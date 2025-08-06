@@ -1,0 +1,15 @@
+export enum SiteOptionKey {
+  REFERRAL_BONUS_AMOUNT = 'Referral Bonus Amount',
+  REFERRAL_BONUS_STATUS = 'Referral Bonus Status',
+  REFERRAL_BONUS_MINIMUM_DEPOSIT = 'Referral Bonus Minimum Deposit',
+  REFERRAL_BONUS_MINIMUM_BET = 'Referral Bonus Minimum Bet',
+  REFERRAL_BONUS_EXPIRY_DAYS = 'Referral Bonus Expiry Days',
+  REFERRAL_BONUS_MAX_EARNINGS = 'Referral Bonus Max Earnings',
+  REFERRAL_BONUS_MINIMUM_WITHDRAWAL = 'Referral Bonus Minimum Withdrawal',
+  REFERRAL_BONUS_MINIMUM_WITHDRAWAL_TIMES = 'Referral Bonus Minimum Withdrawal Times',
+  REFERRAL_BONUS_MINIMUM_WITHDRAWAL_DAYS = 'Referral Bonus Minimum Withdrawal Days',
+  SITE_MODE = 'Website Mode',
+  PAYSTACK_BASE_URL = 'Paystack Base URL',
+  PAYSTACK_LIVE_SECRET_KEY = 'Paystck Live Secret Key',
+  PAYSTACK_TEST_SECRET_KEY = 'Paystck Test Secret Key',
+}
