@@ -29,6 +29,10 @@ import { ActiveUser } from '../decorators/active-user.decorator';
 import { ResetTransactionPinDto } from './dto/reset-pin.dto';
 import { DeactivateAccountDto } from './dto/deactivate-account.dto';
 import { ApiTags } from '@nestjs/swagger';
+import { CreateTransactionPinDto } from './dto/create-transaction-pin.dto';
+import { RequestPasswordResetDto } from './dto/request-password-reset.dto';
+import { VerifyPasswordResetOtpDto } from './dto/verify-password-resetotp.dto';
+import { ResetPasswordAfterOtpDto } from './dto/reset-password-afterotp-verification.dto';
 
 @ApiTags('Authentication')
 @Auth(AuthType.None) // route with no auth guard
@@ -57,6 +61,19 @@ export class AuthenticationController {
   @Post('resend-otp')
   async resendEmailVerificationOtp(@Body() resendOtpDto: ResendOtpDto) {
     return await this.authService.resendVerificationEmail(resendOtpDto.email);
+  }
+
+  @Auth(AuthType.Bearer)
+  @HttpCode(HttpStatus.OK)
+  @Post('create-transaction-pin')
+  async createTransactionPin(
+    @Body() createTransactionPinDto: CreateTransactionPinDto,
+    @ActiveUser() user: ActiveUserData,
+  ) {
+    return await this.authService.createTransactionPin(
+      createTransactionPinDto.pin,
+      user.sub,
+    );
   }
 
   @HttpCode(HttpStatus.OK)
@@ -113,11 +130,11 @@ export class AuthenticationController {
     return await this.authService.sendResetPasswordLink(resetPasswordLinkDto);
   }
 
-  @HttpCode(HttpStatus.OK)
-  @Post('reset-password')
-  async resetPassword(@Body() resetPasswordDto: ResetPasswordDto) {
-    return this.authService.resetPassword(resetPasswordDto);
-  }
+  // @HttpCode(HttpStatus.OK)
+  // @Post('reset-password')
+  // async resetPassword(@Body() resetPasswordDto: ResetPasswordDto) {
+  //   return this.authService.resetPassword(resetPasswordDto);
+  // }
 
   @Auth(AuthType.Bearer)
   @HttpCode(HttpStatus.OK)
@@ -137,6 +154,24 @@ export class AuthenticationController {
       resetTransactionPinDto,
       user.sub,
     );
+  }
+
+  // Step 1: POST /auth/password-reset/request
+  @Post('password-reset/request')
+  async requestReset(@Body() dto: RequestPasswordResetDto) {
+    return this.authService.requestPasswordReset(dto.email);
+  }
+
+  // Step 2: POST /auth/password-reset/verify-otp
+  @Post('password-reset/verify-otp')
+  async verifyOtp(@Body() dto: VerifyPasswordResetOtpDto) {
+    return this.authService.verifyPasswordResetOtp(dto);
+  }
+
+  // Step 3: POST /auth/password-reset/complete
+  @Post('password-reset/complete')
+  async resetPassword(@Body() dto: ResetPasswordAfterOtpDto) {
+    return this.authService.resetPasswordWithVerifiedOtp(dto);
   }
 
   @Get('google')

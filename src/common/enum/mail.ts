@@ -13,6 +13,7 @@ export const MailSubject = {
   WELCOME_EMAIL: `Welcome to ${CONFIG_VARIABLES.APP_NAME}`,
   FORGOT_PASSWORD: `Reset your ${CONFIG_VARIABLES.APP_NAME}  Password`,
   RESET_PASSWORD: 'Your password has been reset',
+  RESET_PASSWORD_OTP: 'Your One-Time Password (OTP) for Password Reset',
   OTP: 'Your One-Time Password (OTP) for Registration',
   NON_WINNING_TICKET: 'Non-Winning Ticket Notification',
   WINNING_TICKET: 'Winning Ticket Notification',

@@ -57,10 +57,10 @@ const EmailLayout = ({ children }) => {
               <Text className="font-Exo text-primary">Contact us</Text>
 
               <Link
-                href="mailto:support@lottonownow.com"
+                href="mailto:support@vidalpay.com"
                 className="text-primary no-underline "
               >
-                support@lottonownow.com
+                support@vidalpay.com
               </Link>
 
               <Text>
@@ -74,10 +74,10 @@ const EmailLayout = ({ children }) => {
 
               <Text>
                 <Link
-                  href="https://www.lottonownow.com"
+                  href="https://www.vidalpay.com"
                   className="text-primary no-underline "
                 >
-                  www.lottonownow.com
+                  www.vidalpay.com
                 </Link>
               </Text>
             </div>
@@ -104,14 +104,14 @@ const EmailLayout = ({ children }) => {
               </div> */}
 
               <div className="w-full flex space-x-2 md:mt-20 my-10">
-                <Link href="https://www.instagram.com/lottonownow">
+                <Link href="https://www.instagram.com/vidalpay">
                   <Img
                     src="https://hervest-users.s3.eu-west-1.amazonaws.com/instagram.png"
                     alt="instagram"
                     className="w-[32px] h-[32px] mx-2 "
                   />
                 </Link>
-                <Link href="https://x.com/lottonownow">
+                <Link href="https://x.com/vidalpay">
                   <Img
                     src="https://res.cloudinary.com/dlhjvo4tz/image/upload/v1721545013/twitter_hkdxk5.png"
                     alt="Twitter"

@@ -6,6 +6,7 @@ import { EmailService } from './email.service';
 import VerificationEmail from 'emails/auth/welcome';
 import ResetPassword from 'emails/auth/resetPassword';
 import ResetTransactionPin from 'emails/auth/resetTransactionPin';
+import ResetPasswordOTP from 'emails/auth/reset-password-otp';
 
 // import { NotificationService } from 'src/notification/notification.service';
 
@@ -52,6 +53,17 @@ export class MailService {
       email: this.email,
       subject: MailSubject.WELCOME_EMAIL,
       template: VerificationEmail({
+        firstName: this.firstName,
+        code: otp,
+      }),
+    });
+  }
+  async sendResetPasswordOTP(userId: string, otp: string): Promise<void> {
+    await this.getLoggedUser(userId);
+    await this.emailService.sendMail({
+      email: this.email,
+      subject: MailSubject.RESET_PASSWORD_OTP,
+      template: ResetPasswordOTP({
         firstName: this.firstName,
         code: otp,
       }),

@@ -49,6 +49,8 @@ import { PromoStatus } from 'src/common/enum/promo.enum';
 import { DeactivateAccountDto } from './dto/deactivate-account.dto';
 import { UserRole } from 'src/utils/enums/user.enum';
 import { TagIdGenerator } from 'src/utils/tagIdGenerator';
+import { VerifyPasswordResetOtpDto } from './dto/verify-password-resetotp.dto';
+import { ResetPasswordAfterOtpDto } from './dto/reset-password-afterotp-verification.dto';
 
 @Injectable()
 export class AuthenticationService {
@@ -127,7 +129,16 @@ export class AuthenticationService {
     //   NotificationType.ADMIN,
     // );
     // delete newUser.password;
-    return newUser;
+    const tokens = await this.generateToken(newUser);
+    return { ...tokens, newUser };
+  }
+
+  async createTransactionPin(pin: string, userId: string) {
+    const hashedPin = await this.hashingService.hash(pin);
+    await this.userRepository.findOneAndUpdate(userId, {
+      pin: hashedPin,
+    });
+    return API_MESSAGES.PIN_SET_SUCCESSFUL;
   }
 
   async verifyUserEmail(token: string): Promise<string> {
@@ -508,10 +519,10 @@ export class AuthenticationService {
       user,
     });
 
-    // await this.mailService.sendResetTransactionPinCode(
-    //   user.id,
-    //   verificationToken,
-    // );
+    await this.mailService.sendResetTransactionPinCode(
+      user.id,
+      verificationToken,
+    );
     return API_MESSAGES.OTP_SENT;
   }
 
@@ -533,6 +544,93 @@ export class AuthenticationService {
       pin: await this.hashingService.hash(pin),
     });
     return API_MESSAGES.PIN_RESET_SUCCESSFUL;
+  }
+
+  // STEP 1: User enters email - Request password reset (sends OTP to email)
+  public async requestPasswordReset(email: string) {
+    const user = await this.userRepository.findUserByEmail(email);
+    if (!user) {
+      throw new BadRequestException(API_MESSAGES.USER_NOT_FOUND);
+    }
+
+    // Generate 6-digit OTP
+    const verificationToken = this.generateSixDigitToken();
+    const tokenExpiration = new Date();
+    tokenExpiration.setHours(tokenExpiration.getHours() + 1); // 1 hour expiry
+
+    // Save OTP token for password reset
+    await this.tokenService.create({
+      token: verificationToken,
+      expiration: tokenExpiration,
+      type: TokenType.PASSWORD_RESET,
+      user,
+    });
+
+    // Send OTP via email
+    await this.mailService.sendResetPasswordOTP(user.id, verificationToken);
+
+    return API_MESSAGES.OTP_SENT;
+  }
+
+  // STEP 2: User enters OTP code - Verify OTP without resetting password
+  public async verifyPasswordResetOtp(verifyOtpDto: VerifyPasswordResetOtpDto) {
+    const { email, otp } = verifyOtpDto;
+
+    const user = await this.userRepository.findUserByEmail(email);
+    if (!user) {
+      throw new BadRequestException(API_MESSAGES.USER_NOT_FOUND);
+    }
+
+    const validToken = await this.tokenService.findOneByTokenAndValidate(
+      otp,
+      TokenType.PASSWORD_RESET,
+      user.id,
+    );
+
+    if (!validToken) {
+      throw new UnauthorizedException(API_MESSAGES.INVALID_PIN);
+    }
+
+    return {
+      message: API_MESSAGES.OTP_VERIFIED,
+      userId: user.id,
+      verificationId: validToken.id,
+    };
+  }
+
+  // STEP 3: User enters new password - Reset password after OTP verification
+  public async resetPasswordWithVerifiedOtp(
+    resetPasswordDto: ResetPasswordAfterOtpDto,
+  ) {
+    const { email, otp, newPassword } = resetPasswordDto;
+
+    // Find user by email
+    const user = await this.userRepository.findUserByEmail(email);
+    if (!user) {
+      throw new BadRequestException(API_MESSAGES.USER_NOT_FOUND);
+    }
+
+    // Use the correct method signature: 3 separate parameters
+    const validToken = await this.tokenService.findOneByTokenAndValidate(
+      otp,
+      TokenType.PASSWORD_RESET,
+      user.id,
+    );
+
+    if (!validToken) {
+      throw new UnauthorizedException(API_MESSAGES.INVALID_PIN);
+    }
+
+    // Hash new password and update user
+    const hashedPassword = await this.hashingService.hash(newPassword);
+    await this.userRepository.findOneAndUpdate(user.id, {
+      password: hashedPassword,
+    });
+
+    // Delete/invalidate the used OTP token
+    await this.tokenService.delete(validToken.id);
+
+    return API_MESSAGES.PASSWORD_RESET_SUCCESSFUL;
   }
 
   public async verifyToken(token: string) {

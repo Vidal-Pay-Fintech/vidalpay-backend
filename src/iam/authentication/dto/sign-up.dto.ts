@@ -27,6 +27,11 @@ export class SignUpDto {
   @MinLength(2)
   lastName: string;
 
+  @IsOptional()
+  @MinLength(4)
+  @IsString()
+  pin: string;
+
   @Matches(/^\+?[1-9]\d{1,14}$/, {
     message: 'phoneNumber must be a valid phone number',
   })

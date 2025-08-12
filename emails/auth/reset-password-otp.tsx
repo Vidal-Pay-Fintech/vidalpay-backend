@@ -9,10 +9,10 @@ import {
 } from '@react-email/components';
 import EmailLayout from '../components/emailLayout';
 
-export default function VerificationEmail({ firstName, code }) {
+export default function ResetPasswordOTP({ firstName, code }) {
   return (
     <Html>
-      <Preview>Welcome To VidalPay</Preview>
+      <Preview>Reset Your Password</Preview>
       <Tailwind>
         <Body>
           <EmailLayout>
@@ -21,16 +21,14 @@ export default function VerificationEmail({ firstName, code }) {
                 className="text-xl font-semibold"
                 style={{ fontSize: '25px' }}
               >
-                Welcome to VidalPay
+                Reset Password
               </h4>
               <Text>Hi {firstName},</Text>
               <Text className="text-justify">
-                Thank you for registering to use VidalPay!
+                You recently asked to reset your VidalPay password, please use
+                the OTP below to reset your password
               </Text>
-              <Text className="text-justify">
-                We're excited to have you on board! To complete your
-                registration process, please use the following OTP:
-              </Text>
+
               <h1
                 className="text-center text-5xl font-bold"
                 style={{ color: '#D3790D', fontSize: '40px' }}
