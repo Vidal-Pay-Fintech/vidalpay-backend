@@ -1,42 +1,20 @@
-// import { NestFactory } from '@nestjs/core';
-// import { AppModule } from './app.module';
-
-// async function bootstrap() {
-//   const app = await NestFactory.create(AppModule);
-//   await app.listen(process.env.PORT ?? 3000);
-// }
-// bootstrap();
-
 import { NestFactory } from '@nestjs/core';
 import { AppModule } from './app.module';
 import { DocumentBuilder, SwaggerModule } from '@nestjs/swagger';
 import { ValidationPipe, VersioningType } from '@nestjs/common';
 import * as cookieParser from 'cookie-parser';
 import { ResponseInterceptor } from './common/filters/success.filter';
-// import { initializeTransactionalContext } from 'typeorm-transactional';
-import * as bodyParser from 'body-parser'; // Import body-parser
+import * as bodyParser from 'body-parser';
 
 async function bootstrap() {
-  // initializeTransactionalContext();
-
-  const options = new DocumentBuilder()
-    .setTitle('Vidal Pay Backend')
-    .setDescription('API Documentation for Vidal Pay API')
-    .setVersion('1.0')
-    .addServer('http://localhost:3000/', 'Local environment')
-    // .addServer('https://api.tradehere.africa/', 'Deployed Environment')
-    .addTag('Vidal Pay  Backend')
-    .addBearerAuth()
-    .build();
-
   const app = await NestFactory.create(AppModule, {
     cors: true,
     snapshot: true,
   });
+
   app.useGlobalPipes(
     new ValidationPipe({
       whitelist: true,
-      // forbidNonWhitelisted: true,
       transform: true,
     }),
   );
@@ -57,9 +35,26 @@ async function bootstrap() {
     methods: 'GET,HEAD,PUT,PATCH,POST,DELETE,OPTIONS',
     credentials: true,
   });
-  const document = SwaggerModule.createDocument(app, options);
-  SwaggerModule.setup('api-docs', app, document);
-  await app.listen(process.env.PORT || 3000);
+
+  // ✅ Only enable Swagger in non-production
+  if (process.env.NODE_ENV !== 'production') {
+    const options = new DocumentBuilder()
+      .setTitle('Vidal Pay Backend')
+      .setDescription('API Documentation for Vidal Pay API')
+      .setVersion('1.0')
+      // Avoid hardcoding localhost/deployed server here; Swagger will infer base URL
+      .addTag('Vidal Pay Backend')
+      .addBearerAuth()
+      .build();
+
+    const document = SwaggerModule.createDocument(app, options);
+    SwaggerModule.setup('api-docs', app, document);
+  }
+
+  const port = parseInt(process.env.PORT ?? '3000', 10);
+
+  // ✅ Bind to 0.0.0.0 so Render can detect the port
+  await app.listen(port, '0.0.0.0');
 
   console.log(`Application is running on: ${await app.getUrl()}`);
 }

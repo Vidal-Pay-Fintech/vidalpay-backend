@@ -9,6 +9,9 @@ import { MailModule } from './mail/mail.module';
 import { ConfigModule, ConfigService } from '@nestjs/config';
 import { User } from './database/entities/user.entity';
 import { Token } from './database/entities/token.entity';
+import { VaultModule } from './vault/vault.module';
+import { TransactionModule } from './transaction/transaction.module';
+import { JournalModule } from './journal/journal.module';
 
 @Module({
   imports: [
@@ -21,6 +24,9 @@ import { Token } from './database/entities/token.entity';
       isGlobal: true,
       envFilePath: ['.env'],
     }),
+    VaultModule,
+    TransactionModule,
+    JournalModule,
   ],
   controllers: [AppController],
   providers: [AppService, ConfigService],
