@@ -9,7 +9,7 @@ import * as bodyParser from 'body-parser';
 async function bootstrap() {
   const app = await NestFactory.create(AppModule, {
     cors: true,
-    snapshot: true,
+    // snapshot: true,
   });
 
   app.useGlobalPipes(
