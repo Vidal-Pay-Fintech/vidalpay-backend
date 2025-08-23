@@ -1,0 +1,11 @@
+"use strict";
+Object.defineProperty(exports, "__esModule", { value: true });
+exports.default = WinnerNotification;
+const jsx_runtime_1 = require("react/jsx-runtime");
+const components_1 = require("@react-email/components");
+const emailLayout_1 = require("../components/emailLayout");
+const config_1 = require("../../src/utils/config");
+function WinnerNotification({ firstName, amount, drawId }) {
+    return ((0, jsx_runtime_1.jsxs)(components_1.Html, { children: [(0, jsx_runtime_1.jsx)(components_1.Preview, { children: "Congratulations, You've Won with LottoNowNow!" }), (0, jsx_runtime_1.jsx)(components_1.Tailwind, { children: (0, jsx_runtime_1.jsx)(components_1.Body, { children: (0, jsx_runtime_1.jsx)(emailLayout_1.default, { children: (0, jsx_runtime_1.jsxs)(components_1.Row, { children: [(0, jsx_runtime_1.jsxs)("h4", { className: "text-xl font-semibold", style: { fontSize: '25px' }, children: ["Congratulations, ", firstName, "!"] }), (0, jsx_runtime_1.jsxs)(components_1.Text, { children: ["Hi ", firstName, ","] }), (0, jsx_runtime_1.jsx)(components_1.Text, { className: "text-justify", children: "We are thrilled to inform you that you are a winner in the latest LottoNowNow draw! Your lucky ticket has scored a prize, and the winnings have been credited directly to your LottoNowNow wallet." }), (0, jsx_runtime_1.jsx)(components_1.Text, { className: "text-justify", children: "Your winnings amount to:" }), (0, jsx_runtime_1.jsxs)("h1", { className: "text-center text-5xl font-bold", style: { color: '#D3790D', fontSize: '40px' }, children: ["NGN ", amount] }), (0, jsx_runtime_1.jsx)(components_1.Text, { className: "text-justify", children: "Feel free to log in to your account to view your wallet balance or withdraw your winnings. While you're there, check out our ongoing draws for another chance to win big!" }), (0, jsx_runtime_1.jsx)(components_1.Text, { className: "text-center font-semibold", style: { marginTop: '15px' }, children: "Congratulations once again, and thank you for choosing LottoNowNow!" }), (0, jsx_runtime_1.jsx)("a", { href: `${config_1.CONFIG_VARIABLES.APP_URL}/draws/${drawId}`, className: "text-center text-white bg-[#D3790D] text-2xl my-10 font-bold rounded-xl no-underline px-8 py-4", children: "VIEW DRAW RESULTS" })] }) }) }) })] }));
+}
+//# sourceMappingURL=wonTicket.js.map
