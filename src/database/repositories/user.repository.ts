@@ -141,29 +141,55 @@ export class UserRepository extends AbstractRepository<User> {
     });
   }
 
+  // async findUserByEmailOrPhone(value: string): Promise<User | null> {
+  //   this.logger.log(`Fetching user with email or phone: ${value}`);
+
+  //   const user = await this.userEntityRepository
+  //     .createQueryBuilder('user')
+  //     .where('user.email = :value', { value })
+  //     .getOne();
+
+  //   if (!user) {
+  //     return await this.userEntityRepository
+  //       .createQueryBuilder('user')
+  //       .orWhere((qb) => {
+  //         if (value.startsWith('0')) {
+  //           value = value.replace(/^0/, '+234');
+  //         }
+  //         qb.where('user.phoneNumber = :value', { value });
+  //       })
+  //       .getOne();
+  //   }
+
+  //   return user;
+  // }
+
   async findUserByEmailOrPhone(value: string): Promise<User | null> {
     this.logger.log(`Fetching user with email or phone: ${value}`);
 
-    const user = await this.userEntityRepository
+    // First try to find by email
+    const userByEmail = await this.userEntityRepository
       .createQueryBuilder('user')
       .where('user.email = :value', { value })
       .getOne();
 
-    if (!user) {
-      return await this.userEntityRepository
-        .createQueryBuilder('user')
-        .orWhere((qb) => {
-          if (value.startsWith('0')) {
-            value = value.replace(/^0/, '+234');
-          }
-          qb.where('user.phoneNumber = :value', { value });
-        })
-        .getOne();
+    if (userByEmail) {
+      return userByEmail;
     }
 
-    return user;
-  }
+    // If not found by email, try by phone number with phone formatting logic
+    let phoneValue = value;
+    if (value.startsWith('0')) {
+      phoneValue = value.replace(/^0/, '+234');
+    }
 
+    const userByPhone = await this.userEntityRepository
+      .createQueryBuilder('user')
+      .where('user.phoneNumber = :phoneValue', { phoneValue })
+      .getOne();
+
+    return userByPhone;
+  }
   async findUserById(id: string): Promise<User> {
     this.logger.log(`Fetching user with id: ${id}`);
     const queryBuilder = this.userEntityRepository

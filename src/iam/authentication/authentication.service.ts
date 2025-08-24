@@ -79,7 +79,7 @@ export class AuthenticationService {
     const { firstName, lastName, password, phoneNumber, email } = signUpDto;
 
     await this.userRepository.checkUserExistByEmail(email);
-    // await this.userRepository.checkUserExistByPhone(phoneNumber);
+    await this.userRepository.checkUserExistByPhone(phoneNumber);
 
     const hashedPassword = await this.hashingService.hash(password);
     const refCode = UTILITIES.generateReferralCode();
@@ -199,11 +199,30 @@ export class AuthenticationService {
 
   async signIn(signInDto: SignInDto) {
     const { email, phoneNumber, password } = signInDto;
-    console.log(email, 'hehehe');
-    const user = await this.userRepository.findUserByEmail(email);
+
+    // Validate that at least one identifier is provided
+    if (!email && !phoneNumber) {
+      throw new BadRequestException(
+        'Either email or phone number must be provided',
+      );
+    }
+
+    // Use the identifier that was provided (email takes priority if both are provided)
+    const identifier = email || phoneNumber;
+
+    // TypeScript guard - this should never happen due to the validation above
+    if (!identifier) {
+      throw new BadRequestException(
+        'Either email or phone number must be provided',
+      );
+    }
+
+    const user = await this.userRepository.findUserByEmailOrPhone(identifier);
+
     if (!user) {
       throw new BadRequestException(API_MESSAGES.INVALID_LOGIN_CREDENTIALS);
     }
+
     const isEqual = await this.hashingService.compare(password, user.password);
     if (!isEqual) {
       throw new UnauthorizedException(API_MESSAGES.INVALID_PASSWORD);
@@ -215,19 +234,18 @@ export class AuthenticationService {
 
     await this.validateUserValidity(user);
     const tokens = await this.generateToken(user);
-    console.log(tokens);
-    // await this.notificationService.sendNotificationToUser(
-    //   user.id,
-    //   NOTIFICATION_MESSAGES.ACCOUNT_LOGIN,
-    //   NotificationType.SIGN_UP,
-    // );
-    // UPDATE THE LAST LOGIN DATE
+
+    // Update the last login date
     await this.userRepository.findOneAndUpdate(user.id, {
       lastLogin: new Date(),
     });
-    //CHECK THE ACCOUNT STATUS OF THE USER
+
+    // Check the account status of the user
     await this.checkAccountStatus(user);
+
+    // Remove password from response
     // delete user.password;
+
     return {
       ...tokens,
       user: user,
@@ -249,8 +267,26 @@ export class AuthenticationService {
   }
 
   async adminSignIn(signInDto: SignInDto) {
-    const { email, password } = signInDto;
-    const admin = await this.userRepository.findUserByEmail(email);
+    const { email, phoneNumber, password } = signInDto;
+
+    // Validate that at least one identifier is provided
+    if (!email && !phoneNumber) {
+      throw new BadRequestException(
+        'Either email or phone number must be provided',
+      );
+    }
+
+    // Use the identifier that was provided (email takes priority if both are provided)
+    const identifier = email || phoneNumber;
+
+    // TypeScript guard - this should never happen due to the validation above
+    if (!identifier) {
+      throw new BadRequestException(
+        'Either email or phone number must be provided',
+      );
+    }
+
+    const admin = await this.userRepository.findUserByEmail(identifier);
     if (!admin) {
       throw new BadRequestException(API_MESSAGES.USER_NOT_FOUND);
     }
