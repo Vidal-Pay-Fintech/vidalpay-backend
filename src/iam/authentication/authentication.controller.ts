@@ -212,4 +212,17 @@ export class AuthenticationController {
   async validateToken(@Param('token') token: string) {
     return this.authService.validateToken(token);
   }
+
+  @Auth(AuthType.Bearer)
+  @HttpCode(HttpStatus.OK)
+  @Post('validate-transaction-pin')
+  async validateTransactionPin(
+    @Body() createTransactionPinDto: CreateTransactionPinDto,
+    @ActiveUser() user: ActiveUserData,
+  ) {
+    return await this.authService.validateTransactionPin(
+      user.sub,
+      createTransactionPinDto.pin,
+    );
+  }
 }

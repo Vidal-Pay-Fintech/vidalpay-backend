@@ -422,7 +422,6 @@ export class AuthenticationService {
 
   public async validateTransactionPin(userId: string, pin: string) {
     const user = await this.userRepository.findUserById(userId);
-
     const isPinValid = await this.hashingService.compare(pin, user.pin);
 
     if (!isPinValid) {
