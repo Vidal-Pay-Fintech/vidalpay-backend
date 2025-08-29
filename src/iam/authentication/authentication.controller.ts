@@ -101,6 +101,13 @@ export class AuthenticationController {
     return res;
   }
 
+  @Auth(AuthType.Bearer)
+  @HttpCode(HttpStatus.OK)
+  @Get('me')
+  async getLoginUserdetails(@ActiveUser() user: ActiveUserData) {
+    return await this.authService.getUserById(user.sub);
+  }
+
   @HttpCode(HttpStatus.OK)
   @Post('admin/login')
   async adminSignIn(

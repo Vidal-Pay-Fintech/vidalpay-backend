@@ -9,7 +9,7 @@ import { InjectRepository } from '@nestjs/typeorm';
 import { Brackets, Repository } from 'typeorm';
 import { AbstractRepository } from 'src/database/abstract.repository';
 import { API_MESSAGES } from 'src/utils/apiMessages';
-// import { Wallet } from '../entities/wallet.entity';
+import { Wallet } from '../entities/wallet.entity';
 // import { Role } from 'src/common/enum/role.enum';
 import { PageMetaDto } from 'src/common/pagination/meta.dto';
 import {
@@ -206,6 +206,26 @@ export class UserRepository extends AbstractRepository<User> {
     return user;
   }
 
+  async getUserById(id: string): Promise<User> {
+    this.logger.log(`Fetching user with id: ${id}`);
+    const queryBuilder = this.userEntityRepository
+      .createQueryBuilder('user')
+      .where('user.id = :id', { id });
+
+    //JOIN THE WALLET TABLE TO FETCH THE WALLET BALANCE
+    queryBuilder.leftJoinAndMapMany(
+      'user.wallet',
+      Wallet,
+      'wallet',
+      'wallet.userId = user.id',
+    );
+
+    const user = await queryBuilder.getOne();
+    if (!user) {
+      throw new BadRequestException(API_MESSAGES.USER_NOT_FOUND);
+    }
+    return user;
+  }
   async findUserByTag(tag: string): Promise<User> {
     this.logger.log(`Fetching user with tag: ${tag}`);
     const user = await this.userEntityRepository.findOne({

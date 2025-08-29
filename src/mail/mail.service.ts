@@ -7,6 +7,7 @@ import VerificationEmail from 'emails/auth/welcome';
 import ResetPassword from 'emails/auth/resetPassword';
 import ResetTransactionPin from 'emails/auth/resetTransactionPin';
 import ResetPasswordOTP from 'emails/auth/reset-password-otp';
+import TransactionEmail from 'emails/auth/walletTransfer';
 
 // import { NotificationService } from 'src/notification/notification.service';
 
@@ -17,6 +18,7 @@ import ResetPasswordOTP from 'emails/auth/reset-password-otp';
 
 import { UserRepository } from 'src/database/repositories/user.repository';
 import { MailSubject } from 'src/common/enum/mail';
+// import { WalletService } from 'src/wallet/wallet.service';
 
 // import AccountDeactivatedNotification from 'emails/transactional/accountDeactivated';
 // import { UTILITIES } from 'src/utils/helperFuncs';
@@ -32,11 +34,14 @@ import { MailSubject } from 'src/common/enum/mail';
 export class MailService {
   private firstName: string;
   private email: string;
-
+  private amount: any;
+  private currency: any;
+  private info: any;
   constructor(
     // private readonly mailerService: MailerService,
     private readonly emailService: EmailService,
     private readonly userRepository: UserRepository,
+
     // private readonly notificationService: NotificationService,
   ) {}
 
@@ -58,6 +63,27 @@ export class MailService {
       }),
     });
   }
+
+  async sendTransactionMail(
+    userId: string,
+    amount: any,
+    info: any,
+    currency: any,
+  ): Promise<void> {
+    await this.getLoggedUser(userId);
+    console.log('emailInfo', userId, amount, info, currency);
+    await this.emailService.sendMail({
+      email: this.email,
+      subject: MailSubject.TRANSACTION_ALERT,
+      template: TransactionEmail({
+        firstName: this.firstName,
+        amount,
+        info,
+        currency,
+      }),
+    });
+  }
+
   async sendResetPasswordOTP(userId: string, otp: string): Promise<void> {
     await this.getLoggedUser(userId);
     await this.emailService.sendMail({
@@ -112,25 +138,25 @@ export class MailService {
     });
   }
 
-  //   async sendWithdrawalSuccessNotification(
-  //     userId: string,
-  //     amount: number,
-  //   ): Promise<void> {
-  //     await this.getLoggedUser(userId);
-  //     await this.notificationService.sendNotificationToUser(
-  //       userId,
-  //       `Your withdrawal request for ${UTILITIES.formatMoney(amount)} has been processed successfully.`,
-  //       NotificationType.WITHDRAWAL,
-  //     );
-  //     await this.emailService.sendMail({
-  //       email: this.email,
-  //       subject: MailSubject.WITHDRAWAL_SUCCESSFUL,
-  //       template: WithdrawalSuccessNotification({
-  //         userName: this.firstName,
-  //         amount,
-  //       }),
-  //     });
-  //   }
+  // async sendWithdrawalSuccessNotification(
+  //   userId: string,
+  //   amount: number,
+  // ): Promise<void> {
+  //   await this.getLoggedUser(userId);
+  //   await this.notificationService.sendNotificationToUser(
+  //     userId,
+  //     `Your withdrawal request for ${UTILITIES.formatMoney(amount)} has been processed successfully.`,
+  //     NotificationType.WITHDRAWAL,
+  //   );
+  //   await this.emailService.sendMail({
+  //     email: this.email,
+  //     subject: MailSubject.WITHDRAWAL_SUCCESSFUL,
+  //     template: WithdrawalSuccessNotification({
+  //       userName: this.firstName,
+  //       amount,
+  //     }),
+  //   });
+  // }
 
   //   async sendAccountDeactivatedNotification(userId: string): Promise<void> {
   //     await this.getLoggedUser(userId);

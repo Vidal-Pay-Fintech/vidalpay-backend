@@ -15,6 +15,7 @@ export const MailSubject = {
   RESET_PASSWORD: 'Your password has been reset',
   RESET_PASSWORD_OTP: 'Your One-Time Password (OTP) for Password Reset',
   OTP: 'Your One-Time Password (OTP) for Registration',
+  TRANSACTION_ALERT: `Transaction alert`,
   NON_WINNING_TICKET: 'Non-Winning Ticket Notification',
   WINNING_TICKET: 'Winning Ticket Notification',
   DRAW_INCOMPLETE: 'Draw Incomplete Notification',

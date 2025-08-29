@@ -8,6 +8,7 @@ import { JournalService } from 'src/journal/journal.service';
 import { UserRepository } from 'src/database/repositories/user.repository';
 import { TagType } from 'src/utils/enums/tag.enum';
 import { User } from 'src/user/entities/user.entity';
+import { MailService } from 'src/mail/mail.service';
 
 @Injectable()
 export class WalletService {
@@ -15,6 +16,7 @@ export class WalletService {
     private readonly walletRepository: WalletRepository,
     private readonly journalService: JournalService,
     private readonly userRepository: UserRepository,
+    private readonly mailService: MailService,
   ) {}
   create(createWalletDto: CreateWalletDto) {
     return 'This action adds a new wallet';
@@ -68,6 +70,12 @@ export class WalletService {
 
       //beneficiary service.addtobeneficiary
       //emailservice
+      // await this.mailService.sendTransactionMail(
+      //   userInfo.id,
+      //   amount,
+      //   info,
+      //   currency,
+      // );
       return userDebitRes;
     } catch (err) {
       if (userDebitRes && !recipientCreditRes) {

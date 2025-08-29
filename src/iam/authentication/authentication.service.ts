@@ -727,4 +727,8 @@ export class AuthenticationService {
 
     return user;
   }
+  async getUserById(userId: string) {
+    const res = await this.userRepository.getUserById(userId);
+    return res;
+  }
 }
