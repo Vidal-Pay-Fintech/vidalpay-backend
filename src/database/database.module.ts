@@ -12,12 +12,18 @@ import {
 //ENTITIES
 import { User } from './entities/user.entity';
 import { Wallet } from './entities/wallet.entity';
+import { Vault } from './entities/vault.entity';
+import { VaultJournal } from './entities/vault-journal.entity';
+import { TransactionEntity } from './entities/transaction.entity';
 
 //REPOSITORIES
 import { UserRepository } from './repositories/user.repository';
 import { TokenRepository } from './repositories/token.repository';
 import { Token } from './entities/token.entity';
 import { WalletRepository } from './repositories/wallet.repository';
+import { VaultRepository } from './repositories/vault.repository';
+import { VaultJournalRepository } from './repositories/vault-journal.repository';
+import { TransactionRepository } from './repositories/transaction.repository';
 
 interface DatabaseConfig {
   MYSQL_HOST: string;
@@ -56,10 +62,33 @@ interface DatabaseConfig {
       inject: [ConfigService],
     }),
 
-    TypeOrmModule.forFeature([User, Token, Wallet]),
+    TypeOrmModule.forFeature([
+      User,
+      Token,
+      Wallet,
+      Vault,
+      VaultJournal,
+      TransactionEntity,
+    ]),
   ],
-  providers: [UserRepository, ConfigService, TokenRepository, WalletRepository],
-  exports: [TypeOrmModule, UserRepository, TokenRepository, WalletRepository],
+  providers: [
+    UserRepository,
+    ConfigService,
+    TokenRepository,
+    WalletRepository,
+    VaultRepository,
+    VaultJournalRepository,
+    TransactionRepository,
+  ],
+  exports: [
+    TypeOrmModule,
+    UserRepository,
+    TokenRepository,
+    WalletRepository,
+    VaultRepository,
+    VaultJournalRepository,
+    TransactionRepository,
+  ],
 })
 export class DatabaseModule {}
 

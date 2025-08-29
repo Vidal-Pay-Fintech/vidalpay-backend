@@ -3,12 +3,19 @@ import { CreateWalletDto } from './dto/create-wallet.dto';
 import { UpdateWalletDto } from './dto/update-wallet.dto';
 import { WalletRepository } from 'src/database/repositories/wallet.repository';
 import { Currency } from 'src/utils/enums/wallet.enum';
-import { throwError } from 'rxjs';
-import { error } from 'console';
+import { InternalTransferDto } from './dto/internal-transafer.dto';
+import { JournalService } from 'src/journal/journal.service';
+import { UserRepository } from 'src/database/repositories/user.repository';
+import { TagType } from 'src/utils/enums/tag.enum';
+import { User } from 'src/user/entities/user.entity';
 
 @Injectable()
 export class WalletService {
-  constructor(private readonly walletRepository: WalletRepository) {}
+  constructor(
+    private readonly walletRepository: WalletRepository,
+    private readonly journalService: JournalService,
+    private readonly userRepository: UserRepository,
+  ) {}
   create(createWalletDto: CreateWalletDto) {
     return 'This action adds a new wallet';
   }
@@ -26,59 +33,57 @@ export class WalletService {
     return `Customer Wallet Created Succesfully`;
   }
 
-  async getUserWalletByCurrencyandUserId(userId: string, currency: Currency) {
-    const res = await this.walletRepository.findOne({
-      where: { userId, currency },
-    });
+  async internalTransfer(
+    internalTransferDTO: InternalTransferDto,
+    userId: string,
+  ) {
+    const { amount, recipientTag, currency } = internalTransferDTO;
+    const recipientInfo = await this.userRepository.findUserByTag(recipientTag);
+    const userInfo = await this.userRepository.findUserById(userId);
 
-    if (!res) {
-      throw new BadRequestException('Wallet not found');
-    }
+    let userDebitRes: any;
+    let recipientCreditRes: any;
+    const info = `Sent to @${recipientInfo.firstName} ${recipientInfo.lastName}`;
+    const description = `Internal transfer from ${userInfo.firstName} ${userInfo.lastName} to ${recipientTag}`;
+    try {
+      userDebitRes = await this.journalService.processWalletDebitJournal({
+        userId,
+        amount,
+        info,
+        description,
+        currency,
+        tag: TagType.TAGBASED,
+      });
 
-    return res;
-  }
-
-  async checkWalletBalance(userId: string, currency: Currency, amount: Number) {
-    const walletInfo = await this.getUserWalletByCurrencyandUserId(
-      userId,
-      currency,
-    );
-    if (Number(walletInfo.balance) < Number(amount)) {
-      throw new BadRequestException(
-        `Insufficient Balance in your ${walletInfo.currency} wallet `,
+      recipientCreditRes = await this.journalService.processWalletCreditJournal(
+        {
+          userId: recipientInfo.id,
+          amount,
+          info: `Received from @${userInfo.tagId}`,
+          description,
+          currency,
+          tag: TagType.TAGBASED,
+        },
       );
+
+      //beneficiary service.addtobeneficiary
+      //emailservice
+      return userDebitRes;
+    } catch (err) {
+      if (userDebitRes && !recipientCreditRes) {
+        userDebitRes = await this.journalService.processWalletCreditJournal({
+          userId,
+          amount,
+          info,
+          description: `REV-${description}`,
+          currency,
+          tag: TagType.TAGBASED,
+          isReversal: true,
+        });
+      }
+      throw err;
     }
-    return walletInfo;
   }
-
-  async debitUserWallet(userId: string, currency: Currency, amount: Number) {
-    const walletDetails = await this.checkWalletBalance(
-      userId,
-      currency,
-      amount,
-    );
-    const newBalance = Number(walletDetails.balance) - Number(amount);
-
-    await this.walletRepository.findOneAndUpdate(walletDetails.id, {
-      balance: newBalance,
-    });
-    return walletDetails;
-  }
-
-  async creditUserWallet(userId: string, currency: Currency, amount: Number) {
-    const walletDetails = await this.checkWalletBalance(
-      userId,
-      currency,
-      amount,
-    );
-    const newBalance = Number(walletDetails.balance) + Number(amount);
-
-    await this.walletRepository.findOneAndUpdate(walletDetails.id, {
-      balance: newBalance,
-    });
-    return walletDetails;
-  }
-
   findAll() {
     return `This action returns all wallet`;
   }

@@ -69,7 +69,7 @@ export class UserRepository extends AbstractRepository<User> {
 
   async getAllUsers(pageOptionsDto: PageOptionsDto) {
     this.logger.log(`Fetching all users with pagination`);
-    console.log(pageOptionsDto, 'THE PAGE OPTIONS');
+
     const { search, role, skip, isExport } = pageOptionsDto;
     const query = this.userEntityRepository.createQueryBuilder('user');
 
@@ -97,8 +97,6 @@ export class UserRepository extends AbstractRepository<User> {
     //   // query.andWhere('user.role = :role', { role });
     // }
 
-    console.log(pageOptionsDto, 'THE PAGE OPTIONS DTO');
-
     if (pageOptionsDto.from && pageOptionsDto.to) {
       query.andWhere('user.createdAt BETWEEN :from AND :to', {
         from: pageOptionsDto.from,
@@ -109,10 +107,7 @@ export class UserRepository extends AbstractRepository<User> {
     const page = Number(pageOptionsDto.page) || 1;
     const limit = Number(pageOptionsDto.limit) || 50;
 
-    console.log(page, limit, 'THE PAGE');
-    console.log(isExport, 'THE EXPORT');
     if (isExport) {
-      console.log('EXPORTING');
       return await query.orderBy('user.createdAt', 'DESC').getMany();
     }
 
@@ -205,6 +200,20 @@ export class UserRepository extends AbstractRepository<User> {
     // );
 
     const user = await queryBuilder.getOne();
+    if (!user) {
+      throw new BadRequestException(API_MESSAGES.USER_NOT_FOUND);
+    }
+    return user;
+  }
+
+  async findUserByTag(tag: string): Promise<User> {
+    this.logger.log(`Fetching user with tag: ${tag}`);
+    const user = await this.userEntityRepository.findOne({
+      where: {
+        tagId: tag,
+      },
+    });
+
     if (!user) {
       throw new BadRequestException(API_MESSAGES.USER_NOT_FOUND);
     }
