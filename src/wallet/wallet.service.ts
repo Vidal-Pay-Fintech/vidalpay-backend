@@ -1,4 +1,8 @@
-import { BadRequestException, Injectable } from '@nestjs/common';
+import {
+  BadRequestException,
+  Injectable,
+  PreconditionFailedException,
+} from '@nestjs/common';
 import { CreateWalletDto } from './dto/create-wallet.dto';
 import { UpdateWalletDto } from './dto/update-wallet.dto';
 import { WalletRepository } from 'src/database/repositories/wallet.repository';
@@ -9,6 +13,7 @@ import { UserRepository } from 'src/database/repositories/user.repository';
 import { TagType } from 'src/utils/enums/tag.enum';
 import { User } from 'src/user/entities/user.entity';
 import { MailService } from 'src/mail/mail.service';
+import { HashingService } from 'src/iam/hashing/hashing.service';
 
 @Injectable()
 export class WalletService {
@@ -17,6 +22,7 @@ export class WalletService {
     private readonly journalService: JournalService,
     private readonly userRepository: UserRepository,
     private readonly mailService: MailService,
+    private readonly hashingService: HashingService,
   ) {}
   create(createWalletDto: CreateWalletDto) {
     return 'This action adds a new wallet';
@@ -39,7 +45,7 @@ export class WalletService {
     internalTransferDTO: InternalTransferDto,
     userId: string,
   ) {
-    const { amount, recipientTag, currency } = internalTransferDTO;
+    const { amount, recipientTag, currency, pin } = internalTransferDTO;
     const recipientInfo = await this.userRepository.findUserByTag(recipientTag);
     const userInfo = await this.userRepository.findUserById(userId);
 
@@ -48,6 +54,13 @@ export class WalletService {
     const info = `Sent to @${recipientInfo.firstName} ${recipientInfo.lastName}`;
     const description = `Internal transfer from ${userInfo.firstName} ${userInfo.lastName} to ${recipientTag}`;
     try {
+      const user = await this.userRepository.findUserById(userId);
+      const isPinValid = await this.hashingService.compare(pin, user.pin);
+
+      if (!isPinValid) {
+        throw new PreconditionFailedException(`Invalid transaction pin`);
+      }
+
       userDebitRes = await this.journalService.processWalletDebitJournal({
         userId,
         amount,

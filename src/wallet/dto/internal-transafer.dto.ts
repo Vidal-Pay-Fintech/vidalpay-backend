@@ -19,6 +19,9 @@ export class InternalTransferDto {
   @IsString()
   recipientTag: string;
 
+  @IsString()
+  pin: string;
+
   @IsEnum(Currency)
   @IsNotEmpty()
   currency: Currency;
