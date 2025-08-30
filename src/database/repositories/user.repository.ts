@@ -123,6 +123,63 @@ export class UserRepository extends AbstractRepository<User> {
     return new PageDto(entities, pageMetaDto);
   }
 
+  async getAllUsersBasicInfo(pageOptionsDto: PageOptionsDto) {
+    this.logger.log(`Fetching all users with pagination`);
+
+    const { search, role, skip, isExport } = pageOptionsDto;
+    const query = this.userEntityRepository
+      .createQueryBuilder('user')
+      .select(['user.firstName', 'user.lastName', 'user.tagId']);
+
+    // Apply search filters if a search term is provided
+    if (search) {
+      query.where(
+        new Brackets((qb) => {
+          qb.where('user.firstName LIKE :search', { search: `%${search}%` })
+            .orWhere('user.lastName LIKE :search', { search: `%${search}%` })
+            .orWhere('user.email LIKE :search', { search: `%${search}%` })
+            .orWhere('user.id LIKE :search', { search: `%${search}%` })
+            .orWhere('user.tagId LIKE :search', { search: `%${search}%` })
+            .orWhere('user.phoneNumber LIKE :search', {
+              search: `%${search}%`,
+            });
+        }),
+      );
+    }
+
+    // if (role) {
+    //   if (role === Role.REGULAR) {
+    //     query.andWhere('user.role = :role', { role: Role.REGULAR });
+    //   } else {
+    //     query.andWhere('user.role != :role', { role: Role.REGULAR });
+    //   }
+    //   // query.andWhere('user.role = :role', { role });
+    // }
+
+    if (pageOptionsDto.from && pageOptionsDto.to) {
+      query.andWhere('user.createdAt BETWEEN :from AND :to', {
+        from: pageOptionsDto.from,
+        to: pageOptionsDto.to,
+      });
+    }
+
+    const page = Number(pageOptionsDto.page) || 1;
+    const limit = Number(pageOptionsDto.limit) || 50;
+
+    if (isExport) {
+      return await query.orderBy('user.createdAt', 'DESC').getMany();
+    }
+
+    const [entities, itemCount] = await query
+      .skip(skip || (page - 1) * limit)
+      .take(limit)
+      .orderBy('user.createdAt', 'DESC')
+      .getManyAndCount();
+
+    // Return paginated result
+    const pageMetaDto = new PageMetaDto({ itemCount, pageOptionsDto });
+    return new PageDto(entities, pageMetaDto);
+  }
   async findUserByEmail(email: string): Promise<User | null> {
     this.logger.log(`Fetching user with email: ${email}`);
     return await this.findOne({

@@ -733,7 +733,7 @@ export class AuthenticationService {
   }
 
   async findAllUsers(pageOptionsDto: PageOptionsDto) {
-    const res = await this.userRepository.getAllUsers(pageOptionsDto);
+    const res = await this.userRepository.getAllUsersBasicInfo(pageOptionsDto);
     return res;
   }
 }
