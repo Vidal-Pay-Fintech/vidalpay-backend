@@ -51,6 +51,7 @@ import { UserRole } from 'src/utils/enums/user.enum';
 import { TagIdGenerator } from 'src/utils/tagIdGenerator';
 import { VerifyPasswordResetOtpDto } from './dto/verify-password-resetotp.dto';
 import { ResetPasswordAfterOtpDto } from './dto/reset-password-afterotp-verification.dto';
+import { PageOptionsDto } from 'src/common/pagination/pageOptionsDto.dto';
 
 @Injectable()
 export class AuthenticationService {
@@ -728,6 +729,11 @@ export class AuthenticationService {
   }
   async getUserById(userId: string) {
     const res = await this.userRepository.getUserById(userId);
+    return res;
+  }
+
+  async findAllUsers(pageOptionsDto: PageOptionsDto) {
+    const res = await this.userRepository.getAllUsers(pageOptionsDto);
     return res;
   }
 }

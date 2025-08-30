@@ -15,6 +15,7 @@ import { Wallet } from './entities/wallet.entity';
 import { Vault } from './entities/vault.entity';
 import { VaultJournal } from './entities/vault-journal.entity';
 import { TransactionEntity } from './entities/transaction.entity';
+import { BeneficiaryEntity } from './entities/beneficiary.entity';
 
 //REPOSITORIES
 import { UserRepository } from './repositories/user.repository';
@@ -24,6 +25,7 @@ import { WalletRepository } from './repositories/wallet.repository';
 import { VaultRepository } from './repositories/vault.repository';
 import { VaultJournalRepository } from './repositories/vault-journal.repository';
 import { TransactionRepository } from './repositories/transaction.repository';
+// import { BeneficiaryRepository } from './repositories/beneficiary.repository';
 
 interface DatabaseConfig {
   MYSQL_HOST: string;
@@ -69,6 +71,7 @@ interface DatabaseConfig {
       Vault,
       VaultJournal,
       TransactionEntity,
+      BeneficiaryEntity,
     ]),
   ],
   providers: [
@@ -79,6 +82,7 @@ interface DatabaseConfig {
     VaultRepository,
     VaultJournalRepository,
     TransactionRepository,
+    // BeneficiaryRepository,
   ],
   exports: [
     TypeOrmModule,
@@ -88,6 +92,7 @@ interface DatabaseConfig {
     VaultRepository,
     VaultJournalRepository,
     TransactionRepository,
+    // BeneficiaryRepository,
   ],
 })
 export class DatabaseModule {}

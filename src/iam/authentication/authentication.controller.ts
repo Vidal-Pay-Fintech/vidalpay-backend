@@ -9,6 +9,7 @@ import {
   Req,
   UseGuards,
   Param,
+  Query,
 } from '@nestjs/common';
 import { AuthenticationService } from './authentication.service';
 import { SignUpDto } from './dto/sign-up.dto';
@@ -33,6 +34,7 @@ import { CreateTransactionPinDto } from './dto/create-transaction-pin.dto';
 import { RequestPasswordResetDto } from './dto/request-password-reset.dto';
 import { VerifyPasswordResetOtpDto } from './dto/verify-password-resetotp.dto';
 import { ResetPasswordAfterOtpDto } from './dto/reset-password-afterotp-verification.dto';
+import { PageOptionsDto } from 'src/common/pagination/pageOptionsDto.dto';
 
 @ApiTags('Authentication')
 @Auth(AuthType.None) // route with no auth guard
@@ -224,5 +226,12 @@ export class AuthenticationController {
       user.sub,
       createTransactionPinDto.pin,
     );
+  }
+
+  @Auth(AuthType.Bearer)
+  @HttpCode(HttpStatus.OK)
+  @Get('get-users-by-query')
+  async getUsersByQuery(@Query() pageOptionsDto: PageOptionsDto) {
+    return await this.authService.findAllUsers(pageOptionsDto);
   }
 }

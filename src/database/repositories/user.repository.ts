@@ -81,6 +81,7 @@ export class UserRepository extends AbstractRepository<User> {
             .orWhere('user.lastName LIKE :search', { search: `%${search}%` })
             .orWhere('user.email LIKE :search', { search: `%${search}%` })
             .orWhere('user.id LIKE :search', { search: `%${search}%` })
+            .orWhere('user.tagId LIKE :search', { search: `%${search}%` })
             .orWhere('user.phoneNumber LIKE :search', {
               search: `%${search}%`,
             });

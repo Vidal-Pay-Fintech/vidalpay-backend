@@ -14,6 +14,7 @@ import { TagType } from 'src/utils/enums/tag.enum';
 import { User } from 'src/user/entities/user.entity';
 import { MailService } from 'src/mail/mail.service';
 import { HashingService } from 'src/iam/hashing/hashing.service';
+// import { BeneficiaryRepository } from 'src/database/repositories/beneficiary.repository';
 
 @Injectable()
 export class WalletService {
@@ -23,6 +24,7 @@ export class WalletService {
     private readonly userRepository: UserRepository,
     private readonly mailService: MailService,
     private readonly hashingService: HashingService,
+    // private readonly beneficiaryRepository: BeneficiaryRepository,
   ) {}
   create(createWalletDto: CreateWalletDto) {
     return 'This action adds a new wallet';
@@ -89,7 +91,18 @@ export class WalletService {
       //   info,
       //   currency,
       // );
+      // const beneficiary = await this.beneficiaryRepository.create({
+      //   userId: recipientInfo.id,
+      //   firstName: recipientInfo.firstName,
+      //   lastName: recipientInfo.lastName,
+      //   tagId: recipientInfo.tagId,
+      //   email: recipientInfo.email,
+      // });
       return userDebitRes;
+      // {
+      //   userDebitRes,
+      //   beneficiary,
+      // };
     } catch (err) {
       if (userDebitRes && !recipientCreditRes) {
         userDebitRes = await this.journalService.processWalletCreditJournal({
