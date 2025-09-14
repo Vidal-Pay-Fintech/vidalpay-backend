@@ -1,20 +1,30 @@
-import { Entity, Column } from 'typeorm';
+import { Entity, Column, OneToOne, OneToMany } from 'typeorm';
 import { AbstractEntity } from '../abstract.entity';
+import { User } from './user.entity';
 
 @Entity('beneficiary')
-export class BeneficiaryEntity extends AbstractEntity {
+export class Beneficiary extends AbstractEntity {
   @Column({})
-  userId: string;
+  senderId: string;
 
-  @Column({ type: 'varchar', nullable: true })
-  firstName: string;
+  @Column({})
+  beneficiaryId: string;
 
-  @Column({ type: 'varchar', nullable: true })
-  lastName: string;
+  @OneToMany(() => User, (user) => user.sender)
+  sender: User;
 
-  @Column({ type: 'varchar', nullable: true })
-  tagId: string;
+  @OneToMany(() => User, (user) => user.recipient)
+  recipient: User;
 
-  @Column({ type: 'varchar', nullable: true })
-  email: string;
+  // @Column({ type: 'varchar', nullable: true })
+  // firstName: string;
+
+  // @Column({ type: 'varchar', nullable: true })
+  // lastName: string;
+
+  // @Column({ type: 'varchar', nullable: true })
+  // tagId: string;
+
+  // @Column({ type: 'varchar', nullable: true })
+  // email: string;
 }

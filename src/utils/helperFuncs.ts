@@ -63,6 +63,9 @@ class HelpersFunc {
     return `FT_${this.generateCode(10)}`;
   }
 
+  public generateChargesRef() {
+    return `CHRG_${this.generateCode(10)}`;
+  }
   public generateOtp() {
     return Math.floor(100000 + Math.random() * 900000);
   }

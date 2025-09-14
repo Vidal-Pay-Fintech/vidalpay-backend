@@ -19,6 +19,7 @@ import { Wallet } from './wallet.entity';
 //
 
 import { UserRole } from 'src/utils/enums/user.enum';
+import { Beneficiary } from './beneficiary.entity';
 
 export enum AccountStatus {
   ACTIVE = 'ACTIVE',
@@ -147,4 +148,10 @@ export class User extends AbstractEntity {
     default: AuthType.LOCAL,
   })
   authType: AuthType;
+
+  @OneToMany(() => Beneficiary, (beneficiary) => beneficiary.sender)
+  sender: Beneficiary[];
+
+  @OneToMany(() => Beneficiary, (beneficiary) => beneficiary.recipient)
+  recipient: Beneficiary[];
 }

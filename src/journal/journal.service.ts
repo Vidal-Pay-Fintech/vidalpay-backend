@@ -112,6 +112,102 @@ export class JournalService {
       throw err;
     }
   }
+
+  public async processCreditChargesJournal(
+    journalInterfaceDTO: JournalInterface,
+  ) {
+    const { userId, currency, amount, info, description, tag, isReversal } =
+      journalInterfaceDTO;
+    const ref = UTILITIES.generateChargesRef();
+    const reference = isReversal ? `REV-${ref}` : ref;
+    let vaultRes: any;
+    let walletRes: any;
+    const vaultType = VaultType.CHARGES;
+    console.log(vaultType, reference);
+    try {
+      walletRes = await this.transactionService.debitTransaction({
+        userId,
+        currency,
+        amount,
+        info,
+        description,
+        tag,
+        reference,
+      });
+      console.log('walletRes', walletRes);
+      vaultRes = await this.vaultService.creditVault({
+        userId,
+        amount,
+        currency,
+        vaultType,
+        description,
+        reference,
+      });
+      return walletRes;
+    } catch (err) {
+      console.log('wallError', err);
+      if (walletRes && !vaultRes) {
+        walletRes = await this.transactionService.creditTransaction({
+          userId,
+          currency,
+          amount,
+          info,
+          description,
+          tag,
+          reference: `REV-${reference}`,
+        });
+      }
+      throw err;
+    }
+  }
+
+  public async processDebitChargesJournal(
+    journalInterfaceDTO: JournalInterface,
+  ) {
+    const { userId, currency, amount, info, description, tag, isReversal } =
+      journalInterfaceDTO;
+    const ref = UTILITIES.generateChargesRef();
+    const reference = isReversal ? `REV-${ref}` : ref;
+    let vaultRes: any;
+    let walletRes: any;
+    const vaultType = VaultType.CHARGES;
+    console.log(vaultType, reference);
+    try {
+      walletRes = await this.transactionService.creditTransaction({
+        userId,
+        currency,
+        amount,
+        info,
+        description,
+        tag,
+        reference,
+      });
+      console.log('walletRes', walletRes);
+      vaultRes = await this.vaultService.debitVault({
+        userId,
+        amount,
+        currency,
+        vaultType,
+        description,
+        reference,
+      });
+      return walletRes;
+    } catch (err) {
+      console.log('wallError', err);
+      if (walletRes && !vaultRes) {
+        walletRes = await this.transactionService.debitTransaction({
+          userId,
+          currency,
+          amount,
+          info,
+          description,
+          tag,
+          reference: `REV-${reference}`,
+        });
+      }
+      throw err;
+    }
+  }
   create(createJournalDto: CreateJournalDto) {
     return 'This action adds a new journal';
   }

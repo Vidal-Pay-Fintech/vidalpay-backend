@@ -13,6 +13,8 @@ import { UpdateWalletDto } from './dto/update-wallet.dto';
 import { InternalTransferDto } from './dto/internal-transafer.dto';
 import { ActiveUser } from 'src/iam/decorators/active-user.decorator';
 import { ActiveUserData } from 'src/iam/interfaces/active-user-data-interfaces';
+import { ExchangeDto } from './dto/exchange.dto';
+import { ExchangeRangeDto } from './dto/exchange.rate.dto';
 
 @Controller('wallet')
 export class WalletController {
@@ -24,6 +26,23 @@ export class WalletController {
     @ActiveUser() user: ActiveUserData,
   ) {
     return this.walletService.internalTransfer(internalTransferDTO, user.sub);
+  }
+
+  @Post('internal-exchange')
+  internalExchange(
+    @Body() internalExchangeDTO: ExchangeDto,
+    @ActiveUser() user: ActiveUserData,
+  ) {
+    return this.walletService.internalExchange(internalExchangeDTO, user.sub);
+  }
+
+  @Post('exchange-rate')
+  myExchangeRate(
+    @Body() exchangeRateDTO: ExchangeRangeDto,
+    @ActiveUser() user: ActiveUserData,
+  ) {
+    const { fromCurrency, toCurrency } = exchangeRateDTO;
+    return this.walletService.getExchangeRate(fromCurrency, toCurrency);
   }
 
   @Get()

@@ -38,8 +38,8 @@ class ApiCall {
       });
       //RETURN THE BODY AS JSON
       // console.log(response, 'THE RESPONSE DATA');
-      return response.data;
-      // return JSON.parse(response.data);
+      // return response.data;
+      return JSON.parse(response.data);
     } catch (error: any) {
       this.logger.log('ApiCall Failed ()');
       console.log(error, 'THE ERROR BACK');

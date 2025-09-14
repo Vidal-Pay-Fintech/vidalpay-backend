@@ -12,7 +12,7 @@ import { Token } from './database/entities/token.entity';
 import { VaultModule } from './vault/vault.module';
 import { TransactionModule } from './transaction/transaction.module';
 import { JournalModule } from './journal/journal.module';
-// import { BeneficiaryModule } from './beneficiary/beneficiary.module';
+import { BeneficiaryModule } from './beneficiary/beneficiary.module';
 
 @Module({
   imports: [
@@ -28,7 +28,7 @@ import { JournalModule } from './journal/journal.module';
     VaultModule,
     TransactionModule,
     JournalModule,
-    // BeneficiaryModule,
+    BeneficiaryModule,
   ],
   controllers: [AppController],
   providers: [AppService, ConfigService],
