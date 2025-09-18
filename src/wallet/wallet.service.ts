@@ -48,95 +48,6 @@ export class WalletService {
     return `Customer Wallet Created Succesfully`;
   }
 
-  // async internalTransfer(
-  //   internalTransferDTO: InternalTransferDto,
-  //   userId: string,
-  // ) {
-  //   const { amount, recipientTag, currency, pin } = internalTransferDTO;
-  //   const recipientInfo = await this.userRepository.findUserByTag(recipientTag);
-  //   const userInfo = await this.userRepository.findUserById(userId);
-
-  //   let userDebitRes: any;
-  //   let recipientCreditRes: any;
-  //   const info = `Sent to @${recipientInfo.firstName} ${recipientInfo.lastName}`;
-  //   const description = `Internal transfer from ${userInfo.firstName} ${userInfo.lastName} to ${recipientTag}`;
-  //   try {
-  //     const user = await this.userRepository.findUserById(userId);
-  //     const isPinValid = await this.hashingService.compare(pin, user.pin);
-
-  //     if (!isPinValid) {
-  //       throw new PreconditionFailedException(`Invalid transaction pin`);
-  //     }
-
-  //     userDebitRes = await this.journalService.processWalletDebitJournal({
-  //       userId,
-  //       amount,
-  //       info,
-  //       description,
-  //       currency,
-  //       tag: TagType.TAGBASED,
-  //     });
-
-  //     recipientCreditRes = await this.journalService.processWalletCreditJournal(
-  //       {
-  //         userId: recipientInfo.id,
-  //         amount,
-  //         info: `Received from @${userInfo.tagId}`,
-  //         description,
-  //         currency,
-  //         tag: TagType.TAGBASED,
-  //       },
-  //     );
-
-  //     //beneficiary service.addtobeneficiary
-  //     //emailservice
-  //     // await this.mailService.sendTransactionMail(
-  //     //   userInfo.id,
-  //     //   amount,
-  //     //   info,
-  //     //   currency,
-  //     // );
-
-  //     const findBeneficiary = await this.beneficiaryRepository.findOne({
-  //       where: {
-  //         beneficiaryId: recipientInfo.id,
-  //       },
-  //     });
-
-  //     const beneficiaryEixt =
-  //       findBeneficiary?.beneficiaryId == recipientInfo.id;
-
-  //     console.log('beneficiaryEixt', beneficiaryEixt);
-  //     console.log('beneficiaryId', findBeneficiary?.beneficiaryId);
-  //     console.log('recipientInfo', recipientInfo.id);
-  //     if (!beneficiaryEixt) {
-  //       await this.beneficiaryRepository.create({
-  //         beneficiaryId: recipientInfo.id,
-  //         senderId: userInfo.id,
-  //       });
-  //     }
-  //     // const beneficiaryres = await this.beneficiaryRepository.create({
-  //     //   beneficiaryId: recipientInfo.id,
-  //     //   senderId: userInfo.id,
-  //     // });
-
-  //     return userDebitRes;
-  //   } catch (err) {
-  //     if (userDebitRes && !recipientCreditRes) {
-  //       userDebitRes = await this.journalService.processWalletCreditJournal({
-  //         userId,
-  //         amount,
-  //         info,
-  //         description: `REV-${description}`,
-  //         currency,
-  //         tag: TagType.TAGBASED,
-  //         isReversal: true,
-  //       });
-  //     }
-  //     throw err;
-  //   }
-  // }
-
   async internalTransfer(
     internalTransferDTO: InternalTransferDto,
     userId: string,
@@ -149,7 +60,6 @@ export class WalletService {
     let recipientCreditRes: any;
     const info = `Sent to @${recipientInfo.firstName} ${recipientInfo.lastName}`;
     const description = `Internal transfer from ${userInfo.firstName} ${userInfo.lastName} to ${recipientTag}`;
-
     try {
       const user = await this.userRepository.findUserById(userId);
       const isPinValid = await this.hashingService.compare(pin, user.pin);
@@ -178,24 +88,37 @@ export class WalletService {
         },
       );
 
-      // Check if beneficiary relationship already exists
+      //beneficiary service.addtobeneficiary
+      //emailservice
+      // await this.mailService.sendTransactionMail(
+      //   userInfo.id,
+      //   amount,
+      //   info,
+      //   currency,
+      // );
+
       const findBeneficiary = await this.beneficiaryRepository.findOne({
         where: {
           beneficiaryId: recipientInfo.id,
-          senderId: userInfo.id, // Add this condition to check the specific relationship
         },
       });
 
-      // Simply check if the record exists
-      if (!findBeneficiary) {
-        await this.beneficiaryRepository.create({
-          beneficiaryId: recipientInfo.id,
-          senderId: userInfo.id,
-        });
-        console.log('New beneficiary created');
-      } else {
-        console.log('Beneficiary already exists, skipping creation');
-      }
+      const beneficiaryEixt =
+        findBeneficiary?.beneficiaryId == recipientInfo.id;
+
+      // console.log('beneficiaryEixt', beneficiaryEixt);
+      // console.log('beneficiaryId', findBeneficiary?.beneficiaryId);
+      // console.log('recipientInfo', recipientInfo.id);
+      // if (!beneficiaryEixt) {
+      await this.beneficiaryRepository.create({
+        beneficiaryId: recipientInfo.id,
+        senderId: userInfo.id,
+      });
+      // }
+      // const beneficiaryres = await this.beneficiaryRepository.create({
+      //   beneficiaryId: recipientInfo.id,
+      //   senderId: userInfo.id,
+      // });
 
       return userDebitRes;
     } catch (err) {
@@ -213,6 +136,83 @@ export class WalletService {
       throw err;
     }
   }
+
+  // async internalTransfer(
+  //   internalTransferDTO: InternalTransferDto,
+  //   userId: string,
+  // ) {
+  //   const { amount, recipientTag, currency, pin } = internalTransferDTO;
+  //   const recipientInfo = await this.userRepository.findUserByTag(recipientTag);
+  //   const userInfo = await this.userRepository.findUserById(userId);
+
+  //   let userDebitRes: any;
+  //   let recipientCreditRes: any;
+  //   const info = `Sent to @${recipientInfo.firstName} ${recipientInfo.lastName}`;
+  //   const description = `Internal transfer from ${userInfo.firstName} ${userInfo.lastName} to ${recipientTag}`;
+
+  //   try {
+  //     const user = await this.userRepository.findUserById(userId);
+  //     const isPinValid = await this.hashingService.compare(pin, user.pin);
+
+  //     if (!isPinValid) {
+  //       throw new PreconditionFailedException(`Invalid transaction pin`);
+  //     }
+
+  //     userDebitRes = await this.journalService.processWalletDebitJournal({
+  //       userId,
+  //       amount,
+  //       info,
+  //       description,
+  //       currency,
+  //       tag: TagType.TAGBASED,
+  //     });
+
+  //     recipientCreditRes = await this.journalService.processWalletCreditJournal(
+  //       {
+  //         userId: recipientInfo.id,
+  //         amount,
+  //         info: `Received from @${userInfo.tagId}`,
+  //         description,
+  //         currency,
+  //         tag: TagType.TAGBASED,
+  //       },
+  //     );
+
+  //     // Check if beneficiary relationship already exists
+  //     const findBeneficiary = await this.beneficiaryRepository.findOne({
+  //       where: {
+  //         beneficiaryId: recipientInfo.id,
+  //         senderId: userInfo.id, // Add this condition to check the specific relationship
+  //       },
+  //     });
+
+  //     // Simply check if the record exists
+  //     if (!findBeneficiary) {
+  //       await this.beneficiaryRepository.create({
+  //         beneficiaryId: recipientInfo.id,
+  //         senderId: userInfo.id,
+  //       });
+  //       console.log('New beneficiary created');
+  //     } else {
+  //       console.log('Beneficiary already exists, skipping creation');
+  //     }
+
+  //     return userDebitRes;
+  //   } catch (err) {
+  //     if (userDebitRes && !recipientCreditRes) {
+  //       userDebitRes = await this.journalService.processWalletCreditJournal({
+  //         userId,
+  //         amount,
+  //         info,
+  //         description: `REV-${description}`,
+  //         currency,
+  //         tag: TagType.TAGBASED,
+  //         isReversal: true,
+  //       });
+  //     }
+  //     throw err;
+  //   }
+  // }
 
   async internalExchange(exchageDto: ExchangeDto, userId: string) {
     const { fromCurrency, toCurrency, amount } = exchageDto;
