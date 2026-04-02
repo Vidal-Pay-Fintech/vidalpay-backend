@@ -74,34 +74,34 @@ export class User extends AbstractEntity {
   @Column({ nullable: true })
   lastLogin: Date;
 
-  @Column({ nullable: true })
+  @Column({ type: 'varchar', nullable: true })
   profilePicture: string;
 
-  @Column({ nullable: true })
+  @Column({ type: 'varchar', nullable: true })
   country: string;
 
-  @Column({ length: 2, nullable: true })
+  @Column({ type: 'varchar', length: 2, nullable: true })
   countryCode: string;
 
-  @Column({ nullable: true })
+  @Column({ type: 'varchar', nullable: true })
   residency: string;
 
-  @Column({ nullable: true })
+  @Column({ type: 'varchar', nullable: true })
   stateOrRegion: string;
 
-  @Column({ nullable: true })
+  @Column({ type: 'varchar', nullable: true })
   city: string;
 
-  @Column({ nullable: true })
+  @Column({ type: 'varchar', nullable: true })
   addressLine1: string;
 
-  @Column({ nullable: true })
+  @Column({ type: 'varchar', nullable: true })
   addressLine2: string;
 
-  @Column({ nullable: true })
+  @Column({ type: 'varchar', nullable: true })
   postalCode: string;
 
-  @Column({ nullable: true })
+  @Column({ type: 'varchar', nullable: true })
   nationality: string;
 
   @Column({

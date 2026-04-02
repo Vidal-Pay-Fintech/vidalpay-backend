@@ -35,7 +35,7 @@ export interface KycLivenessSnapshot {
 
 @Entity({ name: 'user_kyc' })
 export class UserKyc extends AbstractEntity {
-  @Column({ unique: true })
+  @Column({ type: 'varchar', length: 36, unique: true })
   userId: string;
 
   @OneToOne(() => User, (user) => user.kyc)
@@ -56,10 +56,10 @@ export class UserKyc extends AbstractEntity {
   })
   provider: KycProvider | null;
 
-  @Column({ nullable: true })
+  @Column({ type: 'varchar', nullable: true })
   country: string | null;
 
-  @Column({ length: 2, nullable: true })
+  @Column({ type: 'varchar', length: 2, nullable: true })
   countryCode: string | null;
 
   @Column({ type: 'simple-json', nullable: true })
@@ -71,7 +71,7 @@ export class UserKyc extends AbstractEntity {
   @Column({ type: 'simple-json', nullable: true })
   livenessData: KycLivenessSnapshot | null;
 
-  @Column({ nullable: true })
+  @Column({ type: 'varchar', nullable: true })
   submissionReference: string | null;
 
   @Column({ type: 'simple-json', nullable: true })

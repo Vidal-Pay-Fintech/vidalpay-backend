@@ -9,14 +9,14 @@ import { UserKyc } from './user-kyc.entity';
 
 @Entity({ name: 'kyc_document' })
 export class KycDocument extends AbstractEntity {
-  @Column()
+  @Column({ type: 'varchar', length: 36 })
   userId: string;
 
   @ManyToOne(() => User, (user) => user.kycDocuments, { nullable: false })
   @JoinColumn({ name: 'userId' })
   user: User;
 
-  @Column({ nullable: true })
+  @Column({ type: 'varchar', length: 36, nullable: true })
   kycId: string | null;
 
   @ManyToOne(() => UserKyc, (kyc) => kyc.documents, { nullable: true })
@@ -30,16 +30,16 @@ export class KycDocument extends AbstractEntity {
   })
   stage: KycDocumentStage;
 
-  @Column({ nullable: true })
+  @Column({ type: 'varchar', nullable: true })
   documentType: string | null;
 
-  @Column({ nullable: true })
+  @Column({ type: 'varchar', nullable: true })
   originalFileName: string | null;
 
-  @Column({ nullable: true })
+  @Column({ type: 'varchar', nullable: true })
   storedFileName: string | null;
 
-  @Column({ nullable: true })
+  @Column({ type: 'varchar', nullable: true })
   mimeType: string | null;
 
   @Column({ type: 'bigint', nullable: true })
@@ -52,10 +52,10 @@ export class KycDocument extends AbstractEntity {
   })
   storage: KycDocumentStorage;
 
-  @Column({ nullable: true })
+  @Column({ type: 'varchar', nullable: true })
   localPath: string | null;
 
-  @Column({ nullable: true })
+  @Column({ type: 'varchar', nullable: true })
   fileUrl: string | null;
 
   @Column({ type: 'boolean', default: true })

@@ -4,6 +4,8 @@ import { TypeOrmModule } from '@nestjs/typeorm';
 import { DataSource } from 'typeorm';
 import {
   addTransactionalDataSource,
+  deleteDataSourceByName,
+  getDataSourceByName,
   initializeTransactionalContext,
   StorageDriver,
 } from 'typeorm-transactional';
@@ -39,6 +41,8 @@ interface DatabaseConfig {
   MYSQL_PASSWORD: string;
 }
 
+let transactionalContextInitialized = false;
+
 @Global()
 @Module({
   imports: [
@@ -60,10 +64,27 @@ interface DatabaseConfig {
           throw new Error('Invalid DB options passed');
         }
 
-        initializeTransactionalContext({
-          storageDriver: StorageDriver.ASYNC_LOCAL_STORAGE,
+        if (!transactionalContextInitialized) {
+          initializeTransactionalContext({
+            storageDriver: StorageDriver.ASYNC_LOCAL_STORAGE,
+          });
+          transactionalContextInitialized = true;
+        }
+
+        const dataSourceName = options.name ?? 'default';
+        const existingDataSource = getDataSourceByName(dataSourceName);
+        if (existingDataSource) {
+          if (existingDataSource.isInitialized) {
+            return existingDataSource;
+          }
+
+          deleteDataSourceByName(dataSourceName);
+        }
+
+        return addTransactionalDataSource({
+          name: dataSourceName,
+          dataSource: new DataSource(options),
         });
-        return await addTransactionalDataSource(new DataSource(options));
       },
       inject: [ConfigService],
     }),
