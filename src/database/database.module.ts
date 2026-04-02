@@ -1,4 +1,4 @@
-import { Global, Module, OnModuleInit } from '@nestjs/common';
+import { Global, Module } from '@nestjs/common';
 import { ConfigService } from '@nestjs/config';
 import { TypeOrmModule } from '@nestjs/typeorm';
 import { DataSource } from 'typeorm';
@@ -16,6 +16,8 @@ import { Vault } from './entities/vault.entity';
 import { VaultJournal } from './entities/vault-journal.entity';
 import { TransactionEntity } from './entities/transaction.entity';
 import { Beneficiary } from './entities/beneficiary.entity';
+import { UserKyc } from './entities/user-kyc.entity';
+import { KycDocument } from './entities/kyc-document.entity';
 
 //REPOSITORIES
 import { UserRepository } from './repositories/user.repository';
@@ -26,6 +28,8 @@ import { VaultRepository } from './repositories/vault.repository';
 import { VaultJournalRepository } from './repositories/vault-journal.repository';
 import { TransactionRepository } from './repositories/transaction.repository';
 import { BeneficiaryRepository } from './repositories/beneficiary.repository';
+import { UserKycRepository } from './repositories/user-kyc.repository';
+import { KycDocumentRepository } from './repositories/kyc-document.repository';
 
 interface DatabaseConfig {
   MYSQL_HOST: string;
@@ -48,7 +52,7 @@ interface DatabaseConfig {
         username: configService.getOrThrow('MYSQL_USERNAME'),
         password: configService.getOrThrow('MYSQL_PASSWORD'),
         autoLoadEntities: true,
-        synchronize: true,
+        synchronize: false,
       }),
 
       async dataSourceFactory(options) {
@@ -72,6 +76,8 @@ interface DatabaseConfig {
       VaultJournal,
       TransactionEntity,
       Beneficiary,
+      UserKyc,
+      KycDocument,
     ]),
   ],
   providers: [
@@ -83,6 +89,8 @@ interface DatabaseConfig {
     VaultJournalRepository,
     TransactionRepository,
     BeneficiaryRepository,
+    UserKycRepository,
+    KycDocumentRepository,
   ],
   exports: [
     TypeOrmModule,
@@ -93,6 +101,8 @@ interface DatabaseConfig {
     VaultJournalRepository,
     TransactionRepository,
     BeneficiaryRepository,
+    UserKycRepository,
+    KycDocumentRepository,
   ],
 })
 export class DatabaseModule {}

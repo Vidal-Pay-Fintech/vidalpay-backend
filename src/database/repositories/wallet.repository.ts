@@ -19,4 +19,21 @@ export class WalletRepository extends AbstractRepository<Wallet> {
   ) {
     super(walletEntityRepository);
   }
+
+  async findUserWallets(userId: string): Promise<Wallet[]> {
+    return this.find({
+      where: { userId },
+      order: { createdAt: 'ASC' },
+    });
+  }
+
+  async syncRoutingForUser(
+    userId: string,
+    routingPayload: Partial<Wallet>,
+  ): Promise<void> {
+    const wallets = await this.findUserWallets(userId);
+    for (const wallet of wallets) {
+      await this.findOneAndUpdate(wallet.id, routingPayload);
+    }
+  }
 }

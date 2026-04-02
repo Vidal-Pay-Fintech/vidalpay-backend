@@ -13,7 +13,6 @@ import { AccessTokenGuard } from './authentication/guards/access-token/access-to
 import { AuthenticationGuard } from './authentication/guards/authentication/authentication.guard';
 import { RolesGuard } from './guards/roles.guard';
 // import { MailService } from 'src/mail/mail.service';
-import { UserService } from 'src/user/user.service';
 import { TokensService } from 'src/tokens/tokens.service';
 import { Token } from 'src/database/entities/token.entity';
 // import { Ticket } from 'src/database/entities/ticket.entity';
@@ -33,7 +32,6 @@ import { GoogleStrategy } from './strategy/google.strategy';
     { provide: APP_GUARD, useClass: RolesGuard }, // roles guard ---> admin & regular
     AccessTokenGuard,
     AuthenticationService,
-    UserService,
     TokensService,
     // MailService,
     GoogleStrategy,

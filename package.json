@@ -7,7 +7,11 @@
   "license": "UNLICENSED",
   "scripts": {
     "build": "nest build",
+    "migration:run": "typeorm migration:run -d dist/src/database/typeorm-migration.config.js",
+    "migration:revert": "typeorm migration:revert -d dist/src/database/typeorm-migration.config.js",
     "format": "prettier --write \"src/**/*.ts\" \"test/**/*.ts\"",
+    "prestart": "yarn migration:run",
+    "prestart:prod": "yarn migration:run",
     "start": "node --max-old-space-size=512 --optimize-for-size dist/src/main.js",
     "start:prod": "node --max-old-space-size=512 --optimize-for-size dist/src/main.js",
     "start:dev": "nest start --watch",

@@ -7,7 +7,6 @@ import {
   UnauthorizedException,
   UnprocessableEntityException,
 } from '@nestjs/common';
-import { InjectRepository } from '@nestjs/typeorm';
 import { AccountStatus, User } from 'src/database/entities/user.entity';
 import { HashingService } from '../hashing/hashing.service';
 import { SignUpDto } from './dto/sign-up.dto';
@@ -19,7 +18,6 @@ import { ActiveUserData } from '../interfaces/active-user-data-interfaces';
 import { RefreshTokenDto } from './dto/refresh-token.dto';
 import { TokensService } from 'src/tokens/tokens.service';
 import { MailService } from 'src/mail/mail.service';
-import { UserService } from 'src/user/user.service';
 import { TokenType } from 'src/common/enum/token-type.enum';
 import { ResetPasswordLinkDto } from './dto/resetPasswordLinkDto.dto';
 import { ResetPasswordDto } from './dto/reset-password.dto';
@@ -30,7 +28,6 @@ import { UpdatePasswordDto } from 'src/user/dto/update-password.dto';
 import { randomBytes } from 'crypto';
 import { CONFIG_VARIABLES } from 'src/utils/config';
 import { ILike, MoreThan } from 'typeorm';
-import { WalletRepository } from 'src/database/repositories/wallet.repository';
 import { UTILITIES } from 'src/utils/helperFuncs';
 import { PhoneService } from 'src/mail/phone.service';
 import { Transactional } from 'typeorm-transactional';
@@ -52,18 +49,19 @@ import { TagIdGenerator } from 'src/utils/tagIdGenerator';
 import { VerifyPasswordResetOtpDto } from './dto/verify-password-resetotp.dto';
 import { ResetPasswordAfterOtpDto } from './dto/reset-password-afterotp-verification.dto';
 import { PageOptionsDto } from 'src/common/pagination/pageOptionsDto.dto';
+import { UserKycRepository } from 'src/database/repositories/user-kyc.repository';
+import { KycStatus } from 'src/common/enum/kyc-status.enum';
 
 @Injectable()
 export class AuthenticationService {
   constructor(
-    @InjectRepository(User)
-    private readonly usersService: UserService,
     private readonly hashingService: HashingService,
     private readonly jwtService: JwtService,
     private readonly tokenService: TokensService,
     private readonly walletService: WalletService,
     private readonly mailService: MailService,
     private readonly userRepository: UserRepository,
+    private readonly userKycRepository: UserKycRepository,
     // private readonly walletRepository: WalletRepository,
     private readonly phoneService: PhoneService,
     // private readonly notificationService: NotificationService,
@@ -99,6 +97,13 @@ export class AuthenticationService {
 
     // CREATE THE CUSTOMER WALLET
     await this.walletService.createCustomerWallets(newUser.id);
+    await this.userKycRepository.getOrCreateForUser(newUser);
+    await this.userRepository.findOneAndUpdate(newUser.id, {
+      kycStatus: KycStatus.NOT_STARTED,
+      kycProvider: null,
+      kycSubmittedAt: null,
+      kycReviewedAt: null,
+    });
     await this.sendEmailVerificationOtp(newUser);
     //SEBD OTP TO THE CUSTOMER PHONE NUMBER
     const phoneVerificationCode = this.generateSixDigitToken();
