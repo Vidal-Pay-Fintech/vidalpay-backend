@@ -6,7 +6,7 @@ import { KycProvider } from 'src/common/enum/kyc-provider.enum';
 
 @Entity()
 export class Wallet extends AbstractEntity {
-  @Column({})
+  @Column({ type: 'varchar', length: 36 })
   userId: string;
 
   @Column({
@@ -35,22 +35,22 @@ export class Wallet extends AbstractEntity {
   })
   currency: Currency;
 
-  @Column({ nullable: true })
+  @Column({ type: 'varchar', nullable: true })
   accountNumber: string;
 
-  @Column({ nullable: true })
+  @Column({ type: 'varchar', nullable: true })
   routingNumber: string;
 
-  @Column({ nullable: true })
+  @Column({ type: 'varchar', nullable: true })
   accountName: string;
 
-  @Column({ nullable: true })
+  @Column({ type: 'varchar', nullable: true })
   bankName: string;
 
-  @Column({ nullable: true })
+  @Column({ type: 'varchar', nullable: true })
   sortCode: string;
 
-  @Column({ length: 2, nullable: true })
+  @Column({ type: 'varchar', length: 2, nullable: true })
   routingRegionCode: string | null;
 
   @Column({
@@ -60,16 +60,16 @@ export class Wallet extends AbstractEntity {
   })
   routingProvider: KycProvider | null;
 
-  @Column({ nullable: true })
+  @Column({ type: 'varchar', nullable: true })
   providerCustomerId: string | null;
 
-  @Column({ nullable: true })
+  @Column({ type: 'varchar', nullable: true })
   providerAccountId: string | null;
 
-  @Column({ nullable: true })
+  @Column({ type: 'varchar', nullable: true })
   providerVirtualAccountId: string | null;
 
-  @Column({ nullable: true })
+  @Column({ type: 'varchar', nullable: true })
   providerReference: string | null;
 
   @Column({ type: 'simple-json', nullable: true })
