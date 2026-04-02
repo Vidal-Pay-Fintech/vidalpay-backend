@@ -148,6 +148,34 @@ class ApiMessages {
     'You are not eligible to redeem this promo code. Please try another promo code';
   public BASIC_USER_CANNOT_CREATE_GAME_WITH_MORE_THAN_50_STAKES =
     'Basic users cannot create games with more than 50 stakes. Please upgrade your account to create games with higher stakes.';
+  public KYC_REGION_REQUIRED =
+    'A supported country is required before KYC and transfers can continue.';
+  public KYC_UNSUPPORTED_REGION =
+    'Only Nigeria (NG) and United States (US) are supported regions.';
+  public KYC_REGION_CONFLICT =
+    'Your country information is conflicting. Please update your profile with a single supported region.';
+  public KYC_IDENTITY_INCOMPLETE =
+    'Identity information is incomplete for KYC submission.';
+  public KYC_IDENTITY_INCOMPLETE_NG =
+    'Nigeria KYC requires both NIN and BVN.';
+  public KYC_IDENTITY_INCOMPLETE_US =
+    'US KYC requires an SSN or an approved equivalent identity value.';
+  public KYC_ADDRESS_INCOMPLETE =
+    'Address information is incomplete for KYC submission.';
+  public KYC_LIVENESS_INCOMPLETE =
+    'Liveness information is incomplete for KYC submission.';
+  public KYC_DOCUMENT_REQUIRED =
+    'At least one KYC document file is required.';
+  public KYC_PENDING_REVIEW =
+    'Your KYC is pending review. Transfers remain disabled until it is verified.';
+  public KYC_REQUIRES_ACTION =
+    'Your KYC requires action before transfers can be enabled.';
+  public KYC_REJECTED =
+    'Your KYC was rejected. Update your information and resubmit.';
+  public KYC_PROVIDER_UNAVAILABLE =
+    'No supported KYC provider is available for the resolved region.';
+  public TRANSFER_BLOCKED_PENDING_KYC =
+    'Transfers are blocked until your KYC status is VERIFIED.';
 }
 
 export const API_MESSAGES = new ApiMessages();

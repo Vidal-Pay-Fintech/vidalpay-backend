@@ -5,7 +5,7 @@
 import { Token } from 'src/database/entities/token.entity';
 // import { Wallet } from './wallet.entity';
 // import { Wishlist } from 'src/database/entities/wishlist.entity';
-import { Column, Entity, ManyToOne, OneToMany, OneToOne } from 'typeorm';
+import { Column, Entity, OneToMany, OneToOne } from 'typeorm';
 import { AbstractEntity } from '../abstract.entity';
 import { Wallet } from './wallet.entity';
 // import { Winner } from './winner.entity';
@@ -20,6 +20,10 @@ import { Wallet } from './wallet.entity';
 
 import { UserRole } from 'src/utils/enums/user.enum';
 import { Beneficiary } from './beneficiary.entity';
+import { KycStatus } from 'src/common/enum/kyc-status.enum';
+import { KycProvider } from 'src/common/enum/kyc-provider.enum';
+import { UserKyc } from './user-kyc.entity';
+import { KycDocument } from './kyc-document.entity';
 
 export enum AccountStatus {
   ACTIVE = 'ACTIVE',
@@ -73,6 +77,53 @@ export class User extends AbstractEntity {
   @Column({ nullable: true })
   profilePicture: string;
 
+  @Column({ nullable: true })
+  country: string;
+
+  @Column({ length: 2, nullable: true })
+  countryCode: string;
+
+  @Column({ nullable: true })
+  residency: string;
+
+  @Column({ nullable: true })
+  stateOrRegion: string;
+
+  @Column({ nullable: true })
+  city: string;
+
+  @Column({ nullable: true })
+  addressLine1: string;
+
+  @Column({ nullable: true })
+  addressLine2: string;
+
+  @Column({ nullable: true })
+  postalCode: string;
+
+  @Column({ nullable: true })
+  nationality: string;
+
+  @Column({
+    type: 'enum',
+    enum: KycStatus,
+    default: KycStatus.NOT_STARTED,
+  })
+  kycStatus: KycStatus;
+
+  @Column({
+    type: 'enum',
+    enum: KycProvider,
+    nullable: true,
+  })
+  kycProvider: KycProvider | null;
+
+  @Column({ type: 'timestamp', nullable: true })
+  kycSubmittedAt: Date | null;
+
+  @Column({ type: 'timestamp', nullable: true })
+  kycReviewedAt: Date | null;
+
   //   @OneToMany(() => Wishlist, (wishlist) => wishlist.user, { cascade: true })
   //   wishlists: Wishlist[];
 
@@ -81,6 +132,12 @@ export class User extends AbstractEntity {
 
   @OneToMany(() => Wallet, (wallet) => wallet.user)
   wallet: Wallet[];
+
+  @OneToOne(() => UserKyc, (kyc) => kyc.user)
+  kyc: UserKyc;
+
+  @OneToMany(() => KycDocument, (document) => document.user)
+  kycDocuments: KycDocument[];
 
   @Column({ nullable: true })
   accountStatus: boolean;

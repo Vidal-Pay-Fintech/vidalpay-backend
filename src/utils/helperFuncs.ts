@@ -119,8 +119,18 @@ class HelpersFunc {
   }
 
   public isValidCountry(code: string): boolean {
-    const validCountries = ['NG', 'NIGERIA NG'];
-    return validCountries.includes(code);
+    const normalized = (code || '').trim().toUpperCase();
+    const validCountries = [
+      'NG',
+      'NGA',
+      'NIGERIA',
+      'NIGERIA NG',
+      'US',
+      'USA',
+      'UNITED STATES',
+      'UNITED STATES OF AMERICA',
+    ];
+    return validCountries.includes(normalized);
   }
 
   public generateCode(maxLen = 6): string {
@@ -323,12 +333,18 @@ class HelpersFunc {
 
   //POST THIS MESSAGE TO SLACK CHANNEL
   async postToSlack(message: string) {
+    const slackToken = process.env.SLACK_API_TOKEN;
+    if (!slackToken) {
+      return null;
+    }
+
     const SlackConfig = {
-      channel: '#api',
-      token: 'xoxb-7656060575970-7656196630610-yeVLDevklTI7ei4R2uRHeZ8i',
-      botName: 'Hervest API Error Track Bot',
-      icon: ':hervest',
-      url: 'https://slack.com/api/chat.postMessage',
+      channel: process.env.SLACK_API_CHANNEL ?? '#api',
+      token: slackToken,
+      botName: process.env.SLACK_BOT_NAME ?? 'Hervest API Error Track Bot',
+      icon: process.env.SLACK_BOT_ICON ?? ':hervest',
+      url:
+        process.env.SLACK_API_URL ?? 'https://slack.com/api/chat.postMessage',
     };
 
     const body = {

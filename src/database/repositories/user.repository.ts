@@ -265,24 +265,18 @@ export class UserRepository extends AbstractRepository<User> {
   }
 
   async getUserById(id: string): Promise<User> {
-    this.logger.log(`Fetching user with id: ${id}`);
-    const queryBuilder = this.userEntityRepository
-      .createQueryBuilder('user')
-      .where('user.id = :id', { id });
-
-    //JOIN THE WALLET TABLE TO FETCH THE WALLET BALANCE
-    queryBuilder.leftJoinAndMapMany(
-      'user.wallet',
-      Wallet,
-      'wallet',
-      'wallet.userId = user.id',
-    );
-
-    const user = await queryBuilder.getOne();
+    const user = await this.userEntityRepository.findOne({
+      where: { id },
+      relations: ['wallet', 'kyc', 'kyc.documents', 'kycDocuments'],
+    });
     if (!user) {
       throw new BadRequestException(API_MESSAGES.USER_NOT_FOUND);
     }
     return user;
+  }
+
+  async getUserProfileContext(id: string): Promise<User> {
+    return this.getUserById(id);
   }
   async findUserByTag(tag: string): Promise<User> {
     this.logger.log(`Fetching user with tag: ${tag}`);

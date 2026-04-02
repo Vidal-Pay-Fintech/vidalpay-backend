@@ -11,7 +11,6 @@ import { InternalTransferDto } from './dto/internal-transafer.dto';
 import { JournalService } from 'src/journal/journal.service';
 import { UserRepository } from 'src/database/repositories/user.repository';
 import { TagType } from 'src/utils/enums/tag.enum';
-import { User } from 'src/user/entities/user.entity';
 import { MailService } from 'src/mail/mail.service';
 import { HashingService } from 'src/iam/hashing/hashing.service';
 import { BeneficiaryRepository } from 'src/database/repositories/beneficiary.repository';
@@ -19,7 +18,7 @@ import { ExchangeDto } from './dto/exchange.dto';
 import { APICall } from 'src/utils/apiCall';
 import { APIType } from 'src/common/enum/api-type.dto';
 import { UTILITIES } from 'src/utils/helperFuncs';
-import { json } from 'stream/consumers';
+import { UserService } from 'src/user/user.service';
 
 @Injectable()
 export class WalletService {
@@ -30,6 +29,7 @@ export class WalletService {
     private readonly mailService: MailService,
     private readonly hashingService: HashingService,
     private readonly beneficiaryRepository: BeneficiaryRepository,
+    private readonly userService: UserService,
   ) {}
   create(createWalletDto: CreateWalletDto) {
     return 'This action adds a new wallet';
@@ -52,6 +52,8 @@ export class WalletService {
     internalTransferDTO: InternalTransferDto,
     userId: string,
   ) {
+    await this.userService.ensureCanTransfer(userId);
+
     const { amount, recipientTag, currency, pin } = internalTransferDTO;
     const recipientInfo = await this.userRepository.findUserByTag(recipientTag);
     const userInfo = await this.userRepository.findUserById(userId);
