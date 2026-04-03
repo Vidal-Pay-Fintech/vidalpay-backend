@@ -36,16 +36,34 @@ export class WalletService {
   }
 
   async createCustomerWallets(userId: string) {
-    await this.walletRepository.create({
-      userId,
-      currency: Currency.NGN,
-    });
-    await this.walletRepository.create({
-      userId,
-      currency: Currency.USD,
-    });
+    console.log(`[AUTH] wallet creation start for user ${userId}`);
 
-    return `Customer Wallet Created Succesfully`;
+    try {
+      const existingWallets = await this.walletRepository.findUserWallets(userId);
+      const existingCurrencies = new Set(
+        existingWallets.map((wallet) => wallet.currency),
+      );
+
+      for (const currency of [Currency.NGN, Currency.USD]) {
+        if (existingCurrencies.has(currency)) {
+          continue;
+        }
+
+        await this.walletRepository.create({
+          userId,
+          currency,
+        });
+        console.log(`[AUTH] wallet created for user ${userId}: ${currency}`);
+      }
+
+      return `Customer Wallet Created Succesfully`;
+    } catch (error) {
+      console.error(
+        `[AUTH] wallet creation failed for user ${userId}: ${error.message}`,
+        error.stack,
+      );
+      throw error;
+    }
   }
 
   async internalTransfer(

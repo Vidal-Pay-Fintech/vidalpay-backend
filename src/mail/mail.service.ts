@@ -53,15 +53,21 @@ export class MailService {
   }
 
   async sendEmailVerificationCode(userId: string, otp: string): Promise<void> {
-    await this.getLoggedUser(userId);
-    await this.emailService.sendMail({
-      email: this.email,
-      subject: MailSubject.WELCOME_EMAIL,
-      template: VerificationEmail({
-        firstName: this.firstName,
-        code: otp,
-      }),
-    });
+    try {
+      await this.getLoggedUser(userId);
+      await this.emailService.sendMail({
+        email: this.email,
+        subject: MailSubject.WELCOME_EMAIL,
+        template: VerificationEmail({
+          firstName: this.firstName,
+          code: otp,
+        }),
+      });
+    } catch (error) {
+      console.error(
+        `[MAIL] Failed to send verification email for user ${userId}: ${error.message}`,
+      );
+    }
   }
 
   async sendTransactionMail(
@@ -70,45 +76,63 @@ export class MailService {
     info: any,
     currency: any,
   ): Promise<void> {
-    await this.getLoggedUser(userId);
-    console.log('emailInfo', userId, amount, info, currency);
-    await this.emailService.sendMail({
-      email: this.email,
-      subject: MailSubject.TRANSACTION_ALERT,
-      template: TransactionEmail({
-        firstName: this.firstName,
-        amount,
-        info,
-        currency,
-      }),
-    });
+    try {
+      await this.getLoggedUser(userId);
+      console.log('emailInfo', userId, amount, info, currency);
+      await this.emailService.sendMail({
+        email: this.email,
+        subject: MailSubject.TRANSACTION_ALERT,
+        template: TransactionEmail({
+          firstName: this.firstName,
+          amount,
+          info,
+          currency,
+        }),
+      });
+    } catch (error) {
+      console.error(
+        `[MAIL] Failed to send transaction email for user ${userId}: ${error.message}`,
+      );
+    }
   }
 
   async sendResetPasswordOTP(userId: string, otp: string): Promise<void> {
-    await this.getLoggedUser(userId);
-    await this.emailService.sendMail({
-      email: this.email,
-      subject: MailSubject.RESET_PASSWORD_OTP,
-      template: ResetPasswordOTP({
-        firstName: this.firstName,
-        code: otp,
-      }),
-    });
+    try {
+      await this.getLoggedUser(userId);
+      await this.emailService.sendMail({
+        email: this.email,
+        subject: MailSubject.RESET_PASSWORD_OTP,
+        template: ResetPasswordOTP({
+          firstName: this.firstName,
+          code: otp,
+        }),
+      });
+    } catch (error) {
+      console.error(
+        `[MAIL] Failed to send reset password OTP for user ${userId}: ${error.message}`,
+      );
+    }
   }
 
   async sendResetTransactionPinCode(
     userId: string,
     otp: string,
   ): Promise<void> {
-    await this.getLoggedUser(userId);
-    await this.emailService.sendMail({
-      email: this.email,
-      subject: MailSubject.RESET_TRANSACTION_PIN,
-      template: ResetTransactionPin({
-        firstName: this.firstName,
-        otp,
-      }),
-    });
+    try {
+      await this.getLoggedUser(userId);
+      await this.emailService.sendMail({
+        email: this.email,
+        subject: MailSubject.RESET_TRANSACTION_PIN,
+        template: ResetTransactionPin({
+          firstName: this.firstName,
+          otp,
+        }),
+      });
+    } catch (error) {
+      console.error(
+        `[MAIL] Failed to send reset transaction pin email for user ${userId}: ${error.message}`,
+      );
+    }
   }
 
   //   async sendAdminInvite(
@@ -127,15 +151,21 @@ export class MailService {
   //   }
 
   async sendResetEmailLink(userId: string, link: string): Promise<void> {
-    await this.getLoggedUser(userId);
-    await this.emailService.sendMail({
-      email: this.email,
-      subject: MailSubject.FORGOT_PASSWORD,
-      template: ResetPassword({
-        firstName: this.firstName,
-        link,
-      }),
-    });
+    try {
+      await this.getLoggedUser(userId);
+      await this.emailService.sendMail({
+        email: this.email,
+        subject: MailSubject.FORGOT_PASSWORD,
+        template: ResetPassword({
+          firstName: this.firstName,
+          link,
+        }),
+      });
+    } catch (error) {
+      console.error(
+        `[MAIL] Failed to send reset password link for user ${userId}: ${error.message}`,
+      );
+    }
   }
 
   // async sendWithdrawalSuccessNotification(
