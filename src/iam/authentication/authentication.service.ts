@@ -2,6 +2,7 @@ import {
   BadRequestException,
   Inject,
   Injectable,
+  InternalServerErrorException,
   NotFoundException,
   PreconditionFailedException,
   UnauthorizedException,
@@ -76,67 +77,93 @@ export class AuthenticationService {
   @Transactional()
   async signUp(signUpDto: SignUpDto) {
     const { firstName, lastName, password, phoneNumber, email } = signUpDto;
+    console.log(`[AUTH] signup start for ${email}`);
 
-    await this.userRepository.checkUserExistByEmail(email);
-    await this.userRepository.checkUserExistByPhone(phoneNumber);
+    try {
+      await this.userRepository.checkUserExistByEmail(email);
+      await this.userRepository.checkUserExistByPhone(phoneNumber);
 
-    const hashedPassword = await this.hashingService.hash(password);
-    const refCode = UTILITIES.generateReferralCode();
-    const tagId = await TagIdGenerator.generateUniqueTagId(this.userRepository);
+      const hashedPassword = await this.hashingService.hash(password);
+      const refCode = UTILITIES.generateReferralCode();
+      const tagId = await TagIdGenerator.generateUniqueTagId(this.userRepository);
 
-    const newUser = await this.userRepository.create({
-      ...signUpDto,
-      firstName,
-      lastName,
-      referralCode: refCode,
-      password: hashedPassword,
-      tagId,
-      email,
-      phoneNumber,
-    });
+      const newUser = await this.userRepository.create({
+        ...signUpDto,
+        firstName,
+        lastName,
+        referralCode: refCode,
+        password: hashedPassword,
+        tagId,
+        email,
+        phoneNumber,
+      });
+      console.log(`[AUTH] user created: ${newUser.id}`);
 
-    // CREATE THE CUSTOMER WALLET
-    await this.walletService.createCustomerWallets(newUser.id);
-    await this.userKycRepository.getOrCreateForUser(newUser);
-    await this.userRepository.findOneAndUpdate(newUser.id, {
-      kycStatus: KycStatus.NOT_STARTED,
-      kycProvider: null,
-      kycSubmittedAt: null,
-      kycReviewedAt: null,
-    });
-    await this.sendEmailVerificationOtp(newUser);
-    //SEBD OTP TO THE CUSTOMER PHONE NUMBER
-    const phoneVerificationCode = this.generateSixDigitToken();
-    // TODO: TO REPLACE LATER WITH THE SMS SERVICE
-    // await this.phoneService.sendWelcomeSMS(
-    //   phoneNumber,
-    //   phoneVerificationCode,
-    //   newUser.id,
-    // );
+      await this.walletService.createCustomerWallets(newUser.id);
+      console.log(`[AUTH] wallet creation completed for user ${newUser.id}`);
 
-    // await this.mailService.sendEmailVerificationCode(
-    //   newUser.id,
-    //   phoneVerificationCode,
-    // );
-    // CREATE THE REFERRAL RECORD IF THE REFERRAL CODE IS PRESENT
+      await this.userKycRepository.getOrCreateForUser(newUser);
+      console.log(`[AUTH] KYC row ready for user ${newUser.id}`);
 
-    // if (referralCode) {
-    //   await this.processReferralOrPromoCode(referralCode, newUser.id);
-    // }
+      await this.userRepository.findOneAndUpdate(newUser.id, {
+        kycStatus: KycStatus.NOT_STARTED,
+        kycProvider: null,
+        kycSubmittedAt: null,
+        kycReviewedAt: null,
+      });
 
-    // await this.notificationService.sendNotificationToUser(
-    //   newUser.id,
-    //   NOTIFICATION_MESSAGES.ACCOUNT_REGISTRATION,
-    //   NotificationType.SIGN_UP,
-    // );
+      const tokens = await this.generateToken(newUser);
+      await this.safeSendEmailVerificationOtp(newUser, 'signup');
 
-    // await this.notificationService.sendNotificationToAdmins(
-    //   NOTIFICATION_MESSAGES.ADMIN_NEW_USER_SIGNUP,
-    //   NotificationType.ADMIN,
-    // );
-    // delete newUser.password;
-    const tokens = await this.generateToken(newUser);
-    return { ...tokens, newUser };
+      //SEBD OTP TO THE CUSTOMER PHONE NUMBER
+      const phoneVerificationCode = this.generateSixDigitToken();
+      // TODO: TO REPLACE LATER WITH THE SMS SERVICE
+      // await this.phoneService.sendWelcomeSMS(
+      //   phoneNumber,
+      //   phoneVerificationCode,
+      //   newUser.id,
+      // );
+
+      // await this.mailService.sendEmailVerificationCode(
+      //   newUser.id,
+      //   phoneVerificationCode,
+      // );
+      // CREATE THE REFERRAL RECORD IF THE REFERRAL CODE IS PRESENT
+
+      // if (referralCode) {
+      //   await this.processReferralOrPromoCode(referralCode, newUser.id);
+      // }
+
+      // await this.notificationService.sendNotificationToUser(
+      //   newUser.id,
+      //   NOTIFICATION_MESSAGES.ACCOUNT_REGISTRATION,
+      //   NotificationType.SIGN_UP,
+      // );
+
+      // await this.notificationService.sendNotificationToAdmins(
+      //   NOTIFICATION_MESSAGES.ADMIN_NEW_USER_SIGNUP,
+      //   NotificationType.ADMIN,
+      // );
+      // delete newUser.password;
+      return { ...tokens, newUser };
+    } catch (error) {
+      console.error(
+        `[AUTH] signup failed for ${email}: ${error.message}`,
+        error.stack,
+      );
+
+      if (
+        error instanceof BadRequestException ||
+        error instanceof UnauthorizedException ||
+        error instanceof UnprocessableEntityException ||
+        error instanceof PreconditionFailedException ||
+        error instanceof NotFoundException
+      ) {
+        throw error;
+      }
+
+      throw new InternalServerErrorException(API_MESSAGES.SERVER_ERROR);
+    }
   }
 
   async createTransactionPin(pin: string, userId: string) {
@@ -180,7 +207,7 @@ export class AuthenticationService {
     if (user.isVerified) {
       throw new BadRequestException(API_MESSAGES.USER_ALREADY_VERIFIED);
     }
-    await this.sendEmailVerificationOtp(user);
+    await this.safeSendEmailVerificationOtp(user, 'resend-otp');
     return API_MESSAGES.OTP_SENT;
   }
 
@@ -205,57 +232,75 @@ export class AuthenticationService {
 
   async signIn(signInDto: SignInDto) {
     const { email, phoneNumber, password } = signInDto;
+    console.log(`[AUTH] login start for ${email ?? phoneNumber}`);
 
-    // Validate that at least one identifier is provided
-    if (!email && !phoneNumber) {
-      throw new BadRequestException(
-        'Either email or phone number must be provided',
+    try {
+      // Validate that at least one identifier is provided
+      if (!email && !phoneNumber) {
+        throw new BadRequestException(
+          'Either email or phone number must be provided',
+        );
+      }
+
+      // Use the identifier that was provided (email takes priority if both are provided)
+      const identifier = email || phoneNumber;
+
+      // TypeScript guard - this should never happen due to the validation above
+      if (!identifier) {
+        throw new BadRequestException(
+          'Either email or phone number must be provided',
+        );
+      }
+
+      const user = await this.userRepository.findUserByEmailOrPhone(identifier);
+
+      if (!user) {
+        throw new BadRequestException(API_MESSAGES.INVALID_LOGIN_CREDENTIALS);
+      }
+
+      const isEqual = await this.hashingService.compare(password, user.password);
+      if (!isEqual) {
+        throw new UnauthorizedException(API_MESSAGES.INVALID_PASSWORD);
+      }
+
+      if (user?.role !== UserRole.CUSTOMER) {
+        throw new UnauthorizedException(API_MESSAGES.UNAUTHORIZED_ACCESS_ADMIN);
+      }
+
+      await this.validateUserValidity(user);
+      const tokens = await this.generateToken(user);
+
+      // Update the last login date
+      await this.userRepository.findOneAndUpdate(user.id, {
+        lastLogin: new Date(),
+      });
+
+      // Check the account status of the user
+      await this.checkAccountStatus(user);
+
+      console.log(`[AUTH] login success for user ${user.id}`);
+      return {
+        ...tokens,
+        user: user,
+      };
+    } catch (error) {
+      console.error(
+        `[AUTH] login failed for ${email ?? phoneNumber}: ${error.message}`,
+        error.stack,
       );
+
+      if (
+        error instanceof BadRequestException ||
+        error instanceof UnauthorizedException ||
+        error instanceof UnprocessableEntityException ||
+        error instanceof PreconditionFailedException ||
+        error instanceof NotFoundException
+      ) {
+        throw error;
+      }
+
+      throw new InternalServerErrorException(API_MESSAGES.SERVER_ERROR);
     }
-
-    // Use the identifier that was provided (email takes priority if both are provided)
-    const identifier = email || phoneNumber;
-
-    // TypeScript guard - this should never happen due to the validation above
-    if (!identifier) {
-      throw new BadRequestException(
-        'Either email or phone number must be provided',
-      );
-    }
-
-    const user = await this.userRepository.findUserByEmailOrPhone(identifier);
-
-    if (!user) {
-      throw new BadRequestException(API_MESSAGES.INVALID_LOGIN_CREDENTIALS);
-    }
-
-    const isEqual = await this.hashingService.compare(password, user.password);
-    if (!isEqual) {
-      throw new UnauthorizedException(API_MESSAGES.INVALID_PASSWORD);
-    }
-
-    if (user?.role !== UserRole.CUSTOMER) {
-      throw new UnauthorizedException(API_MESSAGES.UNAUTHORIZED_ACCESS_ADMIN);
-    }
-
-    await this.validateUserValidity(user);
-    const tokens = await this.generateToken(user);
-
-    // Update the last login date
-    await this.userRepository.findOneAndUpdate(user.id, {
-      lastLogin: new Date(),
-    });
-
-    // Check the account status of the user
-    await this.checkAccountStatus(user);
-
-    // Remove password from response
-    // delete user.password;
-
-    return {
-      ...tokens,
-      user: user,
-    };
   }
 
   async updatePassword(id: string, updatePasswordDto: UpdatePasswordDto) {
@@ -354,6 +399,13 @@ export class AuthenticationService {
   }
 
   async generateToken(user: User) {
+    if (!this.jwtConfiguration.secret) {
+      console.error('[AUTH] JWT secret is missing');
+      throw new InternalServerErrorException(
+        'Authentication configuration is incomplete.',
+      );
+    }
+
     const [accessToken, refreashToken] = await Promise.all([
       this.signToken<Partial<ActiveUserData>>(
         user.id,
@@ -384,6 +436,17 @@ export class AuthenticationService {
     );
   }
 
+  private async safeSendEmailVerificationOtp(user: User, context: string) {
+    try {
+      await this.sendEmailVerificationOtp(user);
+    } catch (error) {
+      console.error(
+        `[AUTH] ${context} email verification OTP failed for user ${user.id}: ${error.message}`,
+        error.stack,
+      );
+    }
+  }
+
   private async signToken<T>(userId: string, expiresIn: number, payload?: T) {
     return await this.jwtService.signAsync(
       {
@@ -394,7 +457,7 @@ export class AuthenticationService {
         audience: this.jwtConfiguration.audience,
         issuer: this.jwtConfiguration.issuer,
         secret: this.jwtConfiguration.secret,
-        expiresIn: this.jwtConfiguration.accessTokenTtl,
+        expiresIn,
       },
     );
   }
@@ -439,7 +502,7 @@ export class AuthenticationService {
 
   private async validateUserValidity(user: User) {
     if (!user.isVerified) {
-      await this.sendEmailVerificationOtp(user);
+      await this.safeSendEmailVerificationOtp(user, 'login');
       throw new UnauthorizedException(API_MESSAGES.EMAIL_NOT_VERIFIED);
     }
 

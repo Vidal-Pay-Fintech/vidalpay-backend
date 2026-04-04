@@ -30,15 +30,29 @@ export class UserKycRepository extends AbstractRepository<UserKyc> {
       return existing;
     }
 
-    return this.create({
-      userId: user.id,
-      user,
-      status: user.kycStatus ?? KycStatus.NOT_STARTED,
-      provider: user.kycProvider ?? null,
-      country: user.country ?? null,
-      countryCode: user.countryCode ?? null,
-      submittedAt: user.kycSubmittedAt ?? null,
-      reviewedAt: user.kycReviewedAt ?? null,
-    });
+    try {
+      return await this.create({
+        userId: user.id,
+        user,
+        status: user.kycStatus ?? KycStatus.NOT_STARTED,
+        provider: user.kycProvider ?? null,
+        country: user.country ?? null,
+        countryCode: user.countryCode ?? null,
+        submittedAt: user.kycSubmittedAt ?? null,
+        reviewedAt: user.kycReviewedAt ?? null,
+      });
+    } catch (error) {
+      this.logger.error(
+        `Failed to create KYC row for user ${user.id}: ${error.message}`,
+        error.stack,
+      );
+
+      const retryExisting = await this.findByUserId(user.id);
+      if (retryExisting) {
+        return retryExisting;
+      }
+
+      throw error;
+    }
   }
 }

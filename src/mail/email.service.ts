@@ -98,7 +98,7 @@
 //   }
 // }
 
-import { Injectable } from '@nestjs/common';
+import { Injectable, Logger } from '@nestjs/common';
 import { render } from '@react-email/render';
 import * as nodemailer from 'nodemailer';
 
@@ -114,28 +114,39 @@ interface SendMailConfiguration {
 
 @Injectable()
 export class EmailService {
-  private transporter: nodemailer.Transporter;
+  private readonly logger = new Logger(EmailService.name);
+  private transporter: nodemailer.Transporter | null = null;
+  private readonly smtpHost = process.env.SMTP_MAIL_HOST;
+  private readonly smtpPort = Number(process.env.SMTP_MAIL_PORT);
+  private readonly smtpUsername = process.env.SMTP_MAIL_USERNAME;
+  private readonly smtpPassword = process.env.SMTP_MAIL_PASSWORD;
+
   constructor() {
-    this.transporter = nodemailer.createTransport(
-      {
-        host: process.env.SMTP_MAIL_HOST,
-        port: Number(process.env.SMTP_MAIL_PORT),
-        secure: true, // true for 465, false for other port
-        auth: {
-          user: process.env.SMTP_MAIL_USERNAME,
-          pass: process.env.SMTP_MAIL_PASSWORD,
+    if (this.isMailConfigured()) {
+      this.transporter = nodemailer.createTransport(
+        {
+          host: this.smtpHost,
+          port: this.smtpPort,
+          secure: this.smtpPort === 465,
+          auth: {
+            user: this.smtpUsername,
+            pass: this.smtpPassword,
+          },
+          tls: {
+            rejectUnauthorized: false, // Bypass the certificate validation (not recommended for production)
+          },
         },
-        tls: {
-          rejectUnauthorized: false, // Bypass the certificate validation (not recommended for production)
+        {
+          from: {
+            name: 'VidalPay',
+            address: this.smtpUsername,
+          },
         },
-      },
-      {
-        from: {
-          name: 'VidalPay',
-          address: process.env.SMTP_MAIL_USERNAME,
-        },
-      },
-    );
+      );
+      return;
+    }
+
+    this.logger.warn('SMTP is not configured. Email delivery is disabled.');
   }
 
   private generateEmail = (template: any) => {
@@ -143,8 +154,34 @@ export class EmailService {
   };
 
   async sendMail({ email, subject, template, file }: SendMailConfiguration) {
-    const html = await this.generateEmail(template);
+    if (!this.isMailConfigured()) {
+      this.logger.warn(
+        `SMTP is not configured. Skipping email delivery for subject "${subject}".`,
+      );
+      return;
+    }
+
+    let html = '';
+    try {
+      html = await this.generateEmail(template);
+    } catch (error) {
+      this.logger.error(
+        `Failed to render email template for subject "${subject}": ${error.message}`,
+        error.stack,
+      );
+      return;
+    }
+
     return await this.sendEmailNodeMailer({ email, subject, html, file });
+  }
+
+  private isMailConfigured() {
+    return Boolean(
+      this.smtpHost &&
+        this.smtpPort &&
+        this.smtpUsername &&
+        this.smtpPassword,
+    );
   }
 
   /**
@@ -159,15 +196,25 @@ export class EmailService {
     subject,
     html,
   }: SendMailConfiguration) {
+    if (!this.transporter) {
+      this.logger.warn(
+        `Skipping email to ${email} because the SMTP transporter is unavailable.`,
+      );
+      return;
+    }
+
     try {
-      console.log('Sending email to:', email, 'Subject:', subject);
+      this.logger.log(`Sending email to ${email} with subject "${subject}"`);
       await this.transporter.sendMail({
         to: email,
         subject,
         html,
       });
     } catch (err) {
-      console.log(err);
+      this.logger.error(
+        `Failed to send email to ${email}: ${err.message}`,
+        err.stack,
+      );
     }
   }
 }
