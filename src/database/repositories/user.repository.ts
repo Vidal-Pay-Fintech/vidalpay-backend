@@ -1,12 +1,12 @@
 import {
   BadRequestException,
+  ConflictException,
   Injectable,
   Logger,
-  UnprocessableEntityException,
 } from '@nestjs/common';
 import { AccountStatus, User } from '../entities/user.entity';
 import { InjectRepository } from '@nestjs/typeorm';
-import { Brackets, Repository } from 'typeorm';
+import { Brackets, EntityManager, IsNull, Repository } from 'typeorm';
 import { AbstractRepository } from 'src/database/abstract.repository';
 import { API_MESSAGES } from 'src/utils/apiMessages';
 import { Wallet } from '../entities/wallet.entity';
@@ -32,6 +32,60 @@ export class UserRepository extends AbstractRepository<User> {
   async createUser(userInfo: Partial<User>): Promise<User> {
     this.logger.log(`Creating user with email:userInfo`);
     return await this.create(userInfo);
+  }
+
+  private getUserRepository(manager?: EntityManager): Repository<User> {
+    return manager?.getRepository(User) ?? this.userEntityRepository;
+  }
+
+  async createUserInTransaction(
+    userInfo: Partial<User>,
+    manager: EntityManager,
+  ): Promise<User> {
+    const repository = this.getUserRepository(manager);
+    this.logger.log(`Creating user transactionally with email: ${userInfo.email}`);
+    const createdUser = repository.create(userInfo);
+    return await repository.save(createdUser);
+  }
+
+  async ensureEmailAndPhoneAvailable(
+    email: string,
+    phoneNumber: string,
+    manager?: EntityManager,
+  ): Promise<void> {
+    const repository = this.getUserRepository(manager);
+    const [existingEmailUser, existingPhoneUser] = await Promise.all([
+      repository.findOne({
+        where: { email, deletedAt: IsNull() as any },
+      }),
+      repository.findOne({
+        where: { phoneNumber, deletedAt: IsNull() as any },
+      }),
+    ]);
+
+    if (existingEmailUser) {
+      throw new BadRequestException(API_MESSAGES.EMAIL_ALREADY_EXISTS);
+    }
+
+    if (existingPhoneUser) {
+      throw new BadRequestException(API_MESSAGES.PHONE_ALREADY_EXISTS);
+    }
+  }
+
+  async assertTagIdAvailable(
+    tagId: string,
+    manager?: EntityManager,
+  ): Promise<void> {
+    const repository = this.getUserRepository(manager);
+    const existingUser = await repository.findOne({
+      where: { tagId, deletedAt: IsNull() as any },
+    });
+
+    if (existingUser) {
+      throw new ConflictException(
+        'A unique tag could not be assigned to this account. Please try again.',
+      );
+    }
   }
 
   async checkIsUserAccountSuspended(userId: string): Promise<User> {
@@ -298,7 +352,7 @@ export class UserRepository extends AbstractRepository<User> {
       where: { email: email },
     });
     if (user) {
-      throw new UnprocessableEntityException(API_MESSAGES.EMAIL_ALREADY_EXISTS);
+      throw new BadRequestException(API_MESSAGES.EMAIL_ALREADY_EXISTS);
     }
     return true;
   }
@@ -311,7 +365,7 @@ export class UserRepository extends AbstractRepository<User> {
       where: { phoneNumber: phoneNumber },
     });
     if (user) {
-      throw new UnprocessableEntityException(API_MESSAGES.PHONE_ALREADY_EXISTS);
+      throw new BadRequestException(API_MESSAGES.PHONE_ALREADY_EXISTS);
     }
     return true;
   }

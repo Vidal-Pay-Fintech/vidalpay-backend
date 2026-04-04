@@ -1,6 +1,8 @@
 import {
   BadRequestException,
+  ConflictException,
   Injectable,
+  Logger,
   PreconditionFailedException,
 } from '@nestjs/common';
 import { CreateWalletDto } from './dto/create-wallet.dto';
@@ -19,9 +21,13 @@ import { APICall } from 'src/utils/apiCall';
 import { APIType } from 'src/common/enum/api-type.dto';
 import { UTILITIES } from 'src/utils/helperFuncs';
 import { UserService } from 'src/user/user.service';
+import { EntityManager } from 'typeorm';
+import { Wallet } from 'src/database/entities/wallet.entity';
 
 @Injectable()
 export class WalletService {
+  private readonly logger = new Logger(WalletService.name);
+
   constructor(
     private readonly walletRepository: WalletRepository,
     private readonly journalService: JournalService,
@@ -35,30 +41,60 @@ export class WalletService {
     return 'This action adds a new wallet';
   }
 
-  async createCustomerWallets(userId: string) {
-    console.log(`[AUTH] wallet creation start for user ${userId}`);
+  async createCustomerWallets(
+    userId: string,
+    manager?: EntityManager,
+  ): Promise<Wallet[]> {
+    this.logger.log(`[AUTH] wallet creation start for user ${userId}`);
 
     try {
-      const existingWallets = await this.walletRepository.findUserWallets(userId);
+      const existingWallets = await this.walletRepository.findUserWallets(
+        userId,
+        manager,
+      );
       const existingCurrencies = new Set(
         existingWallets.map((wallet) => wallet.currency),
       );
+      const createdCurrencies: Currency[] = [];
 
       for (const currency of [Currency.NGN, Currency.USD]) {
         if (existingCurrencies.has(currency)) {
           continue;
         }
 
-        await this.walletRepository.create({
-          userId,
-          currency,
-        });
-        console.log(`[AUTH] wallet created for user ${userId}: ${currency}`);
+        await this.walletRepository.createWalletInTransaction(
+          {
+            userId,
+            currency,
+          },
+          manager,
+        );
+        createdCurrencies.push(currency);
+        this.logger.log(`[AUTH] wallet created for user ${userId}: ${currency}`);
       }
 
-      return `Customer Wallet Created Succesfully`;
+      const finalWallets = await this.walletRepository.findUserWallets(
+        userId,
+        manager,
+      );
+      const finalCurrencies = new Set(finalWallets.map((wallet) => wallet.currency));
+
+      if (
+        !finalCurrencies.has(Currency.NGN) ||
+        !finalCurrencies.has(Currency.USD)
+      ) {
+        throw new ConflictException(
+          'Customer wallet setup could not be completed.',
+        );
+      }
+
+      this.logger.log(
+        `[AUTH] wallet creation completed for user ${userId}. created=${createdCurrencies.join(',') || 'none'} total=${finalWallets.length}`,
+      );
+
+      return finalWallets;
     } catch (error) {
-      console.error(
+      this.logger.error(
         `[AUTH] wallet creation failed for user ${userId}: ${error.message}`,
         error.stack,
       );

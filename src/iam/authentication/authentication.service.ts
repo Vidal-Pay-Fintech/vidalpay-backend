@@ -1,10 +1,14 @@
 import {
   BadRequestException,
+  ConflictException,
   Inject,
   Injectable,
   InternalServerErrorException,
+  Logger,
   NotFoundException,
   PreconditionFailedException,
+  ServiceUnavailableException,
+  HttpException,
   UnauthorizedException,
   UnprocessableEntityException,
 } from '@nestjs/common';
@@ -28,10 +32,9 @@ import { UpdatePasswordDto } from 'src/user/dto/update-password.dto';
 // import { Role } from 'src/common/enum/role.enum';
 import { randomBytes } from 'crypto';
 import { CONFIG_VARIABLES } from 'src/utils/config';
-import { ILike, MoreThan } from 'typeorm';
+import { DataSource, EntityManager, ILike, MoreThan, QueryFailedError } from 'typeorm';
 import { UTILITIES } from 'src/utils/helperFuncs';
 import { PhoneService } from 'src/mail/phone.service';
-import { Transactional } from 'typeorm-transactional';
 // import { NotificationService } from 'src/notification/notification.service';
 // import {
 //   NOTIFICATION_MESSAGES,
@@ -55,6 +58,8 @@ import { KycStatus } from 'src/common/enum/kyc-status.enum';
 
 @Injectable()
 export class AuthenticationService {
+  private readonly logger = new Logger(AuthenticationService.name);
+
   constructor(
     private readonly hashingService: HashingService,
     private readonly jwtService: JwtService,
@@ -63,6 +68,7 @@ export class AuthenticationService {
     private readonly mailService: MailService,
     private readonly userRepository: UserRepository,
     private readonly userKycRepository: UserKycRepository,
+    private readonly dataSource: DataSource,
     // private readonly walletRepository: WalletRepository,
     private readonly phoneService: PhoneService,
     // private readonly notificationService: NotificationService,
@@ -74,45 +80,66 @@ export class AuthenticationService {
     private readonly jwtConfiguration: ConfigType<typeof jwtConfig>,
   ) {}
 
-  @Transactional()
   async signUp(signUpDto: SignUpDto) {
     const { firstName, lastName, password, phoneNumber, email } = signUpDto;
-    console.log(`[AUTH] signup start for ${email}`);
+    let signupStage = 'transaction:start';
+    this.logger.log(`[AUTH] signup start for ${email}`);
 
     try {
-      await this.userRepository.checkUserExistByEmail(email);
-      await this.userRepository.checkUserExistByPhone(phoneNumber);
+      const newUser = await this.dataSource.transaction(async (manager) => {
+        signupStage = 'transaction:validate-identity';
+        await this.userRepository.ensureEmailAndPhoneAvailable(
+          email,
+          phoneNumber,
+          manager,
+        );
 
-      const hashedPassword = await this.hashingService.hash(password);
-      const refCode = UTILITIES.generateReferralCode();
-      const tagId = await TagIdGenerator.generateUniqueTagId(this.userRepository);
+        signupStage = 'transaction:hash-password';
+        const hashedPassword = await this.hashingService.hash(password);
+        const referralCode = UTILITIES.generateReferralCode();
 
-      const newUser = await this.userRepository.create({
-        ...signUpDto,
-        firstName,
-        lastName,
-        referralCode: refCode,
-        password: hashedPassword,
-        tagId,
-        email,
-        phoneNumber,
+        signupStage = 'transaction:generate-tag';
+        const tagId = await this.generateUniqueSignupTagId(manager);
+
+        signupStage = 'transaction:create-user';
+        const createdUser = await this.userRepository.createUserInTransaction(
+          {
+            ...signUpDto,
+            firstName,
+            lastName,
+            referralCode,
+            password: hashedPassword,
+            tagId,
+            email,
+            phoneNumber,
+            kycStatus: KycStatus.NOT_STARTED,
+            kycProvider: null,
+            kycSubmittedAt: null,
+            kycReviewedAt: null,
+          },
+          manager,
+        );
+        this.logger.log(`[AUTH] user created: ${createdUser.id}`);
+
+        signupStage = 'transaction:create-wallets';
+        const createdWallets = await this.walletService.createCustomerWallets(
+          createdUser.id,
+          manager,
+        );
+        this.logger.log(
+          `[AUTH] wallet creation completed for user ${createdUser.id} with ${createdWallets.length} wallets`,
+        );
+
+        signupStage = 'transaction:create-kyc';
+        await this.userKycRepository.getOrCreateForUser(createdUser, manager);
+        this.logger.log(`[AUTH] KYC row ready for user ${createdUser.id}`);
+
+        return createdUser;
       });
-      console.log(`[AUTH] user created: ${newUser.id}`);
 
-      await this.walletService.createCustomerWallets(newUser.id);
-      console.log(`[AUTH] wallet creation completed for user ${newUser.id}`);
-
-      await this.userKycRepository.getOrCreateForUser(newUser);
-      console.log(`[AUTH] KYC row ready for user ${newUser.id}`);
-
-      await this.userRepository.findOneAndUpdate(newUser.id, {
-        kycStatus: KycStatus.NOT_STARTED,
-        kycProvider: null,
-        kycSubmittedAt: null,
-        kycReviewedAt: null,
-      });
-
+      signupStage = 'post-transaction:generate-token';
       const tokens = await this.generateToken(newUser);
+      signupStage = 'post-transaction:send-verification-otp';
       await this.safeSendEmailVerificationOtp(newUser, 'signup');
 
       //SEBD OTP TO THE CUSTOMER PHONE NUMBER
@@ -147,22 +174,20 @@ export class AuthenticationService {
       // delete newUser.password;
       return { ...tokens, newUser };
     } catch (error) {
-      console.error(
-        `[AUTH] signup failed for ${email}: ${error.message}`,
-        error.stack,
-      );
+      this.logSignupFailure(error, email, phoneNumber, signupStage);
 
-      if (
-        error instanceof BadRequestException ||
-        error instanceof UnauthorizedException ||
-        error instanceof UnprocessableEntityException ||
-        error instanceof PreconditionFailedException ||
-        error instanceof NotFoundException
-      ) {
+      const mappedError = this.mapSignupError(error);
+      if (mappedError) {
+        throw mappedError;
+      }
+
+      if (error instanceof HttpException && error.getStatus() < 500) {
         throw error;
       }
 
-      throw new InternalServerErrorException(API_MESSAGES.SERVER_ERROR);
+      throw new ConflictException(
+        'Signup could not be completed. Please try again.',
+      );
     }
   }
 
@@ -440,11 +465,159 @@ export class AuthenticationService {
     try {
       await this.sendEmailVerificationOtp(user);
     } catch (error) {
-      console.error(
+      this.logger.error(
         `[AUTH] ${context} email verification OTP failed for user ${user.id}: ${error.message}`,
         error.stack,
       );
     }
+  }
+
+  private async generateUniqueSignupTagId(
+    manager: EntityManager,
+    maxAttempts: number = 20,
+  ): Promise<string> {
+    const transactionalRepository = manager.getRepository(User);
+
+    try {
+      const tagId = await TagIdGenerator.generateUniqueTagId(
+        transactionalRepository,
+        maxAttempts,
+      );
+      await this.userRepository.assertTagIdAvailable(tagId, manager);
+      return tagId;
+    } catch (error) {
+      this.logger.error(
+        `[AUTH] tag generation failed: ${error.message}`,
+        error.stack,
+      );
+      throw new ConflictException(
+        'A unique tag could not be assigned to this account. Please try again.',
+      );
+    }
+  }
+
+  private logSignupFailure(
+    error: unknown,
+    email: string,
+    phoneNumber: string,
+    stage: string,
+  ) {
+    const typedError = error as Error & {
+      code?: string;
+      errno?: number;
+      sqlMessage?: string;
+      driverError?: {
+        code?: string;
+        errno?: number;
+        sqlMessage?: string;
+      };
+    };
+
+    const code =
+      typedError.driverError?.code ??
+      typedError.code ??
+      typedError.driverError?.errno ??
+      typedError.errno ??
+      'UNKNOWN';
+    const detail =
+      typedError.driverError?.sqlMessage ??
+      typedError.sqlMessage ??
+      typedError.message;
+
+    this.logger.error(
+      `[AUTH] signup failed at ${stage} for email=${email} phone=${phoneNumber} code=${code} detail=${detail}`,
+      typedError.stack,
+    );
+  }
+
+  private mapSignupError(error: unknown): HttpException | null {
+    if (error instanceof BadRequestException) {
+      return error;
+    }
+
+    if (
+      error instanceof ConflictException ||
+      error instanceof ServiceUnavailableException
+    ) {
+      return error;
+    }
+
+    if (this.isDuplicateEntryError(error)) {
+      const duplicateMessage = this.resolveDuplicateSignupMessage(error);
+      return new BadRequestException(duplicateMessage);
+    }
+
+    if (error instanceof InternalServerErrorException) {
+      return new ServiceUnavailableException(
+        'Authentication configuration is incomplete.',
+      );
+    }
+
+    if (
+      error instanceof UnauthorizedException ||
+      error instanceof UnprocessableEntityException ||
+      error instanceof PreconditionFailedException ||
+      error instanceof NotFoundException
+    ) {
+      return new BadRequestException(
+        typeof error.message === 'string'
+          ? error.message
+          : API_MESSAGES.GENERIC_ERROR_MESSAGE,
+      );
+    }
+
+    return null;
+  }
+
+  private isDuplicateEntryError(error: unknown): boolean {
+    const typedError = error as any;
+
+    return Boolean(
+      error instanceof QueryFailedError ||
+        typedError.code === 'ER_DUP_ENTRY' ||
+        typedError.errno === 1062 ||
+        typedError.driverError?.code === 'ER_DUP_ENTRY' ||
+        typedError.driverError?.errno === 1062 ||
+        typedError.message?.includes('Duplicate entry') ||
+        typedError.driverError?.sqlMessage?.includes('Duplicate entry') ||
+        typedError.driverError?.message?.includes('Duplicate entry'),
+    );
+  }
+
+  private resolveDuplicateSignupMessage(error: unknown): string {
+    const typedError = error as {
+      message?: string;
+      driverError?: { sqlMessage?: string; message?: string };
+    };
+    const duplicateDetail = [
+      typedError.driverError?.sqlMessage,
+      typedError.driverError?.message,
+      typedError.message,
+    ]
+      .filter(Boolean)
+      .join(' ');
+
+    if (duplicateDetail.includes('phoneNumber')) {
+      return API_MESSAGES.PHONE_ALREADY_EXISTS;
+    }
+
+    if (duplicateDetail.includes('email')) {
+      return API_MESSAGES.EMAIL_ALREADY_EXISTS;
+    }
+
+    if (duplicateDetail.includes('tagId')) {
+      return 'A unique tag could not be assigned to this account. Please try again.';
+    }
+
+    if (duplicateDetail.includes('wallet')) {
+      return 'Customer wallet setup could not be completed. Please try again.';
+    }
+
+    if (duplicateDetail.includes('user_kyc')) {
+      return 'KYC setup could not be completed. Please try again.';
+    }
+
+    return 'Signup could not be completed. Please try again.';
   }
 
   private async signToken<T>(userId: string, expiresIn: number, payload?: T) {
