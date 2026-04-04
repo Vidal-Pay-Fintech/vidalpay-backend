@@ -2,6 +2,7 @@ import 'dotenv/config';
 import { DataSource } from 'typeorm';
 import { AddProfileKycSchema1743584400000 } from './migrations/1743584400000-AddProfileKycSchema';
 import { ReconcileUserProfileKycColumns1743660000000 } from './migrations/1743660000000-ReconcileUserProfileKycColumns';
+import { ReconcileWalletAndKycSchema1743663600000 } from './migrations/1743663600000-ReconcileWalletAndKycSchema';
 
 const requiredEnv = [
   'MYSQL_HOST',
@@ -29,5 +30,6 @@ export default new DataSource({
   migrations: [
     AddProfileKycSchema1743584400000,
     ReconcileUserProfileKycColumns1743660000000,
+    ReconcileWalletAndKycSchema1743663600000,
   ],
 });
