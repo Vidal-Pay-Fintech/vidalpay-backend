@@ -1,6 +1,6 @@
 import { Injectable, Logger } from '@nestjs/common';
 import { InjectRepository } from '@nestjs/typeorm';
-import { Repository } from 'typeorm';
+import { EntityManager, IsNull, Repository } from 'typeorm';
 import { AbstractRepository } from 'src/database/abstract.repository';
 import { UserKyc } from '../entities/user-kyc.entity';
 import { User } from '../entities/user.entity';
@@ -17,21 +17,33 @@ export class UserKycRepository extends AbstractRepository<UserKyc> {
     super(userKycEntityRepository);
   }
 
-  async findByUserId(userId: string): Promise<UserKyc | null> {
-    return this.findOne({
-      where: { userId },
+  private getUserKycRepository(manager?: EntityManager): Repository<UserKyc> {
+    return manager?.getRepository(UserKyc) ?? this.userKycEntityRepository;
+  }
+
+  async findByUserId(
+    userId: string,
+    manager?: EntityManager,
+  ): Promise<UserKyc | null> {
+    const repository = this.getUserKycRepository(manager);
+    return repository.findOne({
+      where: { userId, deletedAt: IsNull() as any },
       relations: ['user', 'documents'],
     });
   }
 
-  async getOrCreateForUser(user: User): Promise<UserKyc> {
-    const existing = await this.findByUserId(user.id);
+  async getOrCreateForUser(
+    user: User,
+    manager?: EntityManager,
+  ): Promise<UserKyc> {
+    const repository = this.getUserKycRepository(manager);
+    const existing = await this.findByUserId(user.id, manager);
     if (existing) {
       return existing;
     }
 
     try {
-      return await this.create({
+      const createdKyc = repository.create({
         userId: user.id,
         user,
         status: user.kycStatus ?? KycStatus.NOT_STARTED,
@@ -41,13 +53,14 @@ export class UserKycRepository extends AbstractRepository<UserKyc> {
         submittedAt: user.kycSubmittedAt ?? null,
         reviewedAt: user.kycReviewedAt ?? null,
       });
+      return await repository.save(createdKyc);
     } catch (error) {
       this.logger.error(
         `Failed to create KYC row for user ${user.id}: ${error.message}`,
         error.stack,
       );
 
-      const retryExisting = await this.findByUserId(user.id);
+      const retryExisting = await this.findByUserId(user.id, manager);
       if (retryExisting) {
         return retryExisting;
       }
