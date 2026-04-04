@@ -374,7 +374,7 @@ export class AuthenticationService {
       resetTokenExpiry: new Date(Date.now() + 3600000), // Token expires in 1 hour
     });
     const passwordResetLink = `${CONFIG_VARIABLES.APP_URL}/change-password?token=${resetToken}&email=${resetPasswordLinkDto.email}`;
-    // await this.mailService.sendResetEmailLink(user.id, passwordResetLink);
+    await this.mailService.sendResetEmailLink(user.id, passwordResetLink);
     return API_MESSAGES.RESET_PASSWORD_LINK_SENT;
   }
 
