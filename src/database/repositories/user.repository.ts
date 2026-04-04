@@ -53,6 +53,9 @@ export class UserRepository extends AbstractRepository<User> {
     phoneNumber: string,
     manager?: EntityManager,
   ): Promise<void> {
+    this.logger.log(
+      `Checking signup duplicates for email=${email} phone=${phoneNumber}`,
+    );
     const repository = this.getUserRepository(manager);
     const [existingEmailUser, existingPhoneUser] = await Promise.all([
       repository.findOne({
@@ -64,10 +67,12 @@ export class UserRepository extends AbstractRepository<User> {
     ]);
 
     if (existingEmailUser) {
+      this.logger.warn(`Signup duplicate email detected: ${email}`);
       throw new BadRequestException(API_MESSAGES.EMAIL_ALREADY_EXISTS);
     }
 
     if (existingPhoneUser) {
+      this.logger.warn(`Signup duplicate phone detected: ${phoneNumber}`);
       throw new BadRequestException(API_MESSAGES.PHONE_ALREADY_EXISTS);
     }
   }
@@ -82,9 +87,27 @@ export class UserRepository extends AbstractRepository<User> {
     });
 
     if (existingUser) {
+      this.logger.warn(`Signup tag conflict detected for tagId=${tagId}`);
       throw new ConflictException(
-        'A unique tag could not be assigned to this account. Please try again.',
+        API_MESSAGES.TAG_GENERATION_FAILED,
       );
+    }
+  }
+
+  async assertReferralCodeAvailable(
+    referralCode: string,
+    manager?: EntityManager,
+  ): Promise<void> {
+    const repository = this.getUserRepository(manager);
+    const existingUser = await repository.findOne({
+      where: { referralCode, deletedAt: IsNull() as any },
+    });
+
+    if (existingUser) {
+      this.logger.warn(
+        `Signup referral code conflict detected for referralCode=${referralCode}`,
+      );
+      throw new ConflictException(API_MESSAGES.REFERRAL_CODE_GENERATION_FAILED);
     }
   }
 

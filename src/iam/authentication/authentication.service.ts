@@ -82,113 +82,108 @@ export class AuthenticationService {
 
   async signUp(signUpDto: SignUpDto) {
     const { firstName, lastName, password, phoneNumber, email } = signUpDto;
-    let signupStage = 'transaction:start';
     this.logger.log(`[AUTH] signup start for ${email}`);
 
-    try {
-      const newUser = await this.dataSource.transaction(async (manager) => {
-        signupStage = 'transaction:validate-identity';
-        await this.userRepository.ensureEmailAndPhoneAvailable(
-          email,
-          phoneNumber,
-          manager,
-        );
+    const maxInternalAttempts = 3;
 
-        signupStage = 'transaction:hash-password';
-        const hashedPassword = await this.hashingService.hash(password);
-        const referralCode = UTILITIES.generateReferralCode();
+    for (let attempt = 1; attempt <= maxInternalAttempts; attempt++) {
+      let signupStage = 'transaction:start';
 
-        signupStage = 'transaction:generate-tag';
-        const tagId = await this.generateUniqueSignupTagId(manager);
-
-        signupStage = 'transaction:create-user';
-        const createdUser = await this.userRepository.createUserInTransaction(
-          {
-            ...signUpDto,
-            firstName,
-            lastName,
-            referralCode,
-            password: hashedPassword,
-            tagId,
+      try {
+        const newUser = await this.dataSource.transaction(async (manager) => {
+          signupStage = 'transaction:validate-identity';
+          await this.userRepository.ensureEmailAndPhoneAvailable(
             email,
             phoneNumber,
-            kycStatus: KycStatus.NOT_STARTED,
-            kycProvider: null,
-            kycSubmittedAt: null,
-            kycReviewedAt: null,
-          },
-          manager,
+            manager,
+          );
+
+          signupStage = 'transaction:hash-password';
+          const hashedPassword = await this.hashingService.hash(password);
+
+          signupStage = 'transaction:generate-referral-code';
+          const referralCode = await this.generateUniqueReferralCode(manager);
+
+          signupStage = 'transaction:generate-tag';
+          const tagId = await this.generateUniqueSignupTagId(manager);
+
+          signupStage = 'transaction:create-user';
+          const createdUser = await this.userRepository.createUserInTransaction(
+            {
+              ...signUpDto,
+              firstName,
+              lastName,
+              referralCode,
+              password: hashedPassword,
+              tagId,
+              email,
+              phoneNumber,
+              kycStatus: KycStatus.NOT_STARTED,
+              kycProvider: null,
+              kycSubmittedAt: null,
+              kycReviewedAt: null,
+            },
+            manager,
+          );
+          this.logger.log(`[AUTH] user created: ${createdUser.id}`);
+
+          signupStage = 'transaction:create-wallets';
+          const createdWallets = await this.walletService.createCustomerWallets(
+            createdUser.id,
+            manager,
+          );
+          this.logger.log(
+            `[AUTH] wallet creation completed for user ${createdUser.id} with ${createdWallets.length} wallets`,
+          );
+
+          signupStage = 'transaction:create-kyc';
+          await this.userKycRepository.getOrCreateForUser(createdUser, manager);
+          this.logger.log(`[AUTH] KYC row ready for user ${createdUser.id}`);
+
+          return createdUser;
+        });
+
+        signupStage = 'post-transaction:generate-token';
+        const tokens = await this.generateToken(newUser);
+        signupStage = 'post-transaction:send-verification-otp';
+        await this.safeSendEmailVerificationOtp(newUser, 'signup');
+
+        return { ...tokens, newUser };
+      } catch (error) {
+        this.logSignupFailure(error, email, phoneNumber, signupStage, attempt);
+
+        if (
+          await this.shouldRetrySignupForGeneratedValueConflict(
+            error,
+            signupStage,
+            email,
+            phoneNumber,
+            attempt,
+            maxInternalAttempts,
+          )
+        ) {
+          this.logger.warn(
+            `[AUTH] retrying signup for ${email} after generated value conflict on attempt ${attempt}`,
+          );
+          continue;
+        }
+
+        const mappedError = await this.mapSignupError(error, email, phoneNumber);
+        if (mappedError) {
+          throw mappedError;
+        }
+
+        if (error instanceof HttpException && error.getStatus() < 500) {
+          throw error;
+        }
+
+        throw new ConflictException(
+          'Signup could not be completed. Please try again.',
         );
-        this.logger.log(`[AUTH] user created: ${createdUser.id}`);
-
-        signupStage = 'transaction:create-wallets';
-        const createdWallets = await this.walletService.createCustomerWallets(
-          createdUser.id,
-          manager,
-        );
-        this.logger.log(
-          `[AUTH] wallet creation completed for user ${createdUser.id} with ${createdWallets.length} wallets`,
-        );
-
-        signupStage = 'transaction:create-kyc';
-        await this.userKycRepository.getOrCreateForUser(createdUser, manager);
-        this.logger.log(`[AUTH] KYC row ready for user ${createdUser.id}`);
-
-        return createdUser;
-      });
-
-      signupStage = 'post-transaction:generate-token';
-      const tokens = await this.generateToken(newUser);
-      signupStage = 'post-transaction:send-verification-otp';
-      await this.safeSendEmailVerificationOtp(newUser, 'signup');
-
-      //SEBD OTP TO THE CUSTOMER PHONE NUMBER
-      const phoneVerificationCode = this.generateSixDigitToken();
-      // TODO: TO REPLACE LATER WITH THE SMS SERVICE
-      // await this.phoneService.sendWelcomeSMS(
-      //   phoneNumber,
-      //   phoneVerificationCode,
-      //   newUser.id,
-      // );
-
-      // await this.mailService.sendEmailVerificationCode(
-      //   newUser.id,
-      //   phoneVerificationCode,
-      // );
-      // CREATE THE REFERRAL RECORD IF THE REFERRAL CODE IS PRESENT
-
-      // if (referralCode) {
-      //   await this.processReferralOrPromoCode(referralCode, newUser.id);
-      // }
-
-      // await this.notificationService.sendNotificationToUser(
-      //   newUser.id,
-      //   NOTIFICATION_MESSAGES.ACCOUNT_REGISTRATION,
-      //   NotificationType.SIGN_UP,
-      // );
-
-      // await this.notificationService.sendNotificationToAdmins(
-      //   NOTIFICATION_MESSAGES.ADMIN_NEW_USER_SIGNUP,
-      //   NotificationType.ADMIN,
-      // );
-      // delete newUser.password;
-      return { ...tokens, newUser };
-    } catch (error) {
-      this.logSignupFailure(error, email, phoneNumber, signupStage);
-
-      const mappedError = this.mapSignupError(error);
-      if (mappedError) {
-        throw mappedError;
       }
-
-      if (error instanceof HttpException && error.getStatus() < 500) {
-        throw error;
-      }
-
-      throw new ConflictException(
-        'Signup could not be completed. Please try again.',
-      );
     }
+
+    throw new ConflictException('Signup could not be completed. Please try again.');
   }
 
   async createTransactionPin(pin: string, userId: string) {
@@ -490,10 +485,46 @@ export class AuthenticationService {
         `[AUTH] tag generation failed: ${error.message}`,
         error.stack,
       );
-      throw new ConflictException(
-        'A unique tag could not be assigned to this account. Please try again.',
-      );
+      throw new ConflictException(API_MESSAGES.TAG_GENERATION_FAILED);
     }
+  }
+
+  private async generateUniqueReferralCode(
+    manager: EntityManager,
+    maxAttempts: number = 20,
+  ): Promise<string> {
+    for (let attempt = 1; attempt <= maxAttempts; attempt++) {
+      const referralCode = UTILITIES.generateReferralCode();
+
+      try {
+        await this.userRepository.assertReferralCodeAvailable(
+          referralCode,
+          manager,
+        );
+        this.logger.log(
+          `[AUTH] referral code generated successfully on attempt ${attempt}`,
+        );
+        return referralCode;
+      } catch (error) {
+        if (
+          error instanceof ConflictException &&
+          attempt < maxAttempts
+        ) {
+          this.logger.warn(
+            `[AUTH] referral code conflict on attempt ${attempt}: ${referralCode}`,
+          );
+          continue;
+        }
+
+        this.logger.error(
+          `[AUTH] referral code generation failed after ${attempt} attempts`,
+          (error as Error).stack,
+        );
+        throw new ConflictException(API_MESSAGES.REFERRAL_CODE_GENERATION_FAILED);
+      }
+    }
+
+    throw new ConflictException(API_MESSAGES.REFERRAL_CODE_GENERATION_FAILED);
   }
 
   private logSignupFailure(
@@ -501,6 +532,7 @@ export class AuthenticationService {
     email: string,
     phoneNumber: string,
     stage: string,
+    attempt: number,
   ) {
     const typedError = error as Error & {
       code?: string;
@@ -525,12 +557,16 @@ export class AuthenticationService {
       typedError.message;
 
     this.logger.error(
-      `[AUTH] signup failed at ${stage} for email=${email} phone=${phoneNumber} code=${code} detail=${detail}`,
+      `[AUTH] signup failed at ${stage} on attempt=${attempt} for email=${email} phone=${phoneNumber} code=${code} detail=${detail}`,
       typedError.stack,
     );
   }
 
-  private mapSignupError(error: unknown): HttpException | null {
+  private async mapSignupError(
+    error: unknown,
+    email: string,
+    phoneNumber: string,
+  ): Promise<HttpException | null> {
     if (error instanceof BadRequestException) {
       return error;
     }
@@ -543,8 +579,7 @@ export class AuthenticationService {
     }
 
     if (this.isDuplicateEntryError(error)) {
-      const duplicateMessage = this.resolveDuplicateSignupMessage(error);
-      return new BadRequestException(duplicateMessage);
+      return await this.resolveDuplicateSignupError(error, email, phoneNumber);
     }
 
     if (error instanceof InternalServerErrorException) {
@@ -573,8 +608,7 @@ export class AuthenticationService {
     const typedError = error as any;
 
     return Boolean(
-      error instanceof QueryFailedError ||
-        typedError.code === 'ER_DUP_ENTRY' ||
+      typedError.code === 'ER_DUP_ENTRY' ||
         typedError.errno === 1062 ||
         typedError.driverError?.code === 'ER_DUP_ENTRY' ||
         typedError.driverError?.errno === 1062 ||
@@ -584,7 +618,19 @@ export class AuthenticationService {
     );
   }
 
-  private resolveDuplicateSignupMessage(error: unknown): string {
+  private async resolveDuplicateSignupError(
+    error: unknown,
+    email: string,
+    phoneNumber: string,
+  ): Promise<HttpException> {
+    if (await this.userRepository.findUserByEmail(email)) {
+      return new BadRequestException(API_MESSAGES.EMAIL_ALREADY_EXISTS);
+    }
+
+    if (await this.userRepository.findUserByPhone(phoneNumber)) {
+      return new BadRequestException(API_MESSAGES.PHONE_ALREADY_EXISTS);
+    }
+
     const typedError = error as {
       message?: string;
       driverError?: { sqlMessage?: string; message?: string };
@@ -597,27 +643,90 @@ export class AuthenticationService {
       .filter(Boolean)
       .join(' ');
 
-    if (duplicateDetail.includes('phoneNumber')) {
-      return API_MESSAGES.PHONE_ALREADY_EXISTS;
+    if (
+      duplicateDetail.includes('phoneNumber') ||
+      duplicateDetail.includes('phone')
+    ) {
+      return new BadRequestException(API_MESSAGES.PHONE_ALREADY_EXISTS);
     }
 
     if (duplicateDetail.includes('email')) {
-      return API_MESSAGES.EMAIL_ALREADY_EXISTS;
+      return new BadRequestException(API_MESSAGES.EMAIL_ALREADY_EXISTS);
     }
 
     if (duplicateDetail.includes('tagId')) {
-      return 'A unique tag could not be assigned to this account. Please try again.';
+      return new ConflictException(API_MESSAGES.TAG_GENERATION_FAILED);
+    }
+
+    if (duplicateDetail.includes('referralCode')) {
+      return new ConflictException(API_MESSAGES.REFERRAL_CODE_GENERATION_FAILED);
     }
 
     if (duplicateDetail.includes('wallet')) {
-      return 'Customer wallet setup could not be completed. Please try again.';
+      return new ConflictException(
+        'Customer wallet setup could not be completed. Please try again.',
+      );
     }
 
     if (duplicateDetail.includes('user_kyc')) {
-      return 'KYC setup could not be completed. Please try again.';
+      return new ConflictException(
+        'KYC setup could not be completed. Please try again.',
+      );
     }
 
-    return 'Signup could not be completed. Please try again.';
+    return new ConflictException('Signup could not be completed. Please try again.');
+  }
+
+  private async shouldRetrySignupForGeneratedValueConflict(
+    error: unknown,
+    stage: string,
+    email: string,
+    phoneNumber: string,
+    attempt: number,
+    maxInternalAttempts: number,
+  ): Promise<boolean> {
+    if (attempt >= maxInternalAttempts) {
+      return false;
+    }
+
+    if (stage !== 'transaction:create-user') {
+      return false;
+    }
+
+    if (!this.isDuplicateEntryError(error)) {
+      return false;
+    }
+
+    const [existingEmail, existingPhone] = await Promise.all([
+      this.userRepository.findUserByEmail(email),
+      this.userRepository.findUserByPhone(phoneNumber),
+    ]);
+
+    if (existingEmail || existingPhone) {
+      return false;
+    }
+
+    const duplicateDetail = this.extractDuplicateDetail(error);
+    return (
+      duplicateDetail.includes('tagId') ||
+      duplicateDetail.includes('referralCode') ||
+      duplicateDetail === ''
+    );
+  }
+
+  private extractDuplicateDetail(error: unknown): string {
+    const typedError = error as {
+      message?: string;
+      driverError?: { sqlMessage?: string; message?: string };
+    };
+
+    return [
+      typedError.driverError?.sqlMessage,
+      typedError.driverError?.message,
+      typedError.message,
+    ]
+      .filter(Boolean)
+      .join(' ');
   }
 
   private async signToken<T>(userId: string, expiresIn: number, payload?: T) {
