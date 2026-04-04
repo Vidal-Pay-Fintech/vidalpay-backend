@@ -81,6 +81,10 @@ class ApiMessages {
   public USER_NOT_FOUND_WITH_PHONE =
     'Account with the phone number does not exist';
   public EMAIL_ALREADY_EXISTS = 'Account with the email already exists';
+  public TAG_GENERATION_FAILED =
+    'Tag generation failed. Please try signing up again.';
+  public REFERRAL_CODE_GENERATION_FAILED =
+    'Referral code generation failed. Please try signing up again.';
   public PHONE_NOT_VERIFIED =
     'Phone not verifed. Please verify your phone number.';
   public PHONE_ALREADY_EXISTS = 'Account with the phone number already exists';

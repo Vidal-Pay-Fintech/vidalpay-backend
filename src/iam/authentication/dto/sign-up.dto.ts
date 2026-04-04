@@ -2,6 +2,7 @@ import { Optional } from '@nestjs/common';
 import {
   IsAlpha,
   IsEmail,
+  IsNotEmpty,
   IsOptional,
   IsString,
   IsStrongPassword,
@@ -10,8 +11,8 @@ import {
 } from 'class-validator';
 
 export class SignUpDto {
-  @IsOptional()
   @IsEmail()
+  @IsNotEmpty()
   email: string;
 
   @MinLength(8)
@@ -33,7 +34,7 @@ export class SignUpDto {
   pin: string;
 
   @Matches(/^\+?[1-9]\d{1,14}$/, {
-    message: 'phoneNumber must be a valid phone number',
+    message: 'Invalid phone format',
   })
   phoneNumber: string;
 }
