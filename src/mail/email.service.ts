@@ -11,7 +11,7 @@ interface SendMailConfiguration {
   fileType?: string;
 }
 
-interface MailDeliveryResult {
+export interface MailDeliveryResult {
   delivered: boolean;
   provider: 'resend';
   skipped?: boolean;

@@ -1,7 +1,10 @@
-import { IsEmail, IsNotEmpty, IsString } from 'class-validator';
+import { IsNotEmpty, IsString, Matches } from 'class-validator';
 
 export class CreateTransactionPinDto {
   @IsNotEmpty()
   @IsString()
+  @Matches(/^\d{4}$/, {
+    message: 'Transaction PIN must be a 4-digit number',
+  })
   pin: string;
 }

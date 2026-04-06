@@ -27,6 +27,9 @@ export class Token extends AbstractEntity {
   })
   type: TokenType;
 
+  @Column({ type: 'simple-json', nullable: true })
+  metadata: Record<string, any> | null;
+
   @ManyToOne(() => User, (user) => user.tokens)
   user: User;
 }

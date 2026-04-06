@@ -15,6 +15,11 @@ import { ActiveUser } from 'src/iam/decorators/active-user.decorator';
 import { ActiveUserData } from 'src/iam/interfaces/active-user-data-interfaces';
 import { ExchangeDto } from './dto/exchange.dto';
 import { ExchangeRangeDto } from './dto/exchange.rate.dto';
+import { ExternalTransferDto } from './dto/external-transfer.dto';
+import { AirtimePurchaseDto } from './dto/airtime-purchase.dto';
+import { DataPurchaseDto } from './dto/data-purchase.dto';
+import { UtilityPaymentDto } from './dto/utility-payment.dto';
+import { CreateCardTopUpIntentDto } from './dto/create-card-topup-intent.dto';
 
 @Controller('wallet')
 export class WalletController {
@@ -26,6 +31,14 @@ export class WalletController {
     @ActiveUser() user: ActiveUserData,
   ) {
     return this.walletService.internalTransfer(internalTransferDTO, user.sub);
+  }
+
+  @Post('external-transfer')
+  externalTransfer(
+    @Body() externalTransferDto: ExternalTransferDto,
+    @ActiveUser() user: ActiveUserData,
+  ) {
+    return this.walletService.externalTransfer(externalTransferDto, user.sub);
   }
 
   @Post('internal-exchange')
@@ -43,6 +56,41 @@ export class WalletController {
   ) {
     const { fromCurrency, toCurrency } = exchangeRateDTO;
     return this.walletService.getExchangeRate(fromCurrency, toCurrency);
+  }
+
+  @Post('airtime')
+  purchaseAirtime(
+    @Body() airtimePurchaseDto: AirtimePurchaseDto,
+    @ActiveUser() user: ActiveUserData,
+  ) {
+    return this.walletService.purchaseAirtime(airtimePurchaseDto, user.sub);
+  }
+
+  @Post('data')
+  purchaseData(
+    @Body() dataPurchaseDto: DataPurchaseDto,
+    @ActiveUser() user: ActiveUserData,
+  ) {
+    return this.walletService.purchaseData(dataPurchaseDto, user.sub);
+  }
+
+  @Post('utilities')
+  payUtility(
+    @Body() utilityPaymentDto: UtilityPaymentDto,
+    @ActiveUser() user: ActiveUserData,
+  ) {
+    return this.walletService.payUtility(utilityPaymentDto, user.sub);
+  }
+
+  @Post('top-up/card')
+  createCardTopUpIntent(
+    @Body() createCardTopUpIntentDto: CreateCardTopUpIntentDto,
+    @ActiveUser() user: ActiveUserData,
+  ) {
+    return this.walletService.createCardTopUpIntent(
+      createCardTopUpIntentDto,
+      user.sub,
+    );
   }
 
   @Get()

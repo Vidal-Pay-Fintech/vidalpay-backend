@@ -7,6 +7,8 @@ class ApiMessages {
   public PASSWORD_RESET_SUCCESSFUL = 'Password Reset Successfully';
   public RESET_PASSWORD_LINK_SENT =
     'Reset Password Link Sent Successfully. Please check your email';
+  public RESET_PASSWORD_LINK_FAILED =
+    'We could not deliver the password reset email. Please try again later.';
   public INVALID_TOKEN = 'Invalid Token Provided';
   public ACCOUNT_CREATED_SUCCESSFULLY = `Account created successfully. Welcome to ${CONFIG_VARIABLES.APP_NAME}`;
   public PIN_ALREADY_EXISTS = 'Transaction Pin already exists';
@@ -14,6 +16,8 @@ class ApiMessages {
   public WALLET_EXISTS = 'Wallet already exists';
   public PAYMENT_LOG_NOTFOUND = "Payment with the reference doesn't exists ";
   public OTP_SENT = `Please enter the OTP sent to your email address`;
+  public OTP_SEND_FAILED =
+    'We could not deliver the verification code. Please try again later.';
   public INSUFFICIENT_BALANCE = `Insuffiucient Balance. Please top-up your wallet and try again.`;
   public PAYMENT_ALREADY_VERIFIED = 'Payment already verified and credited';
   public PAYMENT_NOT_COMPLETED = 'Payment not completed';
@@ -33,6 +37,8 @@ class ApiMessages {
     `Invalid Transaction Pin. You have ${2 - trialTimes} attempts left`;
   public PIN_NOT_SET =
     "You currently haven't set your transaction Pin. Please set Transaction Pin to continue";
+  public TRANSFER_PIN_REQUIRED =
+    'Set your transaction PIN to activate transfers and outgoing payments.';
 
   public BANK_DELETED_SUCCESSFULLY = 'Bank Deleted Successfully';
   public PHONE_VERIFIED_SUCCESSFULLY = 'Phone verified successfully';
@@ -180,6 +186,25 @@ class ApiMessages {
     'No supported KYC provider is available for the resolved region.';
   public TRANSFER_BLOCKED_PENDING_KYC =
     'Transfers are blocked until your KYC status is VERIFIED.';
+  public EXTERNAL_TRANSFER_UNAVAILABLE =
+    'External transfers are not available for your current region or provider.';
+  public PRODUCT_NOT_AVAILABLE_FOR_REGION =
+    'This product is not available for your current region.';
+  public CARD_TOPUP_UNAVAILABLE =
+    'Card top-up is not available for your current region or provider.';
+  public EMAIL_CHANGE_CODE_SENT =
+    'A verification code has been sent to your new email address.';
+  public EMAIL_CHANGE_SUCCESSFUL = 'Your email address has been updated successfully.';
+  public PHONE_CHANGE_CODE_SENT =
+    'A verification code has been sent to your email address to confirm your phone number change.';
+  public PHONE_CHANGE_SUCCESSFUL =
+    'Your phone number has been updated successfully.';
+  public CHANGE_CONTACT_VERIFICATION_FAILED =
+    'We could not deliver the verification code for this change request. Please try again later.';
+  public SUPPORT_TICKET_CREATED =
+    'Your support request has been submitted successfully.';
+  public CRYPTO_COMING_SOON =
+    'Crypto features are not enabled yet in staging.';
 }
 
 export const API_MESSAGES = new ApiMessages();

@@ -3,6 +3,10 @@ import { KycDocumentStage } from 'src/common/enum/kyc-document.enum';
 
 export class UploadKycDocumentsDto {
   @IsOptional()
+  @IsString()
+  category?: string;
+
+  @IsOptional()
   @IsEnum(KycDocumentStage)
   stage?: KycDocumentStage;
 

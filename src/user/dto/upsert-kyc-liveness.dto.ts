@@ -20,4 +20,12 @@ export class UpsertKycLivenessDto {
   @IsOptional()
   @IsObject()
   metadata?: Record<string, any>;
+
+  @IsOptional()
+  @IsString()
+  selfieDocumentId?: string;
+
+  @IsOptional()
+  @IsString()
+  selfieDocumentUrl?: string;
 }

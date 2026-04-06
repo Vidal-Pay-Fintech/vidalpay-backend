@@ -54,7 +54,7 @@ export class VaultService {
       VaultInterfaceDTO;
     const vaultInfo = await this.getVaultByVaultType(vaultType);
     const currentBalance = vaultInfo.workingBalance;
-    const totalCredit = Number(vaultInfo.totalCredit) - amount;
+    const totalCredit = Number(vaultInfo.totalCredit) + amount;
     const balanceLeft = Number(currentBalance) + amount;
     await this.vaultRepository.findOneAndUpdate(vaultInfo.id, {
       totalCredit,
