@@ -1,6 +1,8 @@
 import { BadRequestException, Injectable } from '@nestjs/common';
+import { ClientKycStatus } from 'src/common/enum/client-kyc-status.enum';
 import { KycProvider } from 'src/common/enum/kyc-provider.enum';
 import { KycStatus } from 'src/common/enum/kyc-status.enum';
+import { KycSectionCode } from 'src/common/enum/kyc-section.enum';
 import {
   SUPPORTED_REGION_LABELS,
   SupportedRegion,
@@ -15,6 +17,11 @@ import { User } from 'src/database/entities/user.entity';
 import { KycProviderRouterService } from 'src/integrations/kyc/kyc-provider-router.service';
 import { API_MESSAGES } from 'src/utils/apiMessages';
 import { UpsertKycIdentityDto } from './dto/upsert-kyc-identity.dto';
+import {
+  DynamicLimitProfile,
+  KycSectionProgress,
+  ProductAvailability,
+} from './interfaces/user-account.interface';
 import { UserCapabilities } from './interfaces/user-capability.interface';
 
 export type RegionResolutionState =
@@ -149,40 +156,19 @@ export class UserPolicyService {
       }
     }
 
+    const productAvailability = this.buildProductAvailability(
+      resolution,
+      canTransfer,
+    );
+
     return {
       region: resolution.region,
       provider,
       canReceive,
       canTransfer,
       blockedReason,
-      limits: {
-        policyVersion: 'staging-profile-kyc-v1',
-        tier:
-          resolution.state === 'UNSUPPORTED'
-            ? 'UNSUPPORTED'
-            : canTransfer
-              ? 'VERIFIED'
-              : 'PENDING_KYC',
-        receive: {
-          dailyAmount: null,
-          monthlyAmount: null,
-          managedBy: 'RECEIVE_ENABLED_BY_DEFAULT',
-        },
-        transfer: {
-          dailyAmount: canTransfer ? null : 0,
-          monthlyAmount: canTransfer ? null : 0,
-          managedBy: canTransfer ? 'FUTURE_PROGRESSIVE_POLICY' : 'KYC_GATE',
-        },
-        progressiveIncreases: {
-          enabled: canTransfer,
-          basis: 'ACCOUNT_ACTIVITY',
-          reviewRequired: true,
-        },
-        futureProducts: {
-          loanEligible: false,
-          taxFilingEligible: false,
-        },
-      },
+      limits: this.buildDynamicLimits(resolution, canTransfer, productAvailability),
+      productAvailability,
     };
   }
 
@@ -408,6 +394,97 @@ export class UserPolicyService {
     return KycStatus.DRAFT;
   }
 
+  mapKycStatusToClientStatus(input: {
+    status: KycStatus;
+    regionState: RegionResolutionState;
+    governmentIdComplete: boolean;
+    addressComplete: boolean;
+    livenessComplete: boolean;
+  }): ClientKycStatus {
+    const {
+      status,
+      regionState,
+      governmentIdComplete,
+      addressComplete,
+      livenessComplete,
+    } = input;
+
+    if (status === KycStatus.VERIFIED) {
+      return ClientKycStatus.VERIFIED;
+    }
+
+    if (status === KycStatus.REJECTED) {
+      return ClientKycStatus.REJECTED;
+    }
+
+    if (status === KycStatus.PENDING_REVIEW) {
+      return ClientKycStatus.UNDER_REVIEW;
+    }
+
+    if (regionState !== 'RESOLVED' || status === KycStatus.UNSUPPORTED) {
+      return ClientKycStatus.NOT_STARTED;
+    }
+
+    if (governmentIdComplete && addressComplete && livenessComplete) {
+      return ClientKycStatus.SUBMITTED;
+    }
+
+    if (
+      status === KycStatus.DRAFT ||
+      status === KycStatus.REQUIRES_ACTION ||
+      governmentIdComplete ||
+      addressComplete ||
+      livenessComplete
+    ) {
+      return ClientKycStatus.IN_PROGRESS;
+    }
+
+    return ClientKycStatus.NOT_STARTED;
+  }
+
+  buildKycSectionProgress(input: {
+    region: SupportedRegion | null;
+    globalStatus: ClientKycStatus;
+    rejectionReason: string | null;
+    governmentIdComplete: boolean;
+    addressComplete: boolean;
+    livenessComplete: boolean;
+  }): KycSectionProgress[] {
+    const governmentIdDescription =
+      input.region === SupportedRegion.NG
+        ? 'Provide your NIN and BVN, then upload your government ID.'
+        : input.region === SupportedRegion.US
+          ? 'Provide your SSN or approved identity number and upload your government ID.'
+          : 'Resolve your supported region before KYC can continue.';
+
+    return [
+      this.createSectionProgress(
+        KycSectionCode.GOVERNMENT_ID,
+        'Government ID',
+        governmentIdDescription,
+        input.globalStatus,
+        input.governmentIdComplete,
+        input.rejectionReason,
+      ),
+      this.createSectionProgress(
+        KycSectionCode.ADDRESS,
+        'Address',
+        'Provide your address details and proof of address.',
+        input.globalStatus,
+        input.addressComplete,
+        input.rejectionReason,
+      ),
+      this.createSectionProgress(
+        KycSectionCode.LIVENESS,
+        'Liveness',
+        'Complete the liveness or selfie verification step.',
+        input.globalStatus,
+        input.livenessComplete,
+        input.rejectionReason,
+      ),
+    ];
+  }
+
   mapKycStatusToBlockedReason(status: KycStatus) {
     switch (status) {
       case KycStatus.NOT_STARTED:
@@ -428,5 +505,187 @@ export class UserPolicyService {
 
   getSupportedRegionLabel(region: SupportedRegion) {
     return SUPPORTED_REGION_LABELS[region];
+  }
+
+  private buildDynamicLimits(
+    resolution: RegionResolution,
+    canTransfer: boolean,
+    productAvailability: ProductAvailability,
+  ): DynamicLimitProfile {
+    const tier =
+      resolution.state === 'UNSUPPORTED'
+        ? 'UNSUPPORTED'
+        : canTransfer
+          ? 'VERIFIED'
+          : 'PENDING_KYC';
+
+    return {
+      policyVersion: 'staging-region-products-v2',
+      tier,
+      outbound: {
+        daily: canTransfer ? null : 0,
+        monthly: canTransfer ? null : 0,
+        currency: 'MIXED',
+        managedBy: canTransfer ? 'FUTURE_PROGRESSIVE_POLICY' : 'KYC_GATE',
+      },
+      inbound: {
+        daily: null,
+        monthly: null,
+        currency: 'MIXED',
+        managedBy: 'RECEIVE_ENABLED_BY_DEFAULT',
+      },
+      receive: {
+        dailyAmount: null,
+        monthlyAmount: null,
+        managedBy: 'RECEIVE_ENABLED_BY_DEFAULT',
+      },
+      transfer: {
+        dailyAmount: canTransfer ? null : 0,
+        monthlyAmount: canTransfer ? null : 0,
+        managedBy: canTransfer ? 'FUTURE_PROGRESSIVE_POLICY' : 'KYC_GATE',
+      },
+      progressiveIncreases: {
+        enabled: canTransfer,
+        basis: 'ACCOUNT_ACTIVITY',
+        reviewRequired: true,
+      },
+      futureProducts: {
+        loanEligible: productAvailability.loan,
+        taxFilingEligible: productAvailability.taxFiling,
+      },
+      lastEvaluatedAt: new Date().toISOString(),
+      trustSignals: {
+        transactionVolume: null,
+        transactionConsistency: null,
+        activeDurationDays: null,
+      },
+    };
+  }
+
+  private buildProductAvailability(
+    resolution: RegionResolution,
+    canTransfer: boolean,
+  ): ProductAvailability {
+    const baseAvailability: ProductAvailability = {
+      wallet: true,
+      transfer: false,
+      deposit: false,
+      conversion: false,
+      airtime: false,
+      data: false,
+      utilities: false,
+      loan: false,
+      taxFiling: false,
+    };
+
+    if (resolution.state !== 'RESOLVED' || !resolution.region) {
+      return baseAvailability;
+    }
+
+    if (resolution.region === SupportedRegion.NG) {
+      return {
+        ...baseAvailability,
+        deposit: true,
+        conversion: true,
+        transfer: canTransfer,
+        airtime: true,
+        data: true,
+        utilities: true,
+      };
+    }
+
+    if (resolution.region === SupportedRegion.US) {
+      return {
+        ...baseAvailability,
+        deposit: true,
+        conversion: true,
+        transfer: canTransfer,
+        loan: true,
+        taxFiling: true,
+      };
+    }
+
+    return baseAvailability;
+  }
+
+  private createSectionProgress(
+    section: KycSectionCode,
+    title: string,
+    description: string,
+    globalStatus: ClientKycStatus,
+    sectionComplete: boolean,
+    rejectionReason: string | null,
+  ): KycSectionProgress {
+    if (globalStatus === ClientKycStatus.VERIFIED) {
+      return {
+        section,
+        title,
+        description,
+        status: ClientKycStatus.VERIFIED,
+        completed: true,
+        rejectionReason: null,
+      };
+    }
+
+    if (globalStatus === ClientKycStatus.UNDER_REVIEW) {
+      return {
+        section,
+        title,
+        description,
+        status: sectionComplete
+          ? ClientKycStatus.UNDER_REVIEW
+          : ClientKycStatus.NOT_STARTED,
+        completed: sectionComplete,
+        rejectionReason: null,
+      };
+    }
+
+    if (globalStatus === ClientKycStatus.REJECTED) {
+      return {
+        section,
+        title,
+        description,
+        status: sectionComplete
+          ? ClientKycStatus.REJECTED
+          : ClientKycStatus.NOT_STARTED,
+        completed: false,
+        rejectionReason: sectionComplete ? rejectionReason : null,
+      };
+    }
+
+    if (globalStatus === ClientKycStatus.SUBMITTED) {
+      return {
+        section,
+        title,
+        description,
+        status: sectionComplete
+          ? ClientKycStatus.SUBMITTED
+          : ClientKycStatus.NOT_STARTED,
+        completed: sectionComplete,
+        rejectionReason: null,
+      };
+    }
+
+    if (globalStatus === ClientKycStatus.IN_PROGRESS) {
+      return {
+        section,
+        title,
+        description,
+        status: sectionComplete
+          ? ClientKycStatus.SUBMITTED
+          : ClientKycStatus.IN_PROGRESS,
+        completed: sectionComplete,
+        rejectionReason: null,
+      };
+    }
+
+    return {
+      section,
+      title,
+      description,
+      status: ClientKycStatus.NOT_STARTED,
+      completed: false,
+      rejectionReason: null,
+    };
   }
 }

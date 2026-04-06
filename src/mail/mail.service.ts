@@ -1,6 +1,6 @@
 // import { MailerService } from '@nestjs-modules/mailer';
-import { Injectable } from '@nestjs/common';
-import { EmailService } from './email.service';
+import { Injectable, Logger } from '@nestjs/common';
+import { EmailService, MailDeliveryResult } from './email.service';
 
 // AUTHENTICATION EMAILS
 import VerificationEmail from 'emails/auth/welcome';
@@ -32,6 +32,7 @@ import { MailSubject } from 'src/common/enum/mail';
 // import { DrawType } from 'src/database/entities/draw-type.entity';
 @Injectable()
 export class MailService {
+  private readonly logger = new Logger(MailService.name);
   private firstName: string;
   private email: string;
   private amount: any;
@@ -52,22 +53,21 @@ export class MailService {
     return user;
   }
 
-  async sendEmailVerificationCode(userId: string, otp: string): Promise<void> {
-    try {
-      await this.getLoggedUser(userId);
-      await this.emailService.sendMail({
-        email: this.email,
-        subject: MailSubject.WELCOME_EMAIL,
-        template: VerificationEmail({
-          firstName: this.firstName,
-          code: otp,
-        }),
-      });
-    } catch (error) {
-      console.error(
-        `[MAIL] Failed to send verification email for user ${userId}: ${error.message}`,
-      );
-    }
+  async sendEmailVerificationCode(
+    userId: string,
+    otp: string,
+  ): Promise<MailDeliveryResult> {
+    await this.getLoggedUser(userId);
+    const result = await this.emailService.sendMail({
+      email: this.email,
+      subject: MailSubject.WELCOME_EMAIL,
+      template: VerificationEmail({
+        firstName: this.firstName,
+        code: otp,
+      }),
+    });
+    this.logDeliveryResult('verification email', userId, result);
+    return result;
   }
 
   async sendTransactionMail(
@@ -75,64 +75,54 @@ export class MailService {
     amount: any,
     info: any,
     currency: any,
-  ): Promise<void> {
-    try {
-      await this.getLoggedUser(userId);
-      console.log('emailInfo', userId, amount, info, currency);
-      await this.emailService.sendMail({
-        email: this.email,
-        subject: MailSubject.TRANSACTION_ALERT,
-        template: TransactionEmail({
-          firstName: this.firstName,
-          amount,
-          info,
-          currency,
-        }),
-      });
-    } catch (error) {
-      console.error(
-        `[MAIL] Failed to send transaction email for user ${userId}: ${error.message}`,
-      );
-    }
+  ): Promise<MailDeliveryResult> {
+    await this.getLoggedUser(userId);
+    const result = await this.emailService.sendMail({
+      email: this.email,
+      subject: MailSubject.TRANSACTION_ALERT,
+      template: TransactionEmail({
+        firstName: this.firstName,
+        amount,
+        info,
+        currency,
+      }),
+    });
+    this.logDeliveryResult('transaction email', userId, result);
+    return result;
   }
 
-  async sendResetPasswordOTP(userId: string, otp: string): Promise<void> {
-    try {
-      await this.getLoggedUser(userId);
-      await this.emailService.sendMail({
-        email: this.email,
-        subject: MailSubject.RESET_PASSWORD_OTP,
-        template: ResetPasswordOTP({
-          firstName: this.firstName,
-          code: otp,
-        }),
-      });
-    } catch (error) {
-      console.error(
-        `[MAIL] Failed to send reset password OTP for user ${userId}: ${error.message}`,
-      );
-    }
+  async sendResetPasswordOTP(
+    userId: string,
+    otp: string,
+  ): Promise<MailDeliveryResult> {
+    await this.getLoggedUser(userId);
+    const result = await this.emailService.sendMail({
+      email: this.email,
+      subject: MailSubject.RESET_PASSWORD_OTP,
+      template: ResetPasswordOTP({
+        firstName: this.firstName,
+        code: otp,
+      }),
+    });
+    this.logDeliveryResult('reset password OTP', userId, result);
+    return result;
   }
 
   async sendResetTransactionPinCode(
     userId: string,
     otp: string,
-  ): Promise<void> {
-    try {
-      await this.getLoggedUser(userId);
-      await this.emailService.sendMail({
-        email: this.email,
-        subject: MailSubject.RESET_TRANSACTION_PIN,
-        template: ResetTransactionPin({
-          firstName: this.firstName,
-          otp,
-        }),
-      });
-    } catch (error) {
-      console.error(
-        `[MAIL] Failed to send reset transaction pin email for user ${userId}: ${error.message}`,
-      );
-    }
+  ): Promise<MailDeliveryResult> {
+    await this.getLoggedUser(userId);
+    const result = await this.emailService.sendMail({
+      email: this.email,
+      subject: MailSubject.RESET_TRANSACTION_PIN,
+      template: ResetTransactionPin({
+        firstName: this.firstName,
+        otp,
+      }),
+    });
+    this.logDeliveryResult('reset transaction pin email', userId, result);
+    return result;
   }
 
   //   async sendAdminInvite(
@@ -150,22 +140,38 @@ export class MailService {
   //     });
   //   }
 
-  async sendResetEmailLink(userId: string, link: string): Promise<void> {
-    try {
-      await this.getLoggedUser(userId);
-      await this.emailService.sendMail({
-        email: this.email,
-        subject: MailSubject.FORGOT_PASSWORD,
-        template: ResetPassword({
-          firstName: this.firstName,
-          link,
-        }),
-      });
-    } catch (error) {
-      console.error(
-        `[MAIL] Failed to send reset password link for user ${userId}: ${error.message}`,
+  async sendResetEmailLink(
+    userId: string,
+    link: string,
+  ): Promise<MailDeliveryResult> {
+    await this.getLoggedUser(userId);
+    const result = await this.emailService.sendMail({
+      email: this.email,
+      subject: MailSubject.FORGOT_PASSWORD,
+      template: ResetPassword({
+        firstName: this.firstName,
+        link,
+      }),
+    });
+    this.logDeliveryResult('reset password link', userId, result);
+    return result;
+  }
+
+  private logDeliveryResult(
+    label: string,
+    userId: string,
+    result: MailDeliveryResult,
+  ) {
+    if (result.delivered) {
+      this.logger.log(
+        `[MAIL] ${label} delivered for user ${userId}${result.messageId ? ` messageId=${result.messageId}` : ''}`,
       );
+      return;
     }
+
+    this.logger.warn(
+      `[MAIL] ${label} not delivered for user ${userId}: ${result.reason ?? 'Unknown reason'}`,
+    );
   }
 
   // async sendWithdrawalSuccessNotification(

@@ -20,6 +20,8 @@ import { TransactionEntity } from './entities/transaction.entity';
 import { Beneficiary } from './entities/beneficiary.entity';
 import { UserKyc } from './entities/user-kyc.entity';
 import { KycDocument } from './entities/kyc-document.entity';
+import { ProviderOperation } from './entities/provider-operation.entity';
+import { ProviderWebhookEvent } from './entities/provider-webhook-event.entity';
 
 //REPOSITORIES
 import { UserRepository } from './repositories/user.repository';
@@ -32,6 +34,8 @@ import { TransactionRepository } from './repositories/transaction.repository';
 import { BeneficiaryRepository } from './repositories/beneficiary.repository';
 import { UserKycRepository } from './repositories/user-kyc.repository';
 import { KycDocumentRepository } from './repositories/kyc-document.repository';
+import { ProviderOperationRepository } from './repositories/provider-operation.repository';
+import { ProviderWebhookEventRepository } from './repositories/provider-webhook-event.repository';
 
 interface DatabaseConfig {
   MYSQL_HOST: string;
@@ -99,6 +103,8 @@ let transactionalContextInitialized = false;
       Beneficiary,
       UserKyc,
       KycDocument,
+      ProviderOperation,
+      ProviderWebhookEvent,
     ]),
   ],
   providers: [
@@ -112,6 +118,8 @@ let transactionalContextInitialized = false;
     BeneficiaryRepository,
     UserKycRepository,
     KycDocumentRepository,
+    ProviderOperationRepository,
+    ProviderWebhookEventRepository,
   ],
   exports: [
     TypeOrmModule,
@@ -124,6 +132,8 @@ let transactionalContextInitialized = false;
     BeneficiaryRepository,
     UserKycRepository,
     KycDocumentRepository,
+    ProviderOperationRepository,
+    ProviderWebhookEventRepository,
   ],
 })
 export class DatabaseModule {}

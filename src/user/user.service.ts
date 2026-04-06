@@ -3,6 +3,7 @@ import {
   Injectable,
   PreconditionFailedException,
 } from '@nestjs/common';
+import { ClientKycStatus } from 'src/common/enum/client-kyc-status.enum';
 import {
   KycDocumentStage,
   KycDocumentStorage,
@@ -20,7 +21,9 @@ import { KycDocumentRepository } from 'src/database/repositories/kyc-document.re
 import { UserKycRepository } from 'src/database/repositories/user-kyc.repository';
 import { UserRepository } from 'src/database/repositories/user.repository';
 import { WalletRepository } from 'src/database/repositories/wallet.repository';
+import { KycDocument } from 'src/database/entities/kyc-document.entity';
 import { KycProviderRouterService } from 'src/integrations/kyc/kyc-provider-router.service';
+import { ProviderOperationsService } from 'src/integrations/provider/provider-operations.service';
 import { API_MESSAGES } from 'src/utils/apiMessages';
 import { SubmitKycDto } from './dto/submit-kyc.dto';
 import { UpdateProfileDto } from './dto/update-profile.dto';
@@ -28,9 +31,14 @@ import { UploadKycDocumentsDto } from './dto/upload-kyc-documents.dto';
 import { UpsertKycAddressDto } from './dto/upsert-kyc-address.dto';
 import { UpsertKycIdentityDto } from './dto/upsert-kyc-identity.dto';
 import { UpsertKycLivenessDto } from './dto/upsert-kyc-liveness.dto';
+import {
+  KycSectionProgress,
+  WalletRailDetails,
+} from './interfaces/user-account.interface';
 import { UserCapabilities } from './interfaces/user-capability.interface';
 import { UserPolicyService } from './user-policy.service';
 import { relative } from 'path';
+import { Currency } from 'src/utils/enums/wallet.enum';
 
 type UploadedKycFile = {
   originalname?: string;
@@ -49,20 +57,39 @@ export class UserService {
     private readonly walletRepository: WalletRepository,
     private readonly userPolicy: UserPolicyService,
     private readonly kycProviderRouter: KycProviderRouterService,
+    private readonly providerOperationsService: ProviderOperationsService,
   ) {}
 
   async getMe(userId: string) {
-    const { user, capabilities } = await this.getSyncedContext(userId);
-
-    return {
-      user: this.serializeProfile(user),
-      capabilities,
-    };
+    return this.getAccountOverview(userId);
   }
 
   async getKyc(userId: string) {
     const { user, capabilities } = await this.getSyncedContext(userId);
     return this.buildKycResponse(user, capabilities);
+  }
+
+  async getAccountOverview(userId: string) {
+    const { user, capabilities } = await this.getSyncedContext(userId);
+    const walletRails = this.buildWalletRailDetails(user, capabilities);
+    const accountRails = this.buildAccountRailSummary(walletRails);
+    const serializedProfile = this.serializeProfile(
+      user,
+      capabilities,
+      walletRails,
+      accountRails,
+    );
+
+    return {
+      user: serializedProfile,
+      region: capabilities.region,
+      provider: capabilities.provider,
+      capabilities,
+      productAvailability: capabilities.productAvailability,
+      limits: capabilities.limits,
+      wallets: walletRails,
+      accountRails,
+    };
   }
 
   async updateProfile(userId: string, updateProfileDto: UpdateProfileDto) {
@@ -186,8 +213,18 @@ export class UserService {
         ) ??
         userKyc.identityData?.approvedIdentityValue ??
         null,
-      metadata:
-        upsertKycIdentityDto.metadata ?? userKyc.identityData?.metadata ?? null,
+      metadata: {
+        ...(userKyc.identityData?.metadata ?? {}),
+        ...(upsertKycIdentityDto.metadata ?? {}),
+        governmentIdDocumentId:
+          this.userPolicy.normalizeOptionalString(
+            upsertKycIdentityDto.governmentIdDocumentId,
+          ) ?? null,
+        governmentIdDocumentUrl:
+          this.userPolicy.normalizeOptionalString(
+            upsertKycIdentityDto.governmentIdDocumentUrl,
+          ) ?? null,
+      },
     };
 
     await this.moveKycToDraft(user, userKyc, region, {
@@ -200,9 +237,18 @@ export class UserService {
   async saveKycAddress(userId: string, upsertKycAddressDto: UpsertKycAddressDto) {
     const user = await this.loadUserContext(userId);
     const userKyc = await this.ensureUserKyc(user);
+    const normalizedCountryCode =
+      this.normalizeCountryCode(upsertKycAddressDto.countryCode) ??
+      this.userPolicy.parseSupportedRegion(upsertKycAddressDto.country ?? '') ??
+      null;
+    const normalizedStateOrRegion =
+      this.userPolicy.normalizeOptionalString(
+        upsertKycAddressDto.stateOrRegion,
+      ) ??
+      this.userPolicy.normalizeOptionalString(upsertKycAddressDto.state);
     const region = this.resolveSupportedRegionOrThrow(user, userKyc, {
       country: upsertKycAddressDto.country,
-      countryCode: upsertKycAddressDto.countryCode,
+      countryCode: normalizedCountryCode,
     });
 
     const addressData = this.userPolicy.buildAddressSnapshotFromSources(
@@ -214,18 +260,25 @@ export class UserService {
           upsertKycAddressDto.addressLine2,
         ),
         city: this.userPolicy.normalizeOptionalString(upsertKycAddressDto.city),
-        stateOrRegion: this.userPolicy.normalizeOptionalString(
-          upsertKycAddressDto.stateOrRegion,
-        ),
+        stateOrRegion: normalizedStateOrRegion,
         postalCode: this.userPolicy.normalizeOptionalString(
           upsertKycAddressDto.postalCode,
         ),
         country: this.userPolicy.normalizeOptionalString(
           upsertKycAddressDto.country,
         ),
-        countryCode: this.normalizeCountryCode(
-          upsertKycAddressDto.countryCode,
-        ),
+        countryCode: normalizedCountryCode ?? region,
+        metadata: {
+          proofOfAddressDocumentId:
+            this.userPolicy.normalizeOptionalString(
+              upsertKycAddressDto.proofOfAddressDocumentId,
+            ) ?? null,
+          proofOfAddressDocumentUrl:
+            this.userPolicy.normalizeOptionalString(
+              upsertKycAddressDto.proofOfAddressDocumentUrl,
+            ) ?? null,
+          isAtAddress: upsertKycAddressDto.isAtAddress ?? null,
+        },
       },
       userKyc.addressData ?? this.getUserAddressSnapshot(user),
     );
@@ -280,6 +333,9 @@ export class UserService {
         this.userPolicy.normalizeOptionalString(
           upsertKycLivenessDto.providerReference,
         ) ??
+        this.userPolicy.normalizeOptionalString(
+          upsertKycLivenessDto.selfieDocumentId,
+        ) ??
         userKyc.livenessData?.providerReference ??
         null,
       outcome:
@@ -288,10 +344,28 @@ export class UserService {
         null,
       completed:
         upsertKycLivenessDto.completed ??
-        userKyc.livenessData?.completed ??
-        false,
+        (Boolean(
+          this.userPolicy.normalizeOptionalString(
+            upsertKycLivenessDto.selfieDocumentId,
+          ) ||
+            this.userPolicy.normalizeOptionalString(
+              upsertKycLivenessDto.selfieDocumentUrl,
+            ),
+        ) ||
+          (userKyc.livenessData?.completed ?? false)),
       metadata:
-        upsertKycLivenessDto.metadata ?? userKyc.livenessData?.metadata ?? null,
+        {
+          ...(userKyc.livenessData?.metadata ?? {}),
+          ...(upsertKycLivenessDto.metadata ?? {}),
+          selfieDocumentId:
+            this.userPolicy.normalizeOptionalString(
+              upsertKycLivenessDto.selfieDocumentId,
+            ) ?? null,
+          selfieDocumentUrl:
+            this.userPolicy.normalizeOptionalString(
+              upsertKycLivenessDto.selfieDocumentUrl,
+            ) ?? null,
+        },
     };
 
     if (
@@ -329,14 +403,13 @@ export class UserService {
       throw new BadRequestException(API_MESSAGES.KYC_DOCUMENT_REQUIRED);
     }
 
-    const stage = uploadKycDocumentsDto.stage ?? KycDocumentStage.SUPPORTING;
-    const documentType =
-      this.userPolicy.normalizeOptionalString(
-        uploadKycDocumentsDto.documentType,
-      ) ?? null;
+    const { stage, documentType, category } =
+      this.resolveDocumentStageAndType(uploadKycDocumentsDto);
+    const createdDocuments: KycDocument[] = [];
 
     for (const file of files ?? []) {
-      await this.kycDocumentRepository.create({
+      createdDocuments.push(
+        await this.kycDocumentRepository.create({
         userId,
         kycId: userKyc.id,
         stage,
@@ -349,12 +422,17 @@ export class UserService {
         localPath: file.path ?? null,
         fileUrl: this.buildLocalFileUrl(file.path),
         uploadedViaBackend: true,
-        metadata,
-      });
+        metadata: {
+          ...(metadata ?? {}),
+          category,
+        },
+      }),
+      );
     }
 
     for (const fileUrl of fileUrls) {
-      await this.kycDocumentRepository.create({
+      createdDocuments.push(
+        await this.kycDocumentRepository.create({
         userId,
         kycId: userKyc.id,
         stage,
@@ -367,8 +445,12 @@ export class UserService {
         localPath: null,
         fileUrl,
         uploadedViaBackend: false,
-        metadata,
-      });
+        metadata: {
+          ...(metadata ?? {}),
+          category,
+        },
+      }),
+      );
     }
 
     const regionResolution = this.userPolicy.resolveRegionForUser(user, userKyc);
@@ -399,7 +481,18 @@ export class UserService {
       kycReviewedAt: null,
     });
 
-    return this.getKyc(userId);
+    const kycResponse = await this.getKyc(userId);
+    const latestDocument = createdDocuments.length
+      ? this.serializeKycDocuments([
+          createdDocuments[createdDocuments.length - 1],
+        ])[0]
+      : null;
+
+    return {
+      ...kycResponse,
+      document: latestDocument,
+      file: latestDocument,
+    };
   }
 
   async submitKyc(userId: string, _submitKycDto: SubmitKycDto) {
@@ -484,20 +577,22 @@ export class UserService {
     const capabilities = this.userPolicy.computeCapabilities(user);
 
     if (!capabilities.canTransfer) {
-      await this.syncWalletRouting(userId, capabilities);
+      await this.syncWalletRouting(userId, user, capabilities);
       throw new PreconditionFailedException(
         capabilities.blockedReason ?? API_MESSAGES.TRANSFER_BLOCKED_PENDING_KYC,
       );
     }
 
-    await this.syncWalletRouting(userId, capabilities);
+    await this.syncWalletRouting(userId, user, capabilities);
     return capabilities;
   }
 
   private async getSyncedContext(userId: string) {
-    const user = await this.loadUserContext(userId);
-    const capabilities = this.userPolicy.computeCapabilities(user);
-    await this.syncWalletRouting(userId, capabilities);
+    let user = await this.loadUserContext(userId);
+    let capabilities = this.userPolicy.computeCapabilities(user);
+    await this.syncWalletRouting(userId, user, capabilities);
+    user = await this.loadUserContext(userId);
+    capabilities = this.userPolicy.computeCapabilities(user);
 
     return { user, capabilities };
   }
@@ -753,11 +848,37 @@ export class UserService {
       userKyc?.addressData ?? undefined,
       this.getUserAddressSnapshot(user),
     );
+    const documents = userKyc?.documents ?? user.kycDocuments ?? [];
+    const rejectionReason = this.getKycRejectionReason(user, userKyc);
+    const governmentIdComplete = this.isGovernmentIdSectionComplete(
+      capabilities.region,
+      userKyc,
+      documents,
+    );
+    const addressComplete = this.isAddressSectionComplete(address, documents);
+    const livenessComplete = this.isLivenessSectionComplete(userKyc, documents);
+    const status = this.userPolicy.mapKycStatusToClientStatus({
+      status: userKyc?.status ?? user.kycStatus,
+      regionState: regionResolution.state,
+      governmentIdComplete,
+      addressComplete,
+      livenessComplete,
+    });
+    const sections = this.userPolicy.buildKycSectionProgress({
+      region: capabilities.region,
+      globalStatus: status,
+      rejectionReason,
+      governmentIdComplete,
+      addressComplete,
+      livenessComplete,
+    });
 
     return {
-      status: userKyc?.status ?? user.kycStatus,
-      provider: capabilities.provider ?? userKyc?.provider ?? user.kycProvider,
       region: capabilities.region,
+      provider: capabilities.provider ?? userKyc?.provider ?? user.kycProvider,
+      status,
+      rawStatus: userKyc?.status ?? user.kycStatus,
+      isSupportedRegion: regionResolution.state === 'RESOLVED',
       regionState: regionResolution.state,
       blockedReason:
         capabilities.blockedReason ??
@@ -765,31 +886,76 @@ export class UserService {
         this.userPolicy.mapKycStatusToBlockedReason(
           userKyc?.status ?? user.kycStatus,
         ),
+      rejectionReason,
       submittedAt: userKyc?.submittedAt ?? user.kycSubmittedAt,
       reviewedAt: userKyc?.reviewedAt ?? user.kycReviewedAt,
       requirements: this.userPolicy.buildKycRequirements(capabilities.region),
-      identity: this.userPolicy.maskIdentityData(userKyc?.identityData ?? null),
-      address,
+      sections,
+      identity: this.buildMobileKycIdentity(userKyc, address),
+      address: {
+        ...address,
+        state: address.stateOrRegion,
+      },
       liveness: userKyc?.livenessData ?? null,
-      documents: this.userPolicy.serializeDocuments(
-        userKyc?.documents ?? user.kycDocuments ?? [],
-      ),
+      documents: this.serializeKycDocuments(documents),
+      uploads: this.serializeKycUploads(documents),
       capabilities,
+      productAvailability: capabilities.productAvailability,
+      limits: capabilities.limits,
       profile: this.serializeProfile(user),
     };
   }
 
-  private serializeProfile(user: User) {
+  private serializeProfile(
+    user: User,
+    capabilities?: UserCapabilities,
+    walletRails?: WalletRailDetails[],
+    accountRails?: {
+      primary: WalletRailDetails | null;
+      byCurrency: Partial<Record<Currency, WalletRailDetails>>;
+    },
+  ) {
+    const effectiveCapabilities =
+      capabilities ?? this.userPolicy.computeCapabilities(user);
+    const effectiveWalletRails =
+      walletRails ?? this.buildWalletRailDetails(user, effectiveCapabilities);
+    const effectiveAccountRails =
+      accountRails ?? this.buildAccountRailSummary(effectiveWalletRails);
+    const normalizedKycStatus = this.userPolicy.mapKycStatusToClientStatus({
+      status: user.kyc?.status ?? user.kycStatus,
+      regionState: this.userPolicy.resolveRegionForUser(user, user.kyc).state,
+      governmentIdComplete: this.isGovernmentIdSectionComplete(
+        effectiveCapabilities.region,
+        user.kyc,
+        user.kyc?.documents ?? user.kycDocuments ?? [],
+      ),
+      addressComplete: this.isAddressSectionComplete(
+        this.userPolicy.buildAddressSnapshotFromSources(
+          user.kyc?.addressData ?? undefined,
+          this.getUserAddressSnapshot(user),
+        ),
+        user.kyc?.documents ?? user.kycDocuments ?? [],
+      ),
+      livenessComplete: this.isLivenessSectionComplete(
+        user.kyc,
+        user.kyc?.documents ?? user.kycDocuments ?? [],
+      ),
+    });
+
     return {
       id: user.id,
       email: user.email,
       firstName: user.firstName,
       lastName: user.lastName,
+      referralCode: user.referralCode,
       phoneNumber: user.phoneNumber,
       dateOfBirth: user.dateOfBirth,
       profilePicture: user.profilePicture,
       tagId: user.tagId,
       role: user.role,
+      accountStatus: user.accountStatus,
+      authType: user.authType,
+      reasonForDeactivation: user.reasonForDeactivation,
       status: user.status,
       isVerified: user.isVerified,
       isPhoneVerified: user.isPhoneVerified,
@@ -802,29 +968,19 @@ export class UserService {
       addressLine2: user.addressLine2,
       postalCode: user.postalCode,
       nationality: user.nationality,
-      kycStatus: user.kyc?.status ?? user.kycStatus,
-      kycProvider: user.kyc?.provider ?? user.kycProvider,
+      region: effectiveCapabilities.region,
+      provider: effectiveCapabilities.provider,
+      kycStatus: normalizedKycStatus,
+      rawKycStatus: user.kyc?.status ?? user.kycStatus,
+      kycProvider: effectiveCapabilities.provider ?? user.kyc?.provider ?? user.kycProvider,
       kycSubmittedAt: user.kyc?.submittedAt ?? user.kycSubmittedAt,
       kycReviewedAt: user.kyc?.reviewedAt ?? user.kycReviewedAt,
-      wallets: (user.wallet ?? []).map((wallet) => ({
-        id: wallet.id,
-        currency: wallet.currency,
-        balance: wallet.balance,
-        accountNumber: wallet.accountNumber,
-        routingNumber: wallet.routingNumber,
-        accountName: wallet.accountName,
-        bankName: wallet.bankName,
-        sortCode: wallet.sortCode,
-        receiveEnabled: wallet.receiveEnabled,
-        transferEnabled: wallet.transferEnabled,
-        routingRegionCode: wallet.routingRegionCode,
-        routingProvider: wallet.routingProvider,
-        providerCustomerId: wallet.providerCustomerId,
-        providerAccountId: wallet.providerAccountId,
-        providerVirtualAccountId: wallet.providerVirtualAccountId,
-        providerReference: wallet.providerReference,
-        providerMetadata: wallet.providerMetadata,
-      })),
+      wallet: effectiveWalletRails,
+      wallets: effectiveWalletRails,
+      capabilities: effectiveCapabilities,
+      productAvailability: effectiveCapabilities.productAvailability,
+      limits: effectiveCapabilities.limits,
+      accountRails: effectiveAccountRails,
     };
   }
 
@@ -860,6 +1016,7 @@ export class UserService {
 
   private async syncWalletRouting(
     userId: string,
+    user: User,
     capabilities: UserCapabilities,
   ) {
     await this.walletRepository.syncRoutingForUser(userId, {
@@ -868,5 +1025,299 @@ export class UserService {
       routingRegionCode: capabilities.region,
       routingProvider: capabilities.provider,
     });
+
+    if (capabilities.region) {
+      await this.providerOperationsService.ensureReceiveRailsForUser(
+        user,
+        capabilities.region,
+      );
+    }
+  }
+
+  private buildWalletRailDetails(
+    user: User,
+    capabilities: UserCapabilities,
+  ): WalletRailDetails[] {
+    return (user.wallet ?? []).map((wallet) => {
+      const region =
+        (wallet.routingRegionCode as SupportedRegion | null) ??
+        capabilities.region ??
+        null;
+      const provider = wallet.routingProvider ?? capabilities.provider ?? null;
+      const railType =
+        wallet.accountNumber && wallet.routingNumber
+          ? 'ACH'
+          : wallet.accountNumber
+            ? 'VIRTUAL_ACCOUNT'
+            : 'INTERNAL_ONLY';
+      const supportsExternalRails =
+        (region === SupportedRegion.NG && wallet.currency === Currency.NGN) ||
+        (region === SupportedRegion.US && wallet.currency === Currency.USD);
+
+      return {
+        walletId: wallet.id,
+        currency: wallet.currency,
+        provider,
+        region,
+        railType,
+        balance: wallet.balance,
+        accountNumber: wallet.accountNumber,
+        routingNumber: wallet.routingNumber,
+        accountName: wallet.accountName,
+        bankName: wallet.bankName,
+        sortCode: wallet.sortCode,
+        receiveEnabled: wallet.receiveEnabled,
+        transferEnabled: wallet.transferEnabled,
+        externalReceiveEnabled: Boolean(
+          supportsExternalRails && wallet.accountNumber && wallet.receiveEnabled,
+        ),
+        externalTransferEnabled: Boolean(
+          supportsExternalRails && capabilities.canTransfer,
+        ),
+        providerCustomerId: wallet.providerCustomerId,
+        providerAccountId: wallet.providerAccountId,
+        providerVirtualAccountId: wallet.providerVirtualAccountId,
+        providerReference: wallet.providerReference,
+        providerMetadata: wallet.providerMetadata,
+      };
+    });
+  }
+
+  private buildAccountRailSummary(walletRails: WalletRailDetails[]) {
+    const primary =
+      walletRails.find((wallet) => wallet.externalReceiveEnabled) ??
+      walletRails.find((wallet) => wallet.accountNumber) ??
+      null;
+    const byCurrency: Partial<Record<Currency, WalletRailDetails>> = {};
+
+    for (const wallet of walletRails) {
+      byCurrency[wallet.currency] = wallet;
+    }
+
+    return {
+      primary,
+      byCurrency,
+    };
+  }
+
+  private buildMobileKycIdentity(
+    userKyc: UserKyc | null | undefined,
+    address: KycAddressSnapshot,
+  ) {
+    return {
+      nin: userKyc?.identityData?.nin ?? null,
+      bvn: userKyc?.identityData?.bvn ?? null,
+      ssn: userKyc?.identityData?.ssn ?? null,
+      approvedIdentityType: userKyc?.identityData?.approvedIdentityType ?? null,
+      approvedIdentityValue: userKyc?.identityData?.approvedIdentityValue ?? null,
+      addressLine1: address.addressLine1,
+      addressLine2: address.addressLine2,
+      city: address.city,
+      state: address.stateOrRegion,
+      stateOrRegion: address.stateOrRegion,
+      postalCode: address.postalCode,
+      country: address.country,
+      countryCode: address.countryCode,
+      isAtAddress: Boolean(address.addressLine1),
+      metadata: userKyc?.identityData?.metadata ?? null,
+    };
+  }
+
+  private serializeKycDocuments(documents: Array<any>) {
+    return documents.map((document) => ({
+      id: document.id,
+      stage: document.stage,
+      category: this.getDocumentCategory(document),
+      documentType: document.documentType,
+      originalFileName: document.originalFileName,
+      storedFileName: document.storedFileName,
+      mimeType: document.mimeType,
+      sizeBytes: document.sizeBytes,
+      storage: document.storage,
+      fileUrl: document.fileUrl,
+      uploadedViaBackend: document.uploadedViaBackend,
+      metadata: document.metadata,
+      createdAt:
+        typeof document.createdAt?.toISOString === 'function'
+          ? document.createdAt.toISOString()
+          : document.createdAt,
+    }));
+  }
+
+  private serializeKycUploads(documents: Array<any>) {
+    return documents
+      .map((document) => {
+        const category = this.getDocumentCategory(document);
+        if (!category) {
+          return null;
+        }
+
+        return {
+          id: document.id,
+          category,
+          uri: document.fileUrl,
+          remoteUrl: document.fileUrl,
+          fileName:
+            document.originalFileName ??
+            document.storedFileName ??
+            `${category.toLowerCase()}.jpg`,
+          mimeType: document.mimeType ?? 'application/octet-stream',
+          createdAt:
+            typeof document.createdAt?.toISOString === 'function'
+              ? document.createdAt.toISOString()
+              : document.createdAt,
+        };
+      })
+      .filter((document): document is NonNullable<typeof document> => Boolean(document));
+  }
+
+  private getDocumentCategory(document: any) {
+    const explicitCategory = this.userPolicy
+      .normalizeOptionalString(document?.metadata?.category)
+      ?.toUpperCase();
+    if (explicitCategory) {
+      return explicitCategory;
+    }
+
+    if (document.stage === KycDocumentStage.IDENTITY) {
+      return 'GOVERNMENT_ID_IMAGE';
+    }
+
+    if (document.stage === KycDocumentStage.ADDRESS) {
+      return 'PROOF_OF_ADDRESS_IMAGE';
+    }
+
+    if (document.stage === KycDocumentStage.LIVENESS) {
+      return 'SELFIE_IMAGE';
+    }
+
+    return null;
+  }
+
+  private isGovernmentIdSectionComplete(
+    region: SupportedRegion | null,
+    userKyc: UserKyc | null | undefined,
+    documents: Array<any>,
+  ) {
+    const hasIdentityDocument = documents.some(
+      (document) =>
+        document.stage === KycDocumentStage.IDENTITY ||
+        this.getDocumentCategory(document) === 'GOVERNMENT_ID_IMAGE',
+    );
+
+    if (region === SupportedRegion.NG) {
+      return Boolean(userKyc?.identityData?.nin && userKyc?.identityData?.bvn) &&
+        hasIdentityDocument;
+    }
+
+    if (region === SupportedRegion.US) {
+      return Boolean(
+        userKyc?.identityData?.ssn ||
+          (userKyc?.identityData?.approvedIdentityType &&
+            userKyc?.identityData?.approvedIdentityValue),
+      ) && hasIdentityDocument;
+    }
+
+    return false;
+  }
+
+  private isAddressSectionComplete(
+    address: KycAddressSnapshot,
+    documents: Array<any>,
+  ) {
+    const hasAddressDocument = documents.some(
+      (document) =>
+        document.stage === KycDocumentStage.ADDRESS ||
+        this.getDocumentCategory(document) === 'PROOF_OF_ADDRESS_IMAGE',
+    );
+
+    return Boolean(
+      address.addressLine1 &&
+        address.city &&
+        address.stateOrRegion &&
+        address.country &&
+        address.countryCode &&
+        hasAddressDocument,
+    );
+  }
+
+  private isLivenessSectionComplete(
+    userKyc: UserKyc | null | undefined,
+    documents: Array<any>,
+  ) {
+    const hasLivenessDocument = documents.some(
+      (document) =>
+        document.stage === KycDocumentStage.LIVENESS ||
+        this.getDocumentCategory(document) === 'SELFIE_IMAGE',
+    );
+
+    return Boolean(userKyc?.livenessData?.completed || hasLivenessDocument);
+  }
+
+  private getKycRejectionReason(user: User, userKyc?: UserKyc | null) {
+    const providerResponse = userKyc?.providerResponse ?? {};
+    const rejectionReason =
+      this.userPolicy.normalizeOptionalString(providerResponse?.rejectionReason) ??
+      this.userPolicy.normalizeOptionalString(providerResponse?.reason) ??
+      null;
+
+    if (rejectionReason) {
+      return rejectionReason;
+    }
+
+    const rawStatus = userKyc?.status ?? user.kycStatus;
+    if (rawStatus === KycStatus.REJECTED) {
+      return userKyc?.blockedReason ?? API_MESSAGES.KYC_REJECTED;
+    }
+
+    return null;
+  }
+
+  private resolveDocumentStageAndType(uploadKycDocumentsDto: UploadKycDocumentsDto) {
+    const category = this.userPolicy
+      .normalizeOptionalString(uploadKycDocumentsDto.category)
+      ?.toUpperCase();
+
+    if (category === 'GOVERNMENT_ID_IMAGE') {
+      return {
+        stage: KycDocumentStage.IDENTITY,
+        documentType:
+          this.userPolicy.normalizeOptionalString(
+            uploadKycDocumentsDto.documentType,
+          ) ?? 'GOVERNMENT_ID',
+        category,
+      };
+    }
+
+    if (category === 'PROOF_OF_ADDRESS_IMAGE') {
+      return {
+        stage: KycDocumentStage.ADDRESS,
+        documentType:
+          this.userPolicy.normalizeOptionalString(
+            uploadKycDocumentsDto.documentType,
+          ) ?? 'PROOF_OF_ADDRESS',
+        category,
+      };
+    }
+
+    if (category === 'SELFIE_IMAGE') {
+      return {
+        stage: KycDocumentStage.LIVENESS,
+        documentType:
+          this.userPolicy.normalizeOptionalString(
+            uploadKycDocumentsDto.documentType,
+          ) ?? 'SELFIE',
+        category,
+      };
+    }
+
+    return {
+      stage: uploadKycDocumentsDto.stage ?? KycDocumentStage.SUPPORTING,
+      documentType:
+        this.userPolicy.normalizeOptionalString(
+          uploadKycDocumentsDto.documentType,
+        ) ?? null,
+      category: category ?? 'SUPPORTING_DOCUMENT',
+    };
   }
 }

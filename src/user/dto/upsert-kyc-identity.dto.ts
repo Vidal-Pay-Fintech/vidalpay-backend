@@ -24,4 +24,12 @@ export class UpsertKycIdentityDto {
   @IsOptional()
   @IsObject()
   metadata?: Record<string, any>;
+
+  @IsOptional()
+  @IsString()
+  governmentIdDocumentId?: string;
+
+  @IsOptional()
+  @IsString()
+  governmentIdDocumentUrl?: string;
 }

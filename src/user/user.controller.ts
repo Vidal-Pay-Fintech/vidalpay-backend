@@ -7,7 +7,7 @@ import {
   UploadedFiles,
   UseInterceptors,
 } from '@nestjs/common';
-import { FilesInterceptor } from '@nestjs/platform-express';
+import { AnyFilesInterceptor } from '@nestjs/platform-express';
 import { ApiTags } from '@nestjs/swagger';
 import { ActiveUser } from 'src/iam/decorators/active-user.decorator';
 import { ActiveUserData } from 'src/iam/interfaces/active-user-data-interfaces';
@@ -68,7 +68,7 @@ export class UserController {
   }
 
   @Post('kyc/documents')
-  @UseInterceptors(FilesInterceptor('files', 5, buildKycUploadOptions()))
+  @UseInterceptors(AnyFilesInterceptor(buildKycUploadOptions()))
   saveKycDocuments(
     @ActiveUser() user: ActiveUserData,
     @UploadedFiles() files: Array<any>,

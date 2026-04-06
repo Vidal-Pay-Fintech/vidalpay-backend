@@ -1,4 +1,4 @@
-import { IsOptional, IsString, MinLength } from 'class-validator';
+import { IsBoolean, IsOptional, IsString, MinLength } from 'class-validator';
 
 export class UpsertKycAddressDto {
   @IsString()
@@ -13,9 +13,15 @@ export class UpsertKycAddressDto {
   @MinLength(2)
   city: string;
 
+  @IsOptional()
   @IsString()
   @MinLength(2)
-  stateOrRegion: string;
+  stateOrRegion?: string;
+
+  @IsOptional()
+  @IsString()
+  @MinLength(2)
+  state?: string;
 
   @IsOptional()
   @IsString()
@@ -25,7 +31,20 @@ export class UpsertKycAddressDto {
   @MinLength(2)
   country: string;
 
+  @IsOptional()
   @IsString()
   @MinLength(2)
-  countryCode: string;
+  countryCode?: string;
+
+  @IsOptional()
+  @IsBoolean()
+  isAtAddress?: boolean;
+
+  @IsOptional()
+  @IsString()
+  proofOfAddressDocumentId?: string;
+
+  @IsOptional()
+  @IsString()
+  proofOfAddressDocumentUrl?: string;
 }

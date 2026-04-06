@@ -7,6 +7,8 @@ class ApiMessages {
   public PASSWORD_RESET_SUCCESSFUL = 'Password Reset Successfully';
   public RESET_PASSWORD_LINK_SENT =
     'Reset Password Link Sent Successfully. Please check your email';
+  public RESET_PASSWORD_LINK_FAILED =
+    'We could not deliver the password reset email. Please try again later.';
   public INVALID_TOKEN = 'Invalid Token Provided';
   public ACCOUNT_CREATED_SUCCESSFULLY = `Account created successfully. Welcome to ${CONFIG_VARIABLES.APP_NAME}`;
   public PIN_ALREADY_EXISTS = 'Transaction Pin already exists';
@@ -14,6 +16,8 @@ class ApiMessages {
   public WALLET_EXISTS = 'Wallet already exists';
   public PAYMENT_LOG_NOTFOUND = "Payment with the reference doesn't exists ";
   public OTP_SENT = `Please enter the OTP sent to your email address`;
+  public OTP_SEND_FAILED =
+    'We could not deliver the verification code. Please try again later.';
   public INSUFFICIENT_BALANCE = `Insuffiucient Balance. Please top-up your wallet and try again.`;
   public PAYMENT_ALREADY_VERIFIED = 'Payment already verified and credited';
   public PAYMENT_NOT_COMPLETED = 'Payment not completed';
@@ -180,6 +184,10 @@ class ApiMessages {
     'No supported KYC provider is available for the resolved region.';
   public TRANSFER_BLOCKED_PENDING_KYC =
     'Transfers are blocked until your KYC status is VERIFIED.';
+  public EXTERNAL_TRANSFER_UNAVAILABLE =
+    'External transfers are not available for your current region or provider.';
+  public PRODUCT_NOT_AVAILABLE_FOR_REGION =
+    'This product is not available for your current region.';
 }
 
 export const API_MESSAGES = new ApiMessages();

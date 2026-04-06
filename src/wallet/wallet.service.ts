@@ -23,6 +23,18 @@ import { UTILITIES } from 'src/utils/helperFuncs';
 import { UserService } from 'src/user/user.service';
 import { EntityManager } from 'typeorm';
 import { Wallet } from 'src/database/entities/wallet.entity';
+import { ProviderOperationsService } from 'src/integrations/provider/provider-operations.service';
+import { ExternalTransferDto } from './dto/external-transfer.dto';
+import { AirtimePurchaseDto } from './dto/airtime-purchase.dto';
+import { DataPurchaseDto } from './dto/data-purchase.dto';
+import { UtilityPaymentDto } from './dto/utility-payment.dto';
+import {
+  ProviderOperationStatus,
+  ProviderOperationType,
+} from 'src/common/enum/provider-operation.enum';
+import { SupportedRegion } from 'src/common/enum/supported-region.enum';
+import { API_MESSAGES } from 'src/utils/apiMessages';
+import { ProviderOperationRepository } from 'src/database/repositories/provider-operation.repository';
 
 @Injectable()
 export class WalletService {
@@ -36,6 +48,8 @@ export class WalletService {
     private readonly hashingService: HashingService,
     private readonly beneficiaryRepository: BeneficiaryRepository,
     private readonly userService: UserService,
+    private readonly providerOperationsService: ProviderOperationsService,
+    private readonly providerOperationRepository: ProviderOperationRepository,
   ) {}
   create(createWalletDto: CreateWalletDto) {
     return 'This action adds a new wallet';
@@ -386,6 +400,93 @@ export class WalletService {
     }
     return walletInfo;
   }
+
+  async externalTransfer(externalTransferDto: ExternalTransferDto, userId: string) {
+    const capabilities = await this.userService.ensureCanTransfer(userId);
+
+    if (!capabilities.region) {
+      throw new PreconditionFailedException(
+        capabilities.blockedReason ?? API_MESSAGES.KYC_REGION_REQUIRED,
+      );
+    }
+    const region = capabilities.region;
+
+    const user = await this.userRepository.getUserById(userId);
+    const wallet = await this.checkWalletBalance(
+      userId,
+      externalTransferDto.currency,
+      externalTransferDto.amount,
+    );
+
+    return this.executeDebitedProviderOperation({
+      userId,
+      amount: externalTransferDto.amount,
+      currency: externalTransferDto.currency,
+      tag: TagType.WITHDRAWAL,
+      info: `External transfer to ${externalTransferDto.destinationAccountNumber}`,
+      description:
+        externalTransferDto.narration?.trim() ||
+        `External transfer to ${externalTransferDto.destinationAccountNumber}`,
+      operationLabel: 'External transfer',
+      createOperation: () =>
+        this.providerOperationsService.createExternalTransfer({
+          user,
+          region,
+          wallet,
+          amount: externalTransferDto.amount,
+          currency: externalTransferDto.currency,
+          destinationAccountNumber: externalTransferDto.destinationAccountNumber,
+          destinationAccountName:
+            externalTransferDto.destinationAccountName ?? null,
+          destinationBankName: externalTransferDto.destinationBankName ?? null,
+          destinationRoutingNumber:
+            externalTransferDto.destinationRoutingNumber ?? null,
+          narration: externalTransferDto.narration ?? null,
+          metadata: externalTransferDto.metadata ?? null,
+        }),
+    });
+  }
+
+  async purchaseAirtime(airtimePurchaseDto: AirtimePurchaseDto, userId: string) {
+    return this.processRegionalProductOperation(
+      ProviderOperationType.AIRTIME,
+      airtimePurchaseDto.currency,
+      airtimePurchaseDto.amount,
+      userId,
+      {
+        phoneNumber: airtimePurchaseDto.phoneNumber,
+        metadata: airtimePurchaseDto.metadata ?? null,
+      },
+    );
+  }
+
+  async purchaseData(dataPurchaseDto: DataPurchaseDto, userId: string) {
+    return this.processRegionalProductOperation(
+      ProviderOperationType.DATA,
+      dataPurchaseDto.currency,
+      dataPurchaseDto.amount,
+      userId,
+      {
+        phoneNumber: dataPurchaseDto.phoneNumber,
+        serviceCode: dataPurchaseDto.serviceCode,
+        metadata: dataPurchaseDto.metadata ?? null,
+      },
+    );
+  }
+
+  async payUtility(utilityPaymentDto: UtilityPaymentDto, userId: string) {
+    return this.processRegionalProductOperation(
+      ProviderOperationType.UTILITY,
+      utilityPaymentDto.currency,
+      utilityPaymentDto.amount,
+      userId,
+      {
+        serviceCode: utilityPaymentDto.serviceCode,
+        customerReference: utilityPaymentDto.customerReference,
+        metadata: utilityPaymentDto.metadata ?? null,
+      },
+    );
+  }
   async getUserWalletByCurrencyandUserId(userId: string, currency: Currency) {
     const res = await this.walletRepository.findOne({
       where: { userId, currency },
@@ -412,5 +513,243 @@ export class WalletService {
 
   remove(id: number) {
     return `This action removes a #${id} wallet`;
+  }
+
+  private async processRegionalProductOperation(
+    operationType:
+      | ProviderOperationType.AIRTIME
+      | ProviderOperationType.DATA
+      | ProviderOperationType.UTILITY,
+    currency: Currency,
+    amount: number,
+    userId: string,
+    payload: {
+      phoneNumber?: string | null;
+      serviceCode?: string | null;
+      customerReference?: string | null;
+      metadata?: Record<string, any> | null;
+    },
+  ) {
+    const accountOverview = await this.userService.getAccountOverview(userId);
+    const region = accountOverview.region;
+    const productAvailability = accountOverview.productAvailability;
+    const user = await this.userRepository.getUserById(userId);
+    const wallet = await this.checkWalletBalance(userId, currency, amount);
+
+    if (!region) {
+      throw new BadRequestException(API_MESSAGES.KYC_REGION_REQUIRED);
+    }
+
+    if (
+      (operationType === ProviderOperationType.AIRTIME &&
+        !productAvailability.airtime) ||
+      (operationType === ProviderOperationType.DATA && !productAvailability.data) ||
+      (operationType === ProviderOperationType.UTILITY &&
+        !productAvailability.utilities)
+    ) {
+      throw new BadRequestException(API_MESSAGES.PRODUCT_NOT_AVAILABLE_FOR_REGION);
+    }
+
+    const operationLabel =
+      operationType === ProviderOperationType.AIRTIME
+        ? 'Airtime purchase'
+        : operationType === ProviderOperationType.DATA
+          ? 'Data purchase'
+          : 'Utility payment';
+
+    const operationInfo =
+      operationType === ProviderOperationType.AIRTIME
+        ? `Airtime purchase for ${payload.phoneNumber ?? 'line'}`
+        : operationType === ProviderOperationType.DATA
+          ? `Data purchase for ${payload.phoneNumber ?? 'line'}`
+          : `Utility payment for ${payload.customerReference ?? 'account'}`;
+
+    const operationDescription =
+      operationType === ProviderOperationType.AIRTIME
+        ? `Airtime purchase (${payload.phoneNumber ?? 'line'})`
+        : operationType === ProviderOperationType.DATA
+          ? `Data purchase (${payload.serviceCode ?? 'bundle'})`
+          : `Utility payment (${payload.serviceCode ?? 'service'})`;
+
+    return this.executeDebitedProviderOperation({
+      userId,
+      amount,
+      currency,
+      tag: TagType.BILLS,
+      info: operationInfo,
+      description: operationDescription,
+      operationLabel,
+      createOperation: () =>
+        this.providerOperationsService.createRegionalProductOperation({
+          operationType,
+          user,
+          region,
+          payload: {
+            user,
+            wallet,
+            amount,
+            currency,
+            phoneNumber: payload.phoneNumber ?? null,
+            serviceCode: payload.serviceCode ?? null,
+            customerReference: payload.customerReference ?? null,
+            metadata: payload.metadata ?? null,
+          },
+        }),
+    });
+  }
+
+  private async executeDebitedProviderOperation(input: {
+    userId: string;
+    amount: number;
+    currency: Currency;
+    tag: TagType;
+    info: string;
+    description: string;
+    operationLabel: string;
+    createOperation: () => Promise<{
+      provider: any;
+      region: SupportedRegion;
+      status: ProviderOperationStatus;
+      reference: string;
+      externalReference?: string | null;
+    }>;
+  }) {
+    let walletDebitTransaction: any;
+    let walletDebitReversed = false;
+
+    try {
+      walletDebitTransaction =
+        await this.journalService.processWalletDebitJournal({
+          userId: input.userId,
+          amount: input.amount,
+          info: input.info,
+          description: input.description,
+          currency: input.currency,
+          tag: input.tag,
+        });
+
+      const providerOperation = await input.createOperation();
+
+      await this.attachOperationLedgerMetadata(providerOperation.reference, {
+        walletDebitTransactionReference:
+          walletDebitTransaction?.reference ?? null,
+        walletDebitTransactionId: walletDebitTransaction?.id ?? null,
+        walletDebitedAt: new Date().toISOString(),
+      });
+
+      if (
+        providerOperation.status === ProviderOperationStatus.FAILED ||
+        providerOperation.status === ProviderOperationStatus.REVERSED
+      ) {
+        const reversalTransaction = await this.reverseDebitedProviderOperation({
+          userId: input.userId,
+          amount: input.amount,
+          currency: input.currency,
+          tag: input.tag,
+          info: `Reversal for ${input.info}`,
+          description: `REV-${input.description}`,
+        });
+
+        await this.attachOperationLedgerMetadata(providerOperation.reference, {
+          walletDebitReversalReference: reversalTransaction?.reference ?? null,
+          walletDebitReversalId: reversalTransaction?.id ?? null,
+          walletReversedAt: new Date().toISOString(),
+        });
+        walletDebitReversed = true;
+
+        throw new ConflictException(
+          `${input.operationLabel} could not be initiated. Wallet funds have been reversed.`,
+        );
+      }
+
+      return {
+        ...providerOperation,
+        walletDebited: true,
+        walletTransactionReference: walletDebitTransaction?.reference ?? null,
+      };
+    } catch (error) {
+      if (walletDebitTransaction && !walletDebitReversed) {
+        const reversalTransaction = await this.reverseDebitedProviderOperation({
+          userId: input.userId,
+          amount: input.amount,
+          currency: input.currency,
+          tag: input.tag,
+          info: `Reversal for ${input.info}`,
+          description: `REV-${input.description}`,
+        });
+
+        await this.attachOperationLedgerMetadata(
+          this.extractProviderReference(error),
+          {
+            walletDebitReversalReference: reversalTransaction?.reference ?? null,
+            walletDebitReversalId: reversalTransaction?.id ?? null,
+            walletReversedAt: new Date().toISOString(),
+            walletReversalReason: error?.message ?? 'provider-initiation-failed',
+          },
+        );
+      }
+
+      throw error;
+    }
+  }
+
+  private async reverseDebitedProviderOperation(input: {
+    userId: string;
+    amount: number;
+    currency: Currency;
+    tag: TagType;
+    info: string;
+    description: string;
+  }) {
+    return this.journalService.processWalletCreditJournal({
+      userId: input.userId,
+      amount: input.amount,
+      info: input.info,
+      description: input.description,
+      currency: input.currency,
+      tag: input.tag,
+      isReversal: true,
+    });
+  }
+
+  private async attachOperationLedgerMetadata(
+    operationReference: string | null | undefined,
+    metadataPatch: Record<string, any>,
+  ) {
+    if (!operationReference) {
+      return;
+    }
+
+    try {
+      const operation =
+        await this.providerOperationRepository.findByReference(operationReference);
+      if (!operation) {
+        return;
+      }
+
+      await this.providerOperationRepository.findOneAndUpdate(operation.id, {
+        metadata: {
+          ...(operation.metadata ?? {}),
+          ...metadataPatch,
+        },
+      });
+    } catch (error) {
+      this.logger.warn(
+        `Unable to annotate provider operation ${operationReference}: ${error.message}`,
+      );
+    }
+  }
+
+  private extractProviderReference(error: unknown): string | null {
+    if (!error || typeof error !== 'object') {
+      return null;
+    }
+
+    const maybeError = error as {
+      response?: { reference?: string | null };
+      reference?: string | null;
+    };
+
+    return maybeError.reference ?? maybeError.response?.reference ?? null;
   }
 }

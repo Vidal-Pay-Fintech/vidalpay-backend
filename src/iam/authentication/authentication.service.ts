@@ -55,6 +55,7 @@ import { ResetPasswordAfterOtpDto } from './dto/reset-password-afterotp-verifica
 import { PageOptionsDto } from 'src/common/pagination/pageOptionsDto.dto';
 import { UserKycRepository } from 'src/database/repositories/user-kyc.repository';
 import { KycStatus } from 'src/common/enum/kyc-status.enum';
+import { MailDeliveryResult } from 'src/mail/email.service';
 
 @Injectable()
 export class AuthenticationService {
@@ -227,7 +228,12 @@ export class AuthenticationService {
     if (user.isVerified) {
       throw new BadRequestException(API_MESSAGES.USER_ALREADY_VERIFIED);
     }
-    await this.safeSendEmailVerificationOtp(user, 'resend-otp');
+    const delivery = await this.sendEmailVerificationOtp(user);
+    this.ensureMailDelivered(
+      delivery,
+      'verification code',
+      API_MESSAGES.OTP_SEND_FAILED,
+    );
     return API_MESSAGES.OTP_SENT;
   }
 
@@ -393,8 +399,21 @@ export class AuthenticationService {
       resetToken,
       resetTokenExpiry: new Date(Date.now() + 3600000), // Token expires in 1 hour
     });
-    const passwordResetLink = `${CONFIG_VARIABLES.APP_URL}/change-password?token=${resetToken}&email=${resetPasswordLinkDto.email}`;
-    await this.mailService.sendResetEmailLink(user.id, passwordResetLink);
+    const delivery = await this.mailService.sendResetEmailLink(
+      user.id,
+      this.buildPasswordResetLink(resetToken, resetPasswordLinkDto.email),
+    );
+    if (!delivery.delivered) {
+      await this.userRepository.findOneAndUpdate(user.id, {
+        resetToken: null as any,
+        resetTokenExpiry: null as any,
+      });
+    }
+    this.ensureMailDelivered(
+      delivery,
+      'password reset link',
+      API_MESSAGES.RESET_PASSWORD_LINK_FAILED,
+    );
     return API_MESSAGES.RESET_PASSWORD_LINK_SENT;
   }
 
@@ -443,22 +462,32 @@ export class AuthenticationService {
     const tokenExpiration = new Date();
     tokenExpiration.setHours(tokenExpiration.getHours() + 24);
 
-    await this.tokenService.create({
+    const tokenRecord = await this.tokenService.create({
       token: verificationToken,
       expiration: tokenExpiration,
       type: TokenType.VERIFICATION,
       user,
     });
 
-    return await this.mailService.sendEmailVerificationCode(
+    const delivery = await this.mailService.sendEmailVerificationCode(
       user.id,
       verificationToken,
     );
+    if (!delivery.delivered) {
+      await this.tokenService.delete(tokenRecord.id);
+    }
+
+    return delivery;
   }
 
   private async safeSendEmailVerificationOtp(user: User, context: string) {
     try {
-      await this.sendEmailVerificationOtp(user);
+      const delivery = await this.sendEmailVerificationOtp(user);
+      if (!delivery.delivered) {
+        this.logger.warn(
+          `[AUTH] ${context} email verification OTP was not delivered for user ${user.id}: ${delivery.reason ?? 'Unknown reason'}`,
+        );
+      }
     } catch (error) {
       this.logger.error(
         `[AUTH] ${context} email verification OTP failed for user ${user.id}: ${error.message}`,
@@ -898,16 +927,24 @@ export class AuthenticationService {
     const tokenExpiration = new Date();
     tokenExpiration.setHours(tokenExpiration.getHours() + 1);
 
-    await this.tokenService.create({
+    const tokenRecord = await this.tokenService.create({
       token: verificationToken,
       expiration: tokenExpiration,
       type: TokenType.TRANSACTION_PIN_RESET,
       user,
     });
 
-    await this.mailService.sendResetTransactionPinCode(
+    const delivery = await this.mailService.sendResetTransactionPinCode(
       user.id,
       verificationToken,
+    );
+    if (!delivery.delivered) {
+      await this.tokenService.delete(tokenRecord.id);
+    }
+    this.ensureMailDelivered(
+      delivery,
+      'transaction pin reset code',
+      API_MESSAGES.OTP_SEND_FAILED,
     );
     return API_MESSAGES.OTP_SENT;
   }
@@ -945,7 +982,7 @@ export class AuthenticationService {
     tokenExpiration.setHours(tokenExpiration.getHours() + 1); // 1 hour expiry
 
     // Save OTP token for password reset
-    await this.tokenService.create({
+    const tokenRecord = await this.tokenService.create({
       token: verificationToken,
       expiration: tokenExpiration,
       type: TokenType.PASSWORD_RESET,
@@ -953,7 +990,18 @@ export class AuthenticationService {
     });
 
     // Send OTP via email
-    await this.mailService.sendResetPasswordOTP(user.id, verificationToken);
+    const delivery = await this.mailService.sendResetPasswordOTP(
+      user.id,
+      verificationToken,
+    );
+    if (!delivery.delivered) {
+      await this.tokenService.delete(tokenRecord.id);
+    }
+    this.ensureMailDelivered(
+      delivery,
+      'password reset OTP',
+      API_MESSAGES.OTP_SEND_FAILED,
+    );
 
     return API_MESSAGES.OTP_SENT;
   }
@@ -1080,6 +1128,32 @@ export class AuthenticationService {
   async getUserById(userId: string) {
     const res = await this.userRepository.getUserById(userId);
     return res;
+  }
+
+  private ensureMailDelivered(
+    delivery: MailDeliveryResult,
+    purpose: string,
+    fallbackMessage: string,
+  ) {
+    if (delivery.delivered) {
+      return;
+    }
+
+    this.logger.warn(
+      `[AUTH] ${purpose} delivery failed: ${delivery.reason ?? 'Unknown reason'}`,
+    );
+    throw new ServiceUnavailableException(
+      delivery.reason ? `${fallbackMessage} ${delivery.reason}` : fallbackMessage,
+    );
+  }
+
+  private buildPasswordResetLink(token: string, email: string) {
+    const baseUrl =
+      process.env.FRONTEND_URL ??
+      process.env.APP_URL ??
+      CONFIG_VARIABLES.APP_URL;
+
+    return `${baseUrl}/change-password?token=${token}&email=${email}`;
   }
 
   async findAllUsers(pageOptionsDto: PageOptionsDto) {

@@ -1,0 +1,25 @@
+export enum ProviderOperationType {
+  RAIL_PROVISIONING = 'RAIL_PROVISIONING',
+  EXTERNAL_TRANSFER = 'EXTERNAL_TRANSFER',
+  AIRTIME = 'AIRTIME',
+  DATA = 'DATA',
+  UTILITY = 'UTILITY',
+  LOAN = 'LOAN',
+  TAX_FILING = 'TAX_FILING',
+}
+
+export enum ProviderOperationStatus {
+  PENDING = 'PENDING',
+  PROCESSING = 'PROCESSING',
+  COMPLETED = 'COMPLETED',
+  FAILED = 'FAILED',
+  REVERSED = 'REVERSED',
+  UNDER_REVIEW = 'UNDER_REVIEW',
+}
+
+export enum ProviderWebhookEventStatus {
+  RECEIVED = 'RECEIVED',
+  PROCESSED = 'PROCESSED',
+  FAILED = 'FAILED',
+  IGNORED = 'IGNORED',
+}
