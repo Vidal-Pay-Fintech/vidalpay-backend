@@ -82,7 +82,7 @@ export class AuthenticationService {
   ) {}
 
   async signUp(signUpDto: SignUpDto) {
-    const { firstName, lastName, password, phoneNumber, email } = signUpDto;
+    const { firstName, lastName, password, phoneNumber, email, pin } = signUpDto;
     this.logger.log(`[AUTH] signup start for ${email}`);
 
     const maxInternalAttempts = 3;
@@ -99,8 +99,13 @@ export class AuthenticationService {
             manager,
           );
 
-          signupStage = 'transaction:hash-password';
-          const hashedPassword = await this.hashingService.hash(password);
+            signupStage = 'transaction:hash-password';
+            const hashedPassword = await this.hashingService.hash(password);
+
+            signupStage = 'transaction:hash-pin';
+            const hashedPin = pin
+              ? await this.hashingService.hash(pin)
+              : undefined;
 
           signupStage = 'transaction:generate-referral-code';
           const referralCode = await this.generateUniqueReferralCode(manager);
@@ -114,11 +119,12 @@ export class AuthenticationService {
               ...signUpDto,
               firstName,
               lastName,
-              referralCode,
-              password: hashedPassword,
-              tagId,
-              email,
-              phoneNumber,
+                referralCode,
+                password: hashedPassword,
+                pin: hashedPin,
+                tagId,
+                email,
+                phoneNumber,
               kycStatus: KycStatus.NOT_STARTED,
               kycProvider: null,
               kycSubmittedAt: null,
@@ -149,7 +155,7 @@ export class AuthenticationService {
         signupStage = 'post-transaction:send-verification-otp';
         await this.safeSendEmailVerificationOtp(newUser, 'signup');
 
-        return { ...tokens, newUser };
+          return { ...tokens, newUser: this.sanitizeUserForClient(newUser) };
       } catch (error) {
         this.logSignupFailure(error, email, phoneNumber, signupStage, attempt);
 
@@ -188,6 +194,11 @@ export class AuthenticationService {
   }
 
   async createTransactionPin(pin: string, userId: string) {
+    const user = await this.userRepository.findUserById(userId);
+    if (user.pin?.trim()) {
+      throw new ConflictException(API_MESSAGES.PIN_ALREADY_EXISTS);
+    }
+
     const hashedPin = await this.hashingService.hash(pin);
     await this.userRepository.findOneAndUpdate(userId, {
       pin: hashedPin,
@@ -802,6 +813,9 @@ export class AuthenticationService {
 
   public async validateTransactionPin(userId: string, pin: string) {
     const user = await this.userRepository.findUserById(userId);
+    if (!user.pin?.trim()) {
+      throw new PreconditionFailedException(API_MESSAGES.PIN_NOT_SET);
+    }
     const isPinValid = await this.hashingService.compare(pin, user.pin);
 
     if (!isPinValid) {
@@ -922,6 +936,9 @@ export class AuthenticationService {
 
   public async requestTransactionPinReset(userId: string) {
     const user = await this.userRepository.findUserById(userId);
+    if (!user.pin?.trim()) {
+      throw new PreconditionFailedException(API_MESSAGES.PIN_NOT_SET);
+    }
 
     const verificationToken = this.generateSixDigitToken();
     const tokenExpiration = new Date();
@@ -961,6 +978,9 @@ export class AuthenticationService {
     });
     if (!user) {
       throw new NotFoundException('User not found');
+    }
+    if (!user.pin?.trim()) {
+      throw new PreconditionFailedException(API_MESSAGES.PIN_NOT_SET);
     }
 
     await this.userRepository.findOneAndUpdate(user.id, {
@@ -1127,7 +1147,16 @@ export class AuthenticationService {
   }
   async getUserById(userId: string) {
     const res = await this.userRepository.getUserById(userId);
-    return res;
+    return this.sanitizeUserForClient(res);
+  }
+
+  private sanitizeUserForClient(user: User) {
+    const sanitizedUser = { ...user } as Partial<User>;
+    delete sanitizedUser.password;
+    delete sanitizedUser.pin;
+    delete sanitizedUser.resetToken;
+    delete sanitizedUser.resetTokenExpiry;
+    return sanitizedUser;
   }
 
   private ensureMailDelivered(

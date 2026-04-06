@@ -39,6 +39,15 @@ export interface ExternalTransferPayload {
   metadata?: Record<string, any> | null;
 }
 
+export interface CardTopUpIntentPayload {
+  user: User;
+  wallet: Wallet;
+  amount: number;
+  currency: Currency;
+  redirectUrl?: string | null;
+  metadata?: Record<string, any> | null;
+}
+
 export interface ProviderProductPayload {
   user: User;
   wallet: Wallet;
@@ -58,6 +67,13 @@ export interface ProviderOperationExecution {
   externalReference?: string | null;
   responsePayload?: Record<string, any> | null;
   metadata?: Record<string, any> | null;
+}
+
+export interface ProviderCardTopUpIntentExecution
+  extends ProviderOperationExecution {
+  checkoutUrl: string | null;
+  redirectUrl: string | null;
+  expiresAt?: string | null;
 }
 
 export interface ProviderWebhookExecution {
@@ -82,6 +98,9 @@ export interface RegionalProviderAdapter {
   createExternalTransfer(
     payload: ExternalTransferPayload,
   ): Promise<ProviderOperationExecution>;
+  createCardTopUpIntent?(
+    payload: CardTopUpIntentPayload,
+  ): Promise<ProviderCardTopUpIntentExecution>;
   purchaseAirtime?(
     payload: ProviderProductPayload,
   ): Promise<ProviderOperationExecution>;

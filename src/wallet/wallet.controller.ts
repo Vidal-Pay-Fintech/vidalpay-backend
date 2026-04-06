@@ -19,6 +19,7 @@ import { ExternalTransferDto } from './dto/external-transfer.dto';
 import { AirtimePurchaseDto } from './dto/airtime-purchase.dto';
 import { DataPurchaseDto } from './dto/data-purchase.dto';
 import { UtilityPaymentDto } from './dto/utility-payment.dto';
+import { CreateCardTopUpIntentDto } from './dto/create-card-topup-intent.dto';
 
 @Controller('wallet')
 export class WalletController {
@@ -79,6 +80,17 @@ export class WalletController {
     @ActiveUser() user: ActiveUserData,
   ) {
     return this.walletService.payUtility(utilityPaymentDto, user.sub);
+  }
+
+  @Post('top-up/card')
+  createCardTopUpIntent(
+    @Body() createCardTopUpIntentDto: CreateCardTopUpIntentDto,
+    @ActiveUser() user: ActiveUserData,
+  ) {
+    return this.walletService.createCardTopUpIntent(
+      createCardTopUpIntentDto,
+      user.sub,
+    );
   }
 
   @Get()

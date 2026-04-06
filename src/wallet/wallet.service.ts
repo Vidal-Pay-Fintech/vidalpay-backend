@@ -35,6 +35,7 @@ import {
 import { SupportedRegion } from 'src/common/enum/supported-region.enum';
 import { API_MESSAGES } from 'src/utils/apiMessages';
 import { ProviderOperationRepository } from 'src/database/repositories/provider-operation.repository';
+import { CreateCardTopUpIntentDto } from './dto/create-card-topup-intent.dto';
 
 @Injectable()
 export class WalletService {
@@ -131,12 +132,7 @@ export class WalletService {
     const info = `Sent to @${recipientInfo.firstName} ${recipientInfo.lastName}`;
     const description = `Internal transfer from ${userInfo.firstName} ${userInfo.lastName} to ${recipientTag}`;
     try {
-      const user = await this.userRepository.findUserById(userId);
-      const isPinValid = await this.hashingService.compare(pin, user.pin);
-
-      if (!isPinValid) {
-        throw new PreconditionFailedException(`Invalid transaction pin`);
-      }
+      await this.assertTransactionPinAuthorized(userId, pin);
 
       userDebitRes = await this.journalService.processWalletDebitJournal({
         userId,
@@ -403,6 +399,7 @@ export class WalletService {
 
   async externalTransfer(externalTransferDto: ExternalTransferDto, userId: string) {
     const capabilities = await this.userService.ensureCanTransfer(userId);
+    await this.assertTransactionPinAuthorized(userId, externalTransferDto.pin);
 
     if (!capabilities.region) {
       throw new PreconditionFailedException(
@@ -455,6 +452,7 @@ export class WalletService {
       userId,
       {
         phoneNumber: airtimePurchaseDto.phoneNumber,
+        pin: airtimePurchaseDto.pin,
         metadata: airtimePurchaseDto.metadata ?? null,
       },
     );
@@ -468,6 +466,7 @@ export class WalletService {
       userId,
       {
         phoneNumber: dataPurchaseDto.phoneNumber,
+        pin: dataPurchaseDto.pin,
         serviceCode: dataPurchaseDto.serviceCode,
         metadata: dataPurchaseDto.metadata ?? null,
       },
@@ -483,10 +482,44 @@ export class WalletService {
       {
         serviceCode: utilityPaymentDto.serviceCode,
         customerReference: utilityPaymentDto.customerReference,
+        pin: utilityPaymentDto.pin,
         metadata: utilityPaymentDto.metadata ?? null,
       },
     );
   }
+
+  async createCardTopUpIntent(
+    createCardTopUpIntentDto: CreateCardTopUpIntentDto,
+    userId: string,
+  ) {
+    const accountOverview = await this.userService.getAccountOverview(userId);
+    const region = accountOverview.region;
+
+    if (!region) {
+      throw new BadRequestException(API_MESSAGES.KYC_REGION_REQUIRED);
+    }
+
+    if (!accountOverview.productAvailability.cardTopUp) {
+      throw new BadRequestException(API_MESSAGES.CARD_TOPUP_UNAVAILABLE);
+    }
+
+    const user = await this.userRepository.getUserById(userId);
+    const wallet = await this.getUserWalletByCurrencyandUserId(
+      userId,
+      createCardTopUpIntentDto.currency,
+    );
+
+    return this.providerOperationsService.createCardTopUpIntent({
+      user,
+      region,
+      wallet,
+      amount: createCardTopUpIntentDto.amount,
+      currency: createCardTopUpIntentDto.currency,
+      redirectUrl: createCardTopUpIntentDto.redirectUrl ?? null,
+      metadata: createCardTopUpIntentDto.metadata ?? null,
+    });
+  }
+
   async getUserWalletByCurrencyandUserId(userId: string, currency: Currency) {
     const res = await this.walletRepository.findOne({
       where: { userId, currency },
@@ -525,6 +558,7 @@ export class WalletService {
     userId: string,
     payload: {
       phoneNumber?: string | null;
+      pin: string;
       serviceCode?: string | null;
       customerReference?: string | null;
       metadata?: Record<string, any> | null;
@@ -534,6 +568,7 @@ export class WalletService {
     const region = accountOverview.region;
     const productAvailability = accountOverview.productAvailability;
     const user = await this.userRepository.getUserById(userId);
+    await this.assertTransactionPinAuthorized(userId, payload.pin);
     const wallet = await this.checkWalletBalance(userId, currency, amount);
 
     if (!region) {
@@ -751,5 +786,21 @@ export class WalletService {
     };
 
     return maybeError.reference ?? maybeError.response?.reference ?? null;
+  }
+
+  private async assertTransactionPinAuthorized(userId: string, pin: string) {
+    const user = await this.userRepository.findUserById(userId);
+    const storedPin = user.pin?.trim();
+
+    if (!storedPin) {
+      throw new PreconditionFailedException(API_MESSAGES.TRANSFER_PIN_REQUIRED);
+    }
+
+    const isPinValid = await this.hashingService.compare(pin, storedPin);
+    if (!isPinValid) {
+      throw new PreconditionFailedException(`Invalid transaction pin`);
+    }
+
+    return true;
   }
 }

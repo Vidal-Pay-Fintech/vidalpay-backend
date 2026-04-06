@@ -19,6 +19,10 @@ import { UpsertKycLivenessDto } from './dto/upsert-kyc-liveness.dto';
 import { UploadKycDocumentsDto } from './dto/upload-kyc-documents.dto';
 import { SubmitKycDto } from './dto/submit-kyc.dto';
 import { buildKycUploadOptions } from './kyc-upload.config';
+import { RequestEmailChangeDto } from './dto/request-email-change.dto';
+import { VerifyEmailChangeDto } from './dto/verify-email-change.dto';
+import { RequestPhoneChangeDto } from './dto/request-phone-change.dto';
+import { VerifyPhoneChangeDto } from './dto/verify-phone-change.dto';
 
 @ApiTags('User')
 @Controller('user')
@@ -36,6 +40,43 @@ export class UserController {
     @Body() updateProfileDto: UpdateProfileDto,
   ) {
     return this.userService.updateProfile(user.sub, updateProfileDto);
+  }
+
+  @Get('security')
+  getSecurity(@ActiveUser() user: ActiveUserData) {
+    return this.userService.getSecurityOverview(user.sub);
+  }
+
+  @Post('security/change-email/request')
+  requestEmailChange(
+    @ActiveUser() user: ActiveUserData,
+    @Body() requestEmailChangeDto: RequestEmailChangeDto,
+  ) {
+    return this.userService.requestEmailChange(user.sub, requestEmailChangeDto);
+  }
+
+  @Post('security/change-email/verify')
+  verifyEmailChange(
+    @ActiveUser() user: ActiveUserData,
+    @Body() verifyEmailChangeDto: VerifyEmailChangeDto,
+  ) {
+    return this.userService.verifyEmailChange(user.sub, verifyEmailChangeDto);
+  }
+
+  @Post('security/change-phone/request')
+  requestPhoneChange(
+    @ActiveUser() user: ActiveUserData,
+    @Body() requestPhoneChangeDto: RequestPhoneChangeDto,
+  ) {
+    return this.userService.requestPhoneChange(user.sub, requestPhoneChangeDto);
+  }
+
+  @Post('security/change-phone/verify')
+  verifyPhoneChange(
+    @ActiveUser() user: ActiveUserData,
+    @Body() verifyPhoneChangeDto: VerifyPhoneChangeDto,
+  ) {
+    return this.userService.verifyPhoneChange(user.sub, verifyPhoneChangeDto);
   }
 
   @Get('kyc')

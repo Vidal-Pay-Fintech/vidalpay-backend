@@ -5,6 +5,7 @@ import { ReconcileUserProfileKycColumns1743660000000 } from './migrations/174366
 import { ReconcileWalletAndKycSchema1743663600000 } from './migrations/1743663600000-ReconcileWalletAndKycSchema';
 import { AddProviderOperationsSchema1743912000000 } from './migrations/1743912000000-AddProviderOperationsSchema';
 import { AddProviderWebhookIdempotencyIndex1744000000000 } from './migrations/1744000000000-AddProviderWebhookIdempotencyIndex';
+import { AddSecuritySupportAndTopUpSchema1744070400000 } from './migrations/1744070400000-AddSecuritySupportAndTopUpSchema';
 
 const requiredEnv = [
   'MYSQL_HOST',
@@ -35,5 +36,6 @@ export default new DataSource({
     ReconcileWalletAndKycSchema1743663600000,
     AddProviderOperationsSchema1743912000000,
     AddProviderWebhookIdempotencyIndex1744000000000,
+    AddSecuritySupportAndTopUpSchema1744070400000,
   ],
 });

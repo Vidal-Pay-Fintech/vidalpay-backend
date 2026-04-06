@@ -6,6 +6,7 @@ import {
   IsOptional,
   IsPositive,
   IsString,
+  Matches,
   Min,
 } from 'class-validator';
 import { Currency } from 'src/utils/enums/wallet.enum';
@@ -22,6 +23,12 @@ export class ExternalTransferDto {
   @IsString()
   @IsNotEmpty()
   destinationAccountNumber: string;
+
+  @IsString()
+  @Matches(/^\d{4}$/, {
+    message: 'Transaction PIN must be a 4-digit number',
+  })
+  pin: string;
 
   @IsOptional()
   @IsString()

@@ -16,7 +16,10 @@ import { API_MESSAGES } from 'src/utils/apiMessages';
 import { TagType } from 'src/utils/enums/tag.enum';
 import { Currency } from 'src/utils/enums/wallet.enum';
 import { ProviderRouterService } from './provider-router.service';
-import { ProviderProductPayload } from './interfaces/regional-provider.interface';
+import {
+  CardTopUpIntentPayload,
+  ProviderProductPayload,
+} from './interfaces/regional-provider.interface';
 
 @Injectable()
 export class ProviderOperationsService {
@@ -177,6 +180,71 @@ export class ProviderOperationsService {
       status: execution.status,
       reference: execution.reference,
       externalReference: execution.externalReference ?? null,
+    };
+  }
+
+  async createCardTopUpIntent(input: {
+    user: User;
+    region: SupportedRegion;
+    wallet: Wallet;
+    amount: number;
+    currency: Currency;
+    redirectUrl?: string | null;
+    metadata?: Record<string, any> | null;
+  }) {
+    const provider = this.providerRouter.getProviderByRegion(input.region);
+    if (!provider) {
+      throw new BadRequestException(API_MESSAGES.KYC_PROVIDER_UNAVAILABLE);
+    }
+
+    if (!provider.supportsOperation(ProviderOperationType.CARD_TOPUP)) {
+      throw new BadRequestException(API_MESSAGES.CARD_TOPUP_UNAVAILABLE);
+    }
+
+    const execution = await provider.createCardTopUpIntent?.({
+      user: input.user,
+      wallet: input.wallet,
+      amount: input.amount,
+      currency: input.currency,
+      redirectUrl: input.redirectUrl ?? null,
+      metadata: input.metadata ?? null,
+    } satisfies CardTopUpIntentPayload);
+
+    if (!execution) {
+      throw new BadRequestException(API_MESSAGES.CARD_TOPUP_UNAVAILABLE);
+    }
+
+    await this.providerOperationRepository.create({
+      userId: input.user.id,
+      walletId: input.wallet.id,
+      provider: execution.provider,
+      regionCode: input.region,
+      operationType: execution.operationType,
+      status: execution.status,
+      reference: execution.reference,
+      externalReference: execution.externalReference ?? null,
+      currency: input.currency,
+      amount: input.amount,
+      requestPayload: {
+        redirectUrl: input.redirectUrl ?? null,
+      },
+      responsePayload: execution.responsePayload ?? null,
+      metadata: execution.metadata ?? input.metadata ?? null,
+      reconciledAt:
+        execution.status === ProviderOperationStatus.COMPLETED
+          ? new Date()
+          : null,
+    });
+
+    return {
+      provider: execution.provider,
+      region: input.region,
+      status: execution.status,
+      reference: execution.reference,
+      externalReference: execution.externalReference ?? null,
+      checkoutUrl: execution.checkoutUrl,
+      redirectUrl: execution.redirectUrl,
+      expiresAt: execution.expiresAt ?? null,
     };
   }
 

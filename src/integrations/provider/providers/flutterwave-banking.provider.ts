@@ -17,7 +17,9 @@ import { WalletRepository } from 'src/database/repositories/wallet.repository';
 import { API_MESSAGES } from 'src/utils/apiMessages';
 import { Currency } from 'src/utils/enums/wallet.enum';
 import {
+  CardTopUpIntentPayload,
   ExternalTransferPayload,
+  ProviderCardTopUpIntentExecution,
   ProviderOperationExecution,
   ProviderProductPayload,
   ProviderWalletRail,
@@ -43,6 +45,7 @@ export class FlutterwaveBankingProviderService implements RegionalProviderAdapte
   supportsOperation(operationType: ProviderOperationType): boolean {
     return [
       ProviderOperationType.RAIL_PROVISIONING,
+      ProviderOperationType.CARD_TOPUP,
       ProviderOperationType.EXTERNAL_TRANSFER,
       ProviderOperationType.AIRTIME,
       ProviderOperationType.DATA,
@@ -179,6 +182,59 @@ export class FlutterwaveBankingProviderService implements RegionalProviderAdapte
       metadata: {
         destinationBankCode: bankCode,
         destinationBankName: payload.destinationBankName ?? null,
+      },
+    };
+  }
+
+  async createCardTopUpIntent(
+    payload: CardTopUpIntentPayload,
+  ): Promise<ProviderCardTopUpIntentExecution> {
+    const reference = this.buildCardTopUpReference(payload.wallet, payload.user);
+    const redirectUrl =
+      payload.redirectUrl ?? this.getDefaultPaymentRedirectUrl() ?? null;
+    const customerName = this.buildAccountName(payload.user);
+
+    const response = await this.flutterwaveRequest<{
+      data?: Record<string, any>;
+      message?: string;
+      status?: string;
+    }>('POST', '/payments', {
+      tx_ref: reference,
+      amount: payload.amount,
+      currency: payload.currency,
+      redirect_url: redirectUrl,
+      payment_options: 'card',
+      customer: {
+        email: payload.user.email,
+        phonenumber: payload.user.phoneNumber ?? undefined,
+        name: customerName,
+      },
+      customizations: {
+        title: 'VidalPay Wallet Top-up',
+        description: `Fund your ${payload.currency} wallet securely`,
+      },
+      meta: {
+        ...(payload.metadata ?? {}),
+        walletId: payload.wallet.id,
+        userId: payload.user.id,
+      },
+    });
+
+    const data = (response?.data ?? response ?? {}) as Record<string, any>;
+
+    return {
+      provider: this.provider,
+      operationType: ProviderOperationType.CARD_TOPUP,
+      status: ProviderOperationStatus.PENDING,
+      reference,
+      externalReference: String(data?.id ?? data?.flw_ref ?? ''),
+      checkoutUrl: String(data?.link ?? data?.checkout_url ?? ''),
+      redirectUrl,
+      expiresAt: null,
+      responsePayload: data ?? null,
+      metadata: {
+        fundingSource: 'CARD',
+        redirectUrl,
       },
     };
   }
@@ -335,13 +391,15 @@ export class FlutterwaveBankingProviderService implements RegionalProviderAdapte
 
     if (
       eventType === 'charge.completed' &&
-      String(data.status ?? '').toLowerCase() === 'successful' &&
-      String(data.payment_type ?? '').toLowerCase() === 'bank_transfer'
+      String(data.status ?? '').toLowerCase() === 'successful'
     ) {
       const verified = await this.verifyTransaction(data);
       const verifiedData = verified?.data ?? verified ?? data;
       const txRef = String(verifiedData?.tx_ref ?? data?.tx_ref ?? '');
       const fundingTarget = await this.resolveFundingTarget(txRef);
+      const paymentType = String(
+        verifiedData?.payment_type ?? data?.payment_type ?? 'unknown',
+      ).toLowerCase();
 
       return {
         provider: this.provider,
@@ -367,13 +425,15 @@ export class FlutterwaveBankingProviderService implements RegionalProviderAdapte
                 reference: String(
                   verifiedData?.flw_ref ?? data?.flw_ref ?? txRef ?? '',
                 ),
-                info: `Wallet funding via Flutterwave bank transfer`,
-                description: `Flutterwave bank transfer funding (${txRef})`,
+                info: `Wallet funding via Flutterwave ${paymentType.replace(/_/g, ' ')}`,
+                description: `Flutterwave ${paymentType.replace(/_/g, ' ')} funding (${txRef})`,
               },
+              paymentType,
             }
           : {
               fundingReference: txRef,
               fundingTargetResolved: false,
+              paymentType,
             },
       };
     }
@@ -476,6 +536,10 @@ export class FlutterwaveBankingProviderService implements RegionalProviderAdapte
 
   private buildOperationReference(prefix: string, walletId: string) {
     return `VIDAL_FLW_${prefix.toUpperCase()}_${walletId}_${Date.now()}`;
+  }
+
+  private buildCardTopUpReference(wallet: Wallet, user: User) {
+    return `VIDAL_FLW_TOPUP_${wallet.id}_${user.id}_${Date.now()}`;
   }
 
   private buildAccountName(user: User) {
@@ -609,9 +673,10 @@ export class FlutterwaveBankingProviderService implements RegionalProviderAdapte
     userId: string;
     currency: Currency;
   } | null> {
-    const match = txRef.match(/^VIDAL_FLW_RAIL_([^_]+)_([^_]+)$/);
-    const walletId = match?.[1] ?? null;
-    const userId = match?.[2] ?? null;
+    const railMatch = txRef.match(/^VIDAL_FLW_RAIL_([^_]+)_([^_]+)$/);
+    const topUpMatch = txRef.match(/^VIDAL_FLW_TOPUP_([^_]+)_([^_]+)_\d+$/);
+    const walletId = railMatch?.[1] ?? topUpMatch?.[1] ?? null;
+    const userId = railMatch?.[2] ?? topUpMatch?.[2] ?? null;
 
     if (!walletId || !userId) {
       return null;
@@ -646,6 +711,15 @@ export class FlutterwaveBankingProviderService implements RegionalProviderAdapte
     }
 
     return `${baseUrl.replace(/\/$/, '')}/api/v1/integrations/webhooks/flutterwave`;
+  }
+
+  private getDefaultPaymentRedirectUrl() {
+    return (
+      process.env.PAYMENT_REDIRECT_URL ??
+      process.env.FRONTEND_URL ??
+      process.env.APP_URL ??
+      this.getWebhookCallbackUrl()
+    );
   }
 
   private getConfig(): FlutterwaveConfig {

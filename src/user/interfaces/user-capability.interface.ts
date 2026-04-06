@@ -5,6 +5,7 @@ import { DynamicLimitProfile, ProductAvailability } from './user-account.interfa
 export interface UserCapabilities {
   region: SupportedRegion | null;
   provider: KycProvider | null;
+  hasTransactionPin: boolean;
   canReceive: boolean;
   canTransfer: boolean;
   blockedReason: string | null;

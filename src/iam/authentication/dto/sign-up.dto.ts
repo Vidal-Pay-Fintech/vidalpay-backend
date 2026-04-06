@@ -44,6 +44,9 @@ export class SignUpDto {
   @IsOptional()
   @MinLength(4)
   @IsString()
+  @Matches(/^\d{4}$/, {
+    message: 'Transaction PIN must be a 4-digit number',
+  })
   pin: string;
 
   @Matches(/^\+?[1-9]\d{1,14}$/, {

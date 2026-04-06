@@ -13,6 +13,9 @@ import { VaultModule } from './vault/vault.module';
 import { TransactionModule } from './transaction/transaction.module';
 import { JournalModule } from './journal/journal.module';
 import { BeneficiaryModule } from './beneficiary/beneficiary.module';
+import { SupportModule } from './support/support.module';
+import { LegalModule } from './legal/legal.module';
+import { CryptoModule } from './crypto/crypto.module';
 
 @Module({
   imports: [
@@ -29,6 +32,9 @@ import { BeneficiaryModule } from './beneficiary/beneficiary.module';
     TransactionModule,
     JournalModule,
     BeneficiaryModule,
+    SupportModule,
+    LegalModule,
+    CryptoModule,
   ],
   controllers: [AppController],
   providers: [AppService, ConfigService],

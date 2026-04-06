@@ -8,12 +8,14 @@ export interface ProductAvailability {
   wallet: boolean;
   transfer: boolean;
   deposit: boolean;
+  cardTopUp: boolean;
   conversion: boolean;
   airtime: boolean;
   data: boolean;
   utilities: boolean;
   loan: boolean;
   taxFiling: boolean;
+  crypto: boolean;
 }
 
 export interface NormalizedLimitBucket {
@@ -76,6 +78,27 @@ export interface WalletRailDetails {
   providerVirtualAccountId: string | null;
   providerReference: string | null;
   providerMetadata: Record<string, any> | null;
+}
+
+export interface FundingMethodAvailability {
+  code: 'BANK_TRANSFER' | 'CARD_TOP_UP';
+  title: string;
+  description: string;
+  enabled: boolean;
+  provider: KycProvider | null;
+  blockedReason: string | null;
+  currencies: Currency[];
+  action:
+    | {
+        type: 'API';
+        path: string;
+        method: 'POST' | 'GET';
+      }
+    | {
+        type: 'INFO';
+        path: null;
+        method: null;
+      };
 }
 
 export interface KycSectionProgress {

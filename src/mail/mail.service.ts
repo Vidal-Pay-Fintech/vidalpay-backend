@@ -70,6 +70,27 @@ export class MailService {
     return result;
   }
 
+  async sendEmailVerificationCodeToEmail(input: {
+    email: string;
+    otp: string;
+    firstName?: string | null;
+  }): Promise<MailDeliveryResult> {
+    const result = await this.emailService.sendMail({
+      email: input.email,
+      subject: MailSubject.OTP,
+      template: VerificationEmail({
+        firstName: input.firstName ?? 'there',
+        code: input.otp,
+      }),
+    });
+    this.logDeliveryResult(
+      'verification email',
+      input.email,
+      result,
+    );
+    return result;
+  }
+
   async sendTransactionMail(
     userId: string,
     amount: any,

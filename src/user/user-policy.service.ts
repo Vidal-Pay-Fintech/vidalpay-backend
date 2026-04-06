@@ -134,10 +134,12 @@ export class UserPolicyService {
     const provider = resolution.region
       ? this.kycProviderRouter.mapRegionToProvider(resolution.region)
       : null;
+    const hasTransactionPin = Boolean(this.normalizeOptionalString(user.pin));
+    const isKycVerified = kycStatus === KycStatus.VERIFIED;
 
     const canReceive = true;
     const canTransfer =
-      resolution.state === 'RESOLVED' && kycStatus === KycStatus.VERIFIED;
+      resolution.state === 'RESOLVED' && isKycVerified && hasTransactionPin;
 
     let blockedReason: string | null = null;
     if (!canTransfer) {
@@ -150,9 +152,11 @@ export class UserPolicyService {
       } else if (resolution.state === 'UNRESOLVED') {
         blockedReason =
           resolution.blockedReason ?? API_MESSAGES.KYC_REGION_REQUIRED;
-      } else {
+      } else if (!isKycVerified) {
         blockedReason =
           kyc?.blockedReason ?? this.mapKycStatusToBlockedReason(kycStatus);
+      } else {
+        blockedReason = API_MESSAGES.TRANSFER_PIN_REQUIRED;
       }
     }
 
@@ -164,10 +168,17 @@ export class UserPolicyService {
     return {
       region: resolution.region,
       provider,
+      hasTransactionPin,
       canReceive,
       canTransfer,
       blockedReason,
-      limits: this.buildDynamicLimits(resolution, canTransfer, productAvailability),
+      limits: this.buildDynamicLimits(
+        resolution,
+        isKycVerified,
+        hasTransactionPin,
+        canTransfer,
+        productAvailability,
+      ),
       productAvailability,
     };
   }
@@ -509,15 +520,26 @@ export class UserPolicyService {
 
   private buildDynamicLimits(
     resolution: RegionResolution,
+    isKycVerified: boolean,
+    hasTransactionPin: boolean,
     canTransfer: boolean,
     productAvailability: ProductAvailability,
   ): DynamicLimitProfile {
     const tier =
       resolution.state === 'UNSUPPORTED'
         ? 'UNSUPPORTED'
-        : canTransfer
+        : isKycVerified
           ? 'VERIFIED'
           : 'PENDING_KYC';
+
+    const transferManagedBy =
+      resolution.state !== 'RESOLVED'
+        ? 'REGION_GATE'
+        : !isKycVerified
+          ? 'KYC_GATE'
+          : !hasTransactionPin
+            ? 'PIN_GATE'
+            : 'FUTURE_PROGRESSIVE_POLICY';
 
     return {
       policyVersion: 'staging-region-products-v2',
@@ -526,7 +548,7 @@ export class UserPolicyService {
         daily: canTransfer ? null : 0,
         monthly: canTransfer ? null : 0,
         currency: 'MIXED',
-        managedBy: canTransfer ? 'FUTURE_PROGRESSIVE_POLICY' : 'KYC_GATE',
+        managedBy: transferManagedBy,
       },
       inbound: {
         daily: null,
@@ -542,7 +564,7 @@ export class UserPolicyService {
       transfer: {
         dailyAmount: canTransfer ? null : 0,
         monthlyAmount: canTransfer ? null : 0,
-        managedBy: canTransfer ? 'FUTURE_PROGRESSIVE_POLICY' : 'KYC_GATE',
+        managedBy: transferManagedBy,
       },
       progressiveIncreases: {
         enabled: canTransfer,
@@ -570,12 +592,14 @@ export class UserPolicyService {
       wallet: true,
       transfer: false,
       deposit: false,
+      cardTopUp: false,
       conversion: false,
       airtime: false,
       data: false,
       utilities: false,
       loan: false,
       taxFiling: false,
+      crypto: false,
     };
 
     if (resolution.state !== 'RESOLVED' || !resolution.region) {
@@ -586,6 +610,7 @@ export class UserPolicyService {
       return {
         ...baseAvailability,
         deposit: true,
+        cardTopUp: true,
         conversion: true,
         transfer: canTransfer,
         airtime: true,

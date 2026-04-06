@@ -79,9 +79,12 @@ export class TokensService {
     userId: string,
     tokenType: TokenType,
   ): Promise<void> {
-    await this.tokenRepository.delete({
-      user: { id: userId },
-      type: tokenType,
-    });
+    await this.tokenRepository
+      .createQueryBuilder()
+      .delete()
+      .from(Token)
+      .where('userId = :userId', { userId })
+      .andWhere('type = :tokenType', { tokenType })
+      .execute();
   }
 }

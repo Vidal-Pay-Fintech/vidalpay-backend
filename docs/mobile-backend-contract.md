@@ -21,6 +21,7 @@ Returns a normalized account payload:
   - `productAvailability`
   - `limits`
   - `accountRails`
+  - `fundingMethods`
 - top-level mirrors:
   - `region`
   - `provider`
@@ -29,12 +30,40 @@ Returns a normalized account payload:
   - `limits`
   - `wallets`
   - `accountRails`
+  - `fundingMethods`
 
 Wallet rails are normalized and provider-safe:
 
 - NG users receive Flutterwave-aligned virtual account rails on the `NGN` wallet
 - US users receive Lead Bank-aligned ACH rails on the `USD` wallet
 - non-primary wallets remain app-native and can still participate in internal wallet logic
+
+Funding methods are normalized for mobile:
+
+- `BANK_TRANSFER`
+- `CARD_TOP_UP`
+
+## `/user/security`
+
+Returns the authenticated security summary:
+
+- `email`
+- `phoneNumber`
+- `emailVerified`
+- `phoneVerified`
+- `authType`
+- `lastLogin`
+- `hasTransactionPin`
+- `requiresTransactionPinSetup`
+- `biometricManagedByDevice`
+- `availableActions`
+
+Protected contact-change flows:
+
+- `POST /user/security/change-email/request`
+- `POST /user/security/change-email/verify`
+- `POST /user/security/change-phone/request`
+- `POST /user/security/change-phone/verify`
 
 ## `/user/kyc`
 
@@ -78,11 +107,19 @@ Returns a normalized KYC payload:
 Staging-safe provider-backed endpoints now exist server-side:
 
 - `POST /wallet/external-transfer`
+- `POST /wallet/top-up/card`
 - `POST /wallet/airtime`
 - `POST /wallet/data`
 - `POST /wallet/utilities`
 - `POST /integrations/webhooks/flutterwave`
 - `POST /integrations/webhooks/lead-bank`
+
+### Card top-up
+
+- `POST /wallet/top-up/card`
+  - creates a provider-backed top-up intent
+  - currently available for NG card funding through Flutterwave
+  - returns a normalized provider response with `reference`, `status`, `checkoutUrl`, and `redirectUrl`
 
 ### NG / Flutterwave payload notes
 
@@ -99,5 +136,25 @@ Staging-safe provider-backed endpoints now exist server-side:
 ## Provider boundaries
 
 - KYC remains behind KYC adapters
-- rails, external transfers, airtime, data, utilities, webhook processing, and reconciliation remain behind provider adapters
+- rails, card top-up, external transfers, airtime, data, utilities, webhook processing, and reconciliation remain behind provider adapters
 - tax and loan provider boundaries are intentionally left abstract for later provider selection
+
+## Support, legal, and crypto
+
+The backend now exposes in-app parity routes for these Figma surfaces:
+
+- `GET /support/overview`
+- `GET /support/faqs`
+- `GET /support/tickets`
+- `POST /support/tickets`
+- `GET /legal/overview`
+- `GET /legal/documents`
+- `GET /legal/documents/:slug`
+- `GET /crypto/overview`
+- `GET /crypto/assets`
+
+Current staging behavior:
+
+- support tickets are persisted server-side
+- legal content is delivered as normalized static backend content
+- crypto surfaces are explicitly marked as coming soon and remain disabled

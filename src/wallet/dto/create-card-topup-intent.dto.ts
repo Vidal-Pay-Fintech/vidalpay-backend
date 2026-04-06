@@ -1,17 +1,16 @@
 import {
   IsEnum,
-  IsNotEmpty,
   IsNumber,
   IsObject,
   IsOptional,
   IsPositive,
   IsString,
-  Matches,
+  IsUrl,
   Min,
 } from 'class-validator';
 import { Currency } from 'src/utils/enums/wallet.enum';
 
-export class DataPurchaseDto {
+export class CreateCardTopUpIntentDto {
   @IsNumber()
   @IsPositive()
   @Min(50)
@@ -20,18 +19,9 @@ export class DataPurchaseDto {
   @IsEnum(Currency)
   currency: Currency;
 
-  @Matches(/^\+?[1-9]\d{1,14}$/)
-  phoneNumber: string;
-
-  @IsString()
-  @Matches(/^\d{4}$/, {
-    message: 'Transaction PIN must be a 4-digit number',
-  })
-  pin: string;
-
-  @IsString()
-  @IsNotEmpty()
-  serviceCode: string;
+  @IsOptional()
+  @IsUrl()
+  redirectUrl?: string;
 
   @IsOptional()
   @IsObject()

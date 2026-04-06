@@ -1,10 +1,10 @@
 import {
   IsEnum,
   IsNotEmpty,
+  Matches,
   IsNumber,
   IsPositive,
   IsString,
-  IsUUID,
   Min,
 } from 'class-validator';
 import { Currency } from 'src/utils/enums/wallet.enum';
@@ -20,6 +20,9 @@ export class InternalTransferDto {
   recipientTag: string;
 
   @IsString()
+  @Matches(/^\d{4}$/, {
+    message: 'Transaction PIN must be a 4-digit number',
+  })
   pin: string;
 
   @IsEnum(Currency)

@@ -2,6 +2,7 @@ import {
   BadRequestException,
   Injectable,
   PreconditionFailedException,
+  ServiceUnavailableException,
 } from '@nestjs/common';
 import { ClientKycStatus } from 'src/common/enum/client-kyc-status.enum';
 import {
@@ -25,6 +26,7 @@ import { KycDocument } from 'src/database/entities/kyc-document.entity';
 import { KycProviderRouterService } from 'src/integrations/kyc/kyc-provider-router.service';
 import { ProviderOperationsService } from 'src/integrations/provider/provider-operations.service';
 import { API_MESSAGES } from 'src/utils/apiMessages';
+import { TokenType } from 'src/common/enum/token-type.enum';
 import { SubmitKycDto } from './dto/submit-kyc.dto';
 import { UpdateProfileDto } from './dto/update-profile.dto';
 import { UploadKycDocumentsDto } from './dto/upload-kyc-documents.dto';
@@ -32,6 +34,7 @@ import { UpsertKycAddressDto } from './dto/upsert-kyc-address.dto';
 import { UpsertKycIdentityDto } from './dto/upsert-kyc-identity.dto';
 import { UpsertKycLivenessDto } from './dto/upsert-kyc-liveness.dto';
 import {
+  FundingMethodAvailability,
   KycSectionProgress,
   WalletRailDetails,
 } from './interfaces/user-account.interface';
@@ -39,6 +42,12 @@ import { UserCapabilities } from './interfaces/user-capability.interface';
 import { UserPolicyService } from './user-policy.service';
 import { relative } from 'path';
 import { Currency } from 'src/utils/enums/wallet.enum';
+import { TokensService } from 'src/tokens/tokens.service';
+import { MailService } from 'src/mail/mail.service';
+import { RequestEmailChangeDto } from './dto/request-email-change.dto';
+import { VerifyEmailChangeDto } from './dto/verify-email-change.dto';
+import { RequestPhoneChangeDto } from './dto/request-phone-change.dto';
+import { VerifyPhoneChangeDto } from './dto/verify-phone-change.dto';
 
 type UploadedKycFile = {
   originalname?: string;
@@ -58,10 +67,231 @@ export class UserService {
     private readonly userPolicy: UserPolicyService,
     private readonly kycProviderRouter: KycProviderRouterService,
     private readonly providerOperationsService: ProviderOperationsService,
+    private readonly tokensService: TokensService,
+    private readonly mailService: MailService,
   ) {}
 
   async getMe(userId: string) {
     return this.getAccountOverview(userId);
+  }
+
+  async getSecurityOverview(userId: string) {
+    const { user, capabilities } = await this.getSyncedContext(userId);
+
+    return {
+      email: user.email,
+      phoneNumber: user.phoneNumber,
+      emailVerified: user.isVerified,
+      phoneVerified: user.isPhoneVerified,
+      authType: user.authType,
+      lastLogin: user.lastLogin,
+      hasTransactionPin: capabilities.hasTransactionPin,
+      requiresTransactionPinSetup: !capabilities.hasTransactionPin,
+      biometricManagedByDevice: true,
+      availableActions: {
+        createTransactionPin: !capabilities.hasTransactionPin,
+        resetTransactionPin: capabilities.hasTransactionPin,
+        changeEmail: true,
+        changePhone: true,
+      },
+    };
+  }
+
+  async requestEmailChange(
+    userId: string,
+    requestEmailChangeDto: RequestEmailChangeDto,
+  ) {
+    const user = await this.loadUserContext(userId);
+    const newEmail =
+      this.userPolicy.normalizeOptionalString(requestEmailChangeDto.newEmail)?.toLowerCase() ??
+      null;
+
+    if (!newEmail) {
+      throw new BadRequestException('A valid email address is required.');
+    }
+
+    if (newEmail === user.email?.toLowerCase()) {
+      throw new BadRequestException('Enter a different email address to continue.');
+    }
+
+    const existingUser = await this.userRepository.findUserByEmail(newEmail);
+    if (existingUser) {
+      throw new BadRequestException(API_MESSAGES.EMAIL_ALREADY_EXISTS);
+    }
+
+    await this.tokensService.deleteTokensByUserAndType(userId, TokenType.EMAIL_CHANGE);
+
+    const verificationToken = this.generateSixDigitToken();
+    const tokenExpiration = new Date();
+    tokenExpiration.setHours(tokenExpiration.getHours() + 1);
+
+    const tokenRecord = await this.tokensService.create({
+      token: verificationToken,
+      expiration: tokenExpiration,
+      type: TokenType.EMAIL_CHANGE,
+      user,
+      metadata: {
+        newEmail,
+      },
+    });
+
+    const delivery = await this.mailService.sendEmailVerificationCodeToEmail({
+      email: newEmail,
+      otp: verificationToken,
+      firstName: user.firstName ?? user.lastName ?? 'there',
+    });
+
+    if (!delivery.delivered) {
+      await this.tokensService.delete(tokenRecord.id);
+      throw new ServiceUnavailableException(
+        API_MESSAGES.CHANGE_CONTACT_VERIFICATION_FAILED,
+      );
+    }
+
+    return {
+      message: API_MESSAGES.EMAIL_CHANGE_CODE_SENT,
+      expiresAt: tokenExpiration.toISOString(),
+    };
+  }
+
+  async verifyEmailChange(
+    userId: string,
+    verifyEmailChangeDto: VerifyEmailChangeDto,
+  ) {
+    const validToken = await this.tokensService.findOneByTokenAndValidate(
+      verifyEmailChangeDto.token,
+      TokenType.EMAIL_CHANGE,
+      userId,
+    );
+
+    if (!validToken) {
+      throw new BadRequestException(API_MESSAGES.INVALID_TOKEN);
+    }
+
+    const newEmail = this.userPolicy
+      .normalizeOptionalString(validToken.metadata?.newEmail)
+      ?.toLowerCase();
+
+    if (!newEmail) {
+      await this.tokensService.delete(validToken.id);
+      throw new BadRequestException(API_MESSAGES.INVALID_TOKEN);
+    }
+
+    const existingUser = await this.userRepository.findUserByEmail(newEmail);
+    if (existingUser && existingUser.id !== userId) {
+      await this.tokensService.delete(validToken.id);
+      throw new BadRequestException(API_MESSAGES.EMAIL_ALREADY_EXISTS);
+    }
+
+    await this.userRepository.findOneAndUpdate(userId, {
+      email: newEmail,
+      isVerified: true,
+    });
+    await this.tokensService.delete(validToken.id);
+
+    return {
+      message: API_MESSAGES.EMAIL_CHANGE_SUCCESSFUL,
+      security: await this.getSecurityOverview(userId),
+    };
+  }
+
+  async requestPhoneChange(
+    userId: string,
+    requestPhoneChangeDto: RequestPhoneChangeDto,
+  ) {
+    const user = await this.loadUserContext(userId);
+    const newPhoneNumber =
+      this.userPolicy.normalizeOptionalString(
+        requestPhoneChangeDto.newPhoneNumber,
+      ) ?? null;
+
+    if (!newPhoneNumber) {
+      throw new BadRequestException('A valid phone number is required.');
+    }
+
+    if (newPhoneNumber === user.phoneNumber) {
+      throw new BadRequestException('Enter a different phone number to continue.');
+    }
+
+    const existingUser = await this.userRepository.findUserByPhone(newPhoneNumber);
+    if (existingUser) {
+      throw new BadRequestException(API_MESSAGES.PHONE_ALREADY_EXISTS);
+    }
+
+    await this.tokensService.deleteTokensByUserAndType(userId, TokenType.PHONE_CHANGE);
+
+    const verificationToken = this.generateSixDigitToken();
+    const tokenExpiration = new Date();
+    tokenExpiration.setHours(tokenExpiration.getHours() + 1);
+
+    const tokenRecord = await this.tokensService.create({
+      token: verificationToken,
+      expiration: tokenExpiration,
+      type: TokenType.PHONE_CHANGE,
+      user,
+      metadata: {
+        newPhoneNumber,
+      },
+    });
+
+    const delivery = await this.mailService.sendEmailVerificationCodeToEmail({
+      email: user.email,
+      otp: verificationToken,
+      firstName: user.firstName ?? user.lastName ?? 'there',
+    });
+
+    if (!delivery.delivered) {
+      await this.tokensService.delete(tokenRecord.id);
+      throw new ServiceUnavailableException(
+        API_MESSAGES.CHANGE_CONTACT_VERIFICATION_FAILED,
+      );
+    }
+
+    return {
+      message: API_MESSAGES.PHONE_CHANGE_CODE_SENT,
+      expiresAt: tokenExpiration.toISOString(),
+    };
+  }
+
+  async verifyPhoneChange(
+    userId: string,
+    verifyPhoneChangeDto: VerifyPhoneChangeDto,
+  ) {
+    const validToken = await this.tokensService.findOneByTokenAndValidate(
+      verifyPhoneChangeDto.token,
+      TokenType.PHONE_CHANGE,
+      userId,
+    );
+
+    if (!validToken) {
+      throw new BadRequestException(API_MESSAGES.INVALID_TOKEN);
+    }
+
+    const newPhoneNumber = this.userPolicy.normalizeOptionalString(
+      validToken.metadata?.newPhoneNumber,
+    );
+
+    if (!newPhoneNumber) {
+      await this.tokensService.delete(validToken.id);
+      throw new BadRequestException(API_MESSAGES.INVALID_TOKEN);
+    }
+
+    const existingUser = await this.userRepository.findUserByPhone(newPhoneNumber);
+    if (existingUser && existingUser.id !== userId) {
+      await this.tokensService.delete(validToken.id);
+      throw new BadRequestException(API_MESSAGES.PHONE_ALREADY_EXISTS);
+    }
+
+    await this.userRepository.findOneAndUpdate(userId, {
+      phoneNumber: newPhoneNumber,
+      isPhoneVerified: false,
+    });
+    await this.tokensService.delete(validToken.id);
+
+    return {
+      message: API_MESSAGES.PHONE_CHANGE_SUCCESSFUL,
+      security: await this.getSecurityOverview(userId),
+    };
   }
 
   async getKyc(userId: string) {
@@ -73,22 +303,26 @@ export class UserService {
     const { user, capabilities } = await this.getSyncedContext(userId);
     const walletRails = this.buildWalletRailDetails(user, capabilities);
     const accountRails = this.buildAccountRailSummary(walletRails);
+    const fundingMethods = this.buildFundingMethods(capabilities, walletRails);
     const serializedProfile = this.serializeProfile(
       user,
       capabilities,
       walletRails,
       accountRails,
+      fundingMethods,
     );
 
     return {
       user: serializedProfile,
       region: capabilities.region,
       provider: capabilities.provider,
+      security: serializedProfile.security,
       capabilities,
       productAvailability: capabilities.productAvailability,
       limits: capabilities.limits,
       wallets: walletRails,
       accountRails,
+      fundingMethods,
     };
   }
 
@@ -914,6 +1148,7 @@ export class UserService {
       primary: WalletRailDetails | null;
       byCurrency: Partial<Record<Currency, WalletRailDetails>>;
     },
+    fundingMethods?: FundingMethodAvailability[],
   ) {
     const effectiveCapabilities =
       capabilities ?? this.userPolicy.computeCapabilities(user);
@@ -921,6 +1156,9 @@ export class UserService {
       walletRails ?? this.buildWalletRailDetails(user, effectiveCapabilities);
     const effectiveAccountRails =
       accountRails ?? this.buildAccountRailSummary(effectiveWalletRails);
+    const effectiveFundingMethods =
+      fundingMethods ??
+      this.buildFundingMethods(effectiveCapabilities, effectiveWalletRails);
     const normalizedKycStatus = this.userPolicy.mapKycStatusToClientStatus({
       status: user.kyc?.status ?? user.kycStatus,
       regionState: this.userPolicy.resolveRegionForUser(user, user.kyc).state,
@@ -975,13 +1213,76 @@ export class UserService {
       kycProvider: effectiveCapabilities.provider ?? user.kyc?.provider ?? user.kycProvider,
       kycSubmittedAt: user.kyc?.submittedAt ?? user.kycSubmittedAt,
       kycReviewedAt: user.kyc?.reviewedAt ?? user.kycReviewedAt,
+      security: {
+        hasTransactionPin: effectiveCapabilities.hasTransactionPin,
+        requiresTransactionPinSetup: !effectiveCapabilities.hasTransactionPin,
+        canUsePinProtectedTransfers: effectiveCapabilities.canTransfer,
+      },
       wallet: effectiveWalletRails,
       wallets: effectiveWalletRails,
       capabilities: effectiveCapabilities,
       productAvailability: effectiveCapabilities.productAvailability,
       limits: effectiveCapabilities.limits,
       accountRails: effectiveAccountRails,
+      fundingMethods: effectiveFundingMethods,
     };
+  }
+
+  private buildFundingMethods(
+    capabilities: UserCapabilities,
+    walletRails: WalletRailDetails[],
+  ): FundingMethodAvailability[] {
+    const hasBankTransferRail = walletRails.some(
+      (wallet) => wallet.externalReceiveEnabled,
+    );
+
+    return [
+      {
+        code: 'BANK_TRANSFER',
+        title: 'Bank transfer',
+        description: 'Fund your wallet through your assigned receive rails.',
+        enabled: hasBankTransferRail,
+        provider: capabilities.provider,
+        blockedReason:
+          hasBankTransferRail || capabilities.region
+            ? null
+            : API_MESSAGES.KYC_REGION_REQUIRED,
+        currencies: walletRails
+          .filter((wallet) => wallet.externalReceiveEnabled)
+          .map((wallet) => wallet.currency),
+        action: {
+          type: 'INFO',
+          path: null,
+          method: null,
+        },
+      },
+      {
+        code: 'CARD_TOP_UP',
+        title: 'Card top-up',
+        description: 'Fund your wallet instantly with a debit or credit card.',
+        enabled: capabilities.productAvailability.cardTopUp,
+        provider: capabilities.provider,
+        blockedReason: capabilities.productAvailability.cardTopUp
+          ? null
+          : capabilities.region
+            ? API_MESSAGES.CARD_TOPUP_UNAVAILABLE
+            : API_MESSAGES.KYC_REGION_REQUIRED,
+        currencies: capabilities.productAvailability.cardTopUp
+          ? [Currency.NGN]
+          : [],
+        action: capabilities.productAvailability.cardTopUp
+          ? {
+              type: 'API',
+              path: '/wallet/top-up/card',
+              method: 'POST',
+            }
+          : {
+              type: 'INFO',
+              path: null,
+              method: null,
+            },
+      },
+    ];
   }
 
   private parseDocumentMetadata(metadata?: string | null) {
@@ -1012,6 +1313,10 @@ export class UserService {
   private normalizeCountryCode(value?: string | null) {
     const normalized = this.userPolicy.normalizeOptionalString(value);
     return normalized ? normalized.toUpperCase() : null;
+  }
+
+  private generateSixDigitToken() {
+    return Math.floor(100000 + Math.random() * 900000).toString();
   }
 
   private async syncWalletRouting(

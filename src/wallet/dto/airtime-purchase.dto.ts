@@ -22,6 +22,12 @@ export class AirtimePurchaseDto {
   @Matches(/^\+?[1-9]\d{1,14}$/)
   phoneNumber: string;
 
+  @IsString()
+  @Matches(/^\d{4}$/, {
+    message: 'Transaction PIN must be a 4-digit number',
+  })
+  pin: string;
+
   @IsOptional()
   @IsObject()
   metadata?: Record<string, any>;

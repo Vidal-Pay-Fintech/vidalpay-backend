@@ -6,6 +6,7 @@ import {
   IsOptional,
   IsPositive,
   IsString,
+  Matches,
   Min,
 } from 'class-validator';
 import { Currency } from 'src/utils/enums/wallet.enum';
@@ -26,6 +27,12 @@ export class UtilityPaymentDto {
   @IsString()
   @IsNotEmpty()
   customerReference: string;
+
+  @IsString()
+  @Matches(/^\d{4}$/, {
+    message: 'Transaction PIN must be a 4-digit number',
+  })
+  pin: string;
 
   @IsOptional()
   @IsObject()
