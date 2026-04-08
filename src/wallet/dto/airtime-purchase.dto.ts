@@ -1,5 +1,6 @@
 import {
   IsEnum,
+  IsNotEmpty,
   IsNumber,
   IsObject,
   IsOptional,
@@ -27,6 +28,11 @@ export class AirtimePurchaseDto {
     message: 'Transaction PIN must be a 4-digit number',
   })
   pin: string;
+
+  @IsOptional()
+  @IsString()
+  @IsNotEmpty()
+  serviceCode?: string;
 
   @IsOptional()
   @IsObject()

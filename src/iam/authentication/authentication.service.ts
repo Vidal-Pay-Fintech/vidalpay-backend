@@ -153,9 +153,19 @@ export class AuthenticationService {
         signupStage = 'post-transaction:generate-token';
         const tokens = await this.generateToken(newUser);
         signupStage = 'post-transaction:send-verification-otp';
-        await this.safeSendEmailVerificationOtp(newUser, 'signup');
+        const verificationDelivery = await this.safeSendEmailVerificationOtp(
+          newUser,
+          'signup',
+        );
 
-          return { ...tokens, newUser: this.sanitizeUserForClient(newUser) };
+        return {
+          ...tokens,
+          newUser: this.sanitizeUserForClient(newUser),
+          verificationDelivery: {
+            delivered: verificationDelivery.delivered,
+            reason: verificationDelivery.reason ?? null,
+          },
+        };
       } catch (error) {
         this.logSignupFailure(error, email, phoneNumber, signupStage, attempt);
 
@@ -491,7 +501,10 @@ export class AuthenticationService {
     return delivery;
   }
 
-  private async safeSendEmailVerificationOtp(user: User, context: string) {
+  private async safeSendEmailVerificationOtp(
+    user: User,
+    context: string,
+  ): Promise<MailDeliveryResult> {
     try {
       const delivery = await this.sendEmailVerificationOtp(user);
       if (!delivery.delivered) {
@@ -499,11 +512,17 @@ export class AuthenticationService {
           `[AUTH] ${context} email verification OTP was not delivered for user ${user.id}: ${delivery.reason ?? 'Unknown reason'}`,
         );
       }
+      return delivery;
     } catch (error) {
       this.logger.error(
         `[AUTH] ${context} email verification OTP failed for user ${user.id}: ${error.message}`,
         error.stack,
       );
+      return {
+        delivered: false,
+        provider: 'resend',
+        reason: error.message,
+      };
     }
   }
 
@@ -827,7 +846,12 @@ export class AuthenticationService {
 
   private async validateUserValidity(user: User) {
     if (!user.isVerified) {
-      await this.safeSendEmailVerificationOtp(user, 'login');
+      const delivery = await this.safeSendEmailVerificationOtp(user, 'login');
+      this.ensureMailDelivered(
+        delivery,
+        'verification code',
+        API_MESSAGES.OTP_SEND_FAILED,
+      );
       throw new UnauthorizedException(API_MESSAGES.EMAIL_NOT_VERIFIED);
     }
 

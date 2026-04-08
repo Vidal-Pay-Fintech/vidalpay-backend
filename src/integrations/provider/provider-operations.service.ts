@@ -1,4 +1,9 @@
-import { BadRequestException, Injectable, Logger } from '@nestjs/common';
+import {
+  BadRequestException,
+  Injectable,
+  Logger,
+  NotFoundException,
+} from '@nestjs/common';
 import { KycProvider } from 'src/common/enum/kyc-provider.enum';
 import {
   ProviderOperationStatus,
@@ -18,7 +23,12 @@ import { Currency } from 'src/utils/enums/wallet.enum';
 import { ProviderRouterService } from './provider-router.service';
 import {
   CardTopUpIntentPayload,
+  ProviderAirtimeCatalog,
+  ProviderCardTopUpStatus,
+  ProviderDataCatalog,
   ProviderProductPayload,
+  ProviderUtilitiesCatalog,
+  ProviderUtilityValidationPayload,
 } from './interfaces/regional-provider.interface';
 
 @Injectable()
@@ -32,6 +42,79 @@ export class ProviderOperationsService {
     private readonly providerWebhookEventRepository: ProviderWebhookEventRepository,
     private readonly journalService: JournalService,
   ) {}
+
+  async getAirtimeCatalog(
+    region: SupportedRegion,
+  ): Promise<ProviderAirtimeCatalog> {
+    const provider = this.providerRouter.getProviderByRegion(region);
+    if (!provider?.getAirtimeCatalog) {
+      throw new BadRequestException(API_MESSAGES.PRODUCT_NOT_AVAILABLE_FOR_REGION);
+    }
+
+    return provider.getAirtimeCatalog();
+  }
+
+  async getDataCatalog(region: SupportedRegion): Promise<ProviderDataCatalog> {
+    const provider = this.providerRouter.getProviderByRegion(region);
+    if (!provider?.getDataCatalog) {
+      throw new BadRequestException(API_MESSAGES.PRODUCT_NOT_AVAILABLE_FOR_REGION);
+    }
+
+    return provider.getDataCatalog();
+  }
+
+  async getUtilitiesCatalog(
+    region: SupportedRegion,
+  ): Promise<ProviderUtilitiesCatalog> {
+    const provider = this.providerRouter.getProviderByRegion(region);
+    if (!provider?.getUtilitiesCatalog) {
+      throw new BadRequestException(API_MESSAGES.PRODUCT_NOT_AVAILABLE_FOR_REGION);
+    }
+
+    return provider.getUtilitiesCatalog();
+  }
+
+  async validateUtilityCustomer(
+    region: SupportedRegion,
+    payload: ProviderUtilityValidationPayload,
+  ) {
+    const provider = this.providerRouter.getProviderByRegion(region);
+    if (!provider?.validateUtilityCustomer) {
+      throw new BadRequestException(API_MESSAGES.PRODUCT_NOT_AVAILABLE_FOR_REGION);
+    }
+
+    return provider.validateUtilityCustomer(payload);
+  }
+
+  async getCardTopUpStatus(
+    userId: string,
+    reference: string,
+  ): Promise<ProviderCardTopUpStatus> {
+    const operation =
+      await this.providerOperationRepository.findByReferenceForUserAndType(
+        reference,
+        userId,
+        ProviderOperationType.CARD_TOPUP,
+      );
+
+    if (!operation) {
+      throw new NotFoundException('Card top-up reference not found.');
+    }
+
+    const providerAdapter = this.providerRouter.getProviderByName(operation.provider);
+    const providerStatus = providerAdapter?.getCardTopUpStatus
+      ? await providerAdapter.getCardTopUpStatus(reference)
+      : null;
+
+    if (providerStatus) {
+      await this.mergeCardTopUpProviderStatus(operation.id, operation, providerStatus);
+    }
+
+    const refreshedOperation =
+      (await this.providerOperationRepository.findByReference(reference)) ?? operation;
+
+    return this.serializeCardTopUpStatus(refreshedOperation, providerStatus);
+  }
 
   async ensureReceiveRailsForUser(
     user: User,
@@ -442,6 +525,205 @@ export class ProviderOperationsService {
       processed: webhookStatus === ProviderWebhookEventStatus.PROCESSED,
       operationReference,
     };
+  }
+
+  private async mergeCardTopUpProviderStatus(
+    operationId: string,
+    operation: {
+      status: ProviderOperationStatus;
+      externalReference: string | null;
+      responsePayload: Record<string, any> | null;
+      metadata: Record<string, any> | null;
+      reconciledAt: Date | null;
+    },
+    providerStatus: ProviderCardTopUpStatus,
+  ) {
+    const nextProviderStatus = this.mapCardTopUpStatusToOperationStatus(
+      providerStatus.status,
+    );
+    const walletCredited =
+      Boolean(operation.metadata?.walletCreditTransactionReference) ||
+      Boolean(operation.reconciledAt);
+
+    await this.providerOperationRepository.findOneAndUpdate(operationId, {
+      status:
+        providerStatus.status === 'SUCCESS' && !walletCredited
+          ? ProviderOperationStatus.PROCESSING
+          : nextProviderStatus,
+      externalReference:
+        providerStatus.externalReference ?? operation.externalReference,
+      responsePayload: {
+        ...(operation.responsePayload ?? {}),
+        topUpStatus: providerStatus.status,
+        providerReference: providerStatus.providerReference,
+        checkoutUrl: providerStatus.checkoutUrl,
+        redirectUrl: providerStatus.redirectUrl,
+      },
+      metadata: {
+        ...(operation.metadata ?? {}),
+        normalizedTopUpStatus: providerStatus.status,
+        lastTopUpStatusMessage: providerStatus.message,
+        lastTopUpStatusCheckedAt: new Date().toISOString(),
+        providerReference: providerStatus.providerReference,
+      },
+    });
+  }
+
+  private serializeCardTopUpStatus(
+    operation: {
+      reference: string | null;
+      provider: KycProvider;
+      status: ProviderOperationStatus;
+      amount: number | null;
+      currency: Currency | null;
+      externalReference: string | null;
+      responsePayload: Record<string, any> | null;
+      metadata: Record<string, any> | null;
+      reconciledAt: Date | null;
+    },
+    providerStatus?: ProviderCardTopUpStatus | null,
+  ): ProviderCardTopUpStatus {
+    const walletCredited =
+      Boolean(operation.metadata?.walletCreditTransactionReference) ||
+      Boolean(operation.reconciledAt);
+    const normalizedStatus = this.normalizeCardTopUpStatus(
+      operation,
+      walletCredited,
+      providerStatus ?? null,
+    );
+
+    return {
+      reference: operation.reference ?? providerStatus?.reference ?? '',
+      status: normalizedStatus,
+      provider: operation.provider,
+      amount: providerStatus?.amount ?? operation.amount ?? null,
+      currency: providerStatus?.currency ?? operation.currency ?? null,
+      providerReference:
+        providerStatus?.providerReference ??
+        this.pickFirstString(
+          operation.metadata?.providerReference,
+          operation.responsePayload?.providerReference,
+          operation.responsePayload?.flw_ref,
+          operation.responsePayload?.tx_ref,
+        ),
+      externalReference:
+        providerStatus?.externalReference ?? operation.externalReference ?? null,
+      message: this.buildCardTopUpStatusMessage(
+        normalizedStatus,
+        walletCredited,
+        providerStatus,
+      ),
+      creditedAt:
+        walletCredited && operation.reconciledAt
+          ? operation.reconciledAt.toISOString()
+          : null,
+      checkoutUrl:
+        providerStatus?.checkoutUrl ??
+        this.pickFirstString(
+          operation.responsePayload?.checkoutUrl,
+          operation.responsePayload?.checkout_url,
+          operation.responsePayload?.link,
+        ),
+      redirectUrl:
+        providerStatus?.redirectUrl ??
+        this.pickFirstString(
+          operation.responsePayload?.redirectUrl,
+          operation.responsePayload?.redirect_url,
+          operation.metadata?.redirectUrl,
+        ),
+    };
+  }
+
+  private normalizeCardTopUpStatus(
+    operation: {
+      status: ProviderOperationStatus;
+      responsePayload: Record<string, any> | null;
+      metadata: Record<string, any> | null;
+    },
+    walletCredited: boolean,
+    providerStatus: ProviderCardTopUpStatus | null,
+  ): ProviderCardTopUpStatus['status'] {
+    if (walletCredited) {
+      return 'SUCCESS';
+    }
+
+    const explicitNormalizedStatus = this.pickFirstString(
+      providerStatus?.status,
+      operation.metadata?.normalizedTopUpStatus,
+      operation.responsePayload?.topUpStatus,
+      operation.responsePayload?.status,
+    );
+
+    if (explicitNormalizedStatus === 'CANCELED') {
+      return 'CANCELED';
+    }
+
+    if (
+      explicitNormalizedStatus === 'FAILED' ||
+      operation.status === ProviderOperationStatus.FAILED ||
+      operation.status === ProviderOperationStatus.REVERSED
+    ) {
+      return 'FAILED';
+    }
+
+    return 'PENDING';
+  }
+
+  private buildCardTopUpStatusMessage(
+    status: ProviderCardTopUpStatus['status'],
+    walletCredited: boolean,
+    providerStatus?: ProviderCardTopUpStatus | null,
+  ) {
+    if (status === 'SUCCESS' && walletCredited) {
+      return 'Wallet funding confirmed';
+    }
+
+    if (status === 'FAILED') {
+      return (
+        providerStatus?.message ??
+        'The card top-up did not complete successfully.'
+      );
+    }
+
+    if (status === 'CANCELED') {
+      return (
+        providerStatus?.message ??
+        'The card top-up was canceled before wallet funding was confirmed.'
+      );
+    }
+
+    if (providerStatus?.status === 'SUCCESS') {
+      return 'Provider payment completed. Waiting for wallet credit confirmation.';
+    }
+
+    return (
+      providerStatus?.message ??
+      'The card top-up is still pending wallet confirmation.'
+    );
+  }
+
+  private mapCardTopUpStatusToOperationStatus(
+    status: ProviderCardTopUpStatus['status'],
+  ) {
+    if (status === 'SUCCESS') {
+      return ProviderOperationStatus.COMPLETED;
+    }
+
+    if (status === 'FAILED' || status === 'CANCELED') {
+      return ProviderOperationStatus.FAILED;
+    }
+
+    return ProviderOperationStatus.PROCESSING;
+  }
+
+  private pickFirstString(...values: unknown[]): string | null {
+    for (const value of values) {
+      if (typeof value === 'string' && value.trim().length > 0) {
+        return value.trim();
+      }
+    }
+
+    return null;
   }
 
   private async creditIncomingWalletDeposit(walletCredit: {

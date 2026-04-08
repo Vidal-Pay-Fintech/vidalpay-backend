@@ -108,9 +108,14 @@ Staging-safe provider-backed endpoints now exist server-side:
 
 - `POST /wallet/external-transfer`
 - `POST /wallet/top-up/card`
+- `GET /wallet/top-up/card/:reference`
 - `POST /wallet/airtime`
 - `POST /wallet/data`
 - `POST /wallet/utilities`
+- `GET /wallet/catalogs/airtime`
+- `GET /wallet/catalogs/data`
+- `GET /wallet/catalogs/utilities`
+- `POST /wallet/utilities/validate`
 - `POST /integrations/webhooks/flutterwave`
 - `POST /integrations/webhooks/lead-bank`
 
@@ -121,13 +126,232 @@ Staging-safe provider-backed endpoints now exist server-side:
   - currently available for NG card funding through Flutterwave
   - returns a normalized provider response with `reference`, `status`, `checkoutUrl`, and `redirectUrl`
 
+- `GET /wallet/top-up/card/:reference`
+  - returns a normalized top-up confirmation payload
+  - source of truth is backend provider-operation state and webhook reconciliation
+  - `status` is one of:
+    - `PENDING`
+    - `SUCCESS`
+    - `FAILED`
+    - `CANCELED`
+  - response includes:
+    - `reference`
+    - `provider`
+    - `amount`
+    - `currency`
+    - `providerReference`
+    - `externalReference`
+    - `creditedAt`
+    - `message`
+    - `checkoutUrl`
+    - `redirectUrl`
+
+Example:
+
+```json
+{
+  "reference": "VIDAL_FLW_TOPUP_wallet_user_1712580000000",
+  "status": "PENDING",
+  "provider": "FLUTTERWAVE",
+  "amount": 5000,
+  "currency": "NGN",
+  "providerReference": "flw_ref_123",
+  "externalReference": "9700775",
+  "creditedAt": null,
+  "message": "The card top-up is still pending wallet confirmation.",
+  "checkoutUrl": "https://checkout.flutterwave.com/v3/hosted/pay/...",
+  "redirectUrl": "https://app.vidalpay.com/validate-payment"
+}
+```
+
+### NG service catalogs
+
+To keep the frontend provider-safe and stop hardcoding routing values, the backend now exposes normalized discovery endpoints for NG services.
+
+- `GET /wallet/catalogs/airtime`
+- `GET /wallet/catalogs/data`
+- `GET /wallet/catalogs/utilities`
+
+All catalog responses are:
+
+- region-aware and fail closed outside NG
+- provider-safe
+- normalized for mobile rendering
+- returned with a `source` field:
+  - `PROVIDER` when discovered live from Flutterwave
+  - `CURATED_FALLBACK` when Flutterwave discovery is unavailable and the backend returns a safe fallback list
+
+#### Airtime catalog
+
+Response shape:
+
+```json
+{
+  "region": "NG",
+  "provider": "FLUTTERWAVE",
+  "source": "PROVIDER",
+  "message": null,
+  "networks": [
+    {
+      "id": "mtn",
+      "code": "MTN",
+      "title": "MTN",
+      "description": "Buy airtime for MTN numbers.",
+      "billerCode": "BIL099",
+      "itemCode": "AT099",
+      "serviceCode": "BIL099:AT099:AIRTIME",
+      "currency": "NGN",
+      "minAmount": 50,
+      "maxAmount": 50000,
+      "enabled": true
+    }
+  ]
+}
+```
+
+#### Data catalog
+
+Response shape:
+
+```json
+{
+  "region": "NG",
+  "provider": "FLUTTERWAVE",
+  "source": "PROVIDER",
+  "message": null,
+  "networks": [
+    {
+      "id": "mtn",
+      "code": "MTN",
+      "title": "MTN",
+      "description": "MTN mobile data bundles.",
+      "billerCode": "BIL108",
+      "plans": [
+        {
+          "id": "mtn-md143",
+          "code": "MTN_750_MB_DATA_BUNDLE",
+          "title": "MTN 750 MB DATA BUNDLE",
+          "description": "Mobile Number",
+          "amount": 500,
+          "currency": "NGN",
+          "serviceCode": "BIL108:MD143:MTN 750 MB DATA BUNDLE",
+          "billerCode": "BIL108",
+          "itemCode": "MD143",
+          "type": "MTN 750 MB DATA BUNDLE",
+          "enabled": true
+        }
+      ]
+    }
+  ]
+}
+```
+
+#### Utilities catalog
+
+Response shape:
+
+```json
+{
+  "region": "NG",
+  "provider": "FLUTTERWAVE",
+  "source": "PROVIDER",
+  "message": null,
+  "categories": [
+    {
+      "id": "electricity",
+      "code": "ELECTRICITY",
+      "title": "Electricity",
+      "description": "Pay prepaid and postpaid electricity bills.",
+      "providers": [
+        {
+          "id": "ikeja-electric",
+          "code": "IKEDC",
+          "title": "Ikeja Electric",
+          "description": "Ikeja Electric bill payments.",
+          "billerCode": "BIL113",
+          "itemCode": "PWR101",
+          "type": "POWER",
+          "requiresValidation": true,
+          "customerReferenceLabel": "Meter Number",
+          "currency": "NGN",
+          "enabled": true,
+          "items": [
+            {
+              "id": "ikeja-electric-pwr101",
+              "code": "IKEDC_PREPAID_TOPUP",
+              "title": "IKEDC PREPAID TOPUP",
+              "description": "Meter Number",
+              "amount": 1000,
+              "currency": "NGN",
+              "serviceCode": "BIL113:PWR101:IKEDC PREPAID TOPUP",
+              "billerCode": "BIL113",
+              "itemCode": "PWR101",
+              "type": "IKEDC PREPAID TOPUP",
+              "requiresValidation": true,
+              "customerReferenceLabel": "Meter Number",
+              "enabled": true
+            }
+          ]
+        }
+      ]
+    }
+  ]
+}
+```
+
+### Utility customer validation
+
+- `POST /wallet/utilities/validate`
+  - validates a utility customer reference when provider validation is available
+  - supports:
+    - `serviceCode`
+    - or explicit `billerCode` / `itemCode`
+  - always returns a normalized mobile-safe payload
+
+Request:
+
+```json
+{
+  "customerReference": "1234567890",
+  "serviceCode": "BIL113:PWR101:IKEDC PREPAID TOPUP",
+  "providerCode": "IKEDC",
+  "providerTitle": "Ikeja Electric"
+}
+```
+
+Response:
+
+```json
+{
+  "valid": true,
+  "validationAvailable": true,
+  "resolvedName": "John Doe",
+  "customerReference": "1234567890",
+  "provider": {
+    "code": "IKEDC",
+    "title": "Ikeja Electric",
+    "billerCode": "BIL113",
+    "itemCode": "PWR101",
+    "type": "IKEDC PREPAID TOPUP"
+  },
+  "fee": 0,
+  "minimumAmount": 0,
+  "maximumAmount": 0,
+  "currency": "NGN",
+  "message": "Customer validated"
+}
+```
+
+If provider validation is unavailable, the route still responds with a normalized graceful payload and `validationAvailable: false` so mobile can degrade cleanly without hardcoding provider logic.
+
 ### NG / Flutterwave payload notes
 
 - `POST /wallet/external-transfer`
   - `destinationRoutingNumber` should carry the destination bank code for NG transfers.
   - `metadata.bankCode` is also accepted as a fallback.
 - `POST /wallet/airtime`
-  - `metadata.billerCode` and `metadata.itemCode` should be supplied for Flutterwave bill purchase routing.
+  - `serviceCode` can be supplied as `billerCode:itemCode[:type]`.
+  - `metadata.billerCode` and `metadata.itemCode` are still accepted as a fallback.
 - `POST /wallet/data`
   - `serviceCode` can be passed as `billerCode:itemCode[:type]`, or the same values can be supplied in metadata.
 - `POST /wallet/utilities`

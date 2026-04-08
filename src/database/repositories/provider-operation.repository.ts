@@ -1,5 +1,6 @@
 import { Injectable, Logger } from '@nestjs/common';
 import { InjectRepository } from '@nestjs/typeorm';
+import { ProviderOperationType } from 'src/common/enum/provider-operation.enum';
 import { AbstractRepository } from 'src/database/abstract.repository';
 import { Repository } from 'typeorm';
 import { ProviderOperation } from '../entities/provider-operation.entity';
@@ -19,6 +20,20 @@ export class ProviderOperationRepository extends AbstractRepository<ProviderOper
     return this.findOne({
       where: {
         reference,
+      },
+    });
+  }
+
+  async findByReferenceForUserAndType(
+    reference: string,
+    userId: string,
+    operationType: ProviderOperationType,
+  ): Promise<ProviderOperation | null> {
+    return this.findOne({
+      where: {
+        reference,
+        userId,
+        operationType,
       },
     });
   }
