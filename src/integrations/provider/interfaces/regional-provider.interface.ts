@@ -76,6 +76,150 @@ export interface ProviderCardTopUpIntentExecution
   expiresAt?: string | null;
 }
 
+export interface ProviderAirtimeNetwork {
+  id: string;
+  code: string;
+  title: string;
+  description: string | null;
+  billerCode: string | null;
+  itemCode: string | null;
+  serviceCode: string | null;
+  currency: Currency;
+  minAmount: number | null;
+  maxAmount: number | null;
+  enabled: boolean;
+}
+
+export interface ProviderAirtimeCatalog {
+  region: SupportedRegion;
+  provider: KycProvider;
+  source: 'PROVIDER' | 'CURATED_FALLBACK';
+  message: string | null;
+  networks: ProviderAirtimeNetwork[];
+}
+
+export interface ProviderDataPlan {
+  id: string;
+  code: string;
+  title: string;
+  description: string | null;
+  amount: number | null;
+  currency: Currency;
+  serviceCode: string | null;
+  billerCode: string | null;
+  itemCode: string | null;
+  type: string | null;
+  enabled: boolean;
+}
+
+export interface ProviderDataNetwork {
+  id: string;
+  code: string;
+  title: string;
+  description: string | null;
+  billerCode: string | null;
+  plans: ProviderDataPlan[];
+}
+
+export interface ProviderDataCatalog {
+  region: SupportedRegion;
+  provider: KycProvider;
+  source: 'PROVIDER' | 'CURATED_FALLBACK';
+  message: string | null;
+  networks: ProviderDataNetwork[];
+}
+
+export interface ProviderUtilityCatalogItem {
+  id: string;
+  code: string;
+  title: string;
+  description: string | null;
+  amount: number | null;
+  currency: Currency;
+  serviceCode: string | null;
+  billerCode: string | null;
+  itemCode: string | null;
+  type: string | null;
+  requiresValidation: boolean;
+  customerReferenceLabel: string | null;
+  enabled: boolean;
+}
+
+export interface ProviderUtilityCatalogProvider {
+  id: string;
+  code: string;
+  title: string;
+  description: string | null;
+  billerCode: string | null;
+  itemCode: string | null;
+  type: string | null;
+  requiresValidation: boolean;
+  customerReferenceLabel: string | null;
+  currency: Currency;
+  enabled: boolean;
+  items: ProviderUtilityCatalogItem[];
+}
+
+export interface ProviderUtilityCatalogCategory {
+  id: string;
+  code: string;
+  title: string;
+  description: string | null;
+  providers: ProviderUtilityCatalogProvider[];
+}
+
+export interface ProviderUtilitiesCatalog {
+  region: SupportedRegion;
+  provider: KycProvider;
+  source: 'PROVIDER' | 'CURATED_FALLBACK';
+  message: string | null;
+  categories: ProviderUtilityCatalogCategory[];
+}
+
+export interface ProviderUtilityValidationPayload {
+  serviceCode?: string | null;
+  billerCode?: string | null;
+  itemCode?: string | null;
+  customerReference: string;
+  providerCode?: string | null;
+  providerTitle?: string | null;
+  type?: string | null;
+}
+
+export interface ProviderUtilityValidationResult {
+  valid: boolean;
+  validationAvailable: boolean;
+  resolvedName: string | null;
+  customerReference: string;
+  provider: {
+    code: string | null;
+    title: string | null;
+    billerCode: string | null;
+    itemCode: string | null;
+    type: string | null;
+  };
+  fee: number | null;
+  minimumAmount: number | null;
+  maximumAmount: number | null;
+  currency: Currency | null;
+  message: string;
+  metadata?: Record<string, any> | null;
+}
+
+export interface ProviderCardTopUpStatus {
+  reference: string;
+  status: 'PENDING' | 'SUCCESS' | 'FAILED' | 'CANCELED';
+  provider: KycProvider;
+  amount: number | null;
+  currency: Currency | null;
+  providerReference: string | null;
+  externalReference: string | null;
+  message: string;
+  creditedAt: string | null;
+  checkoutUrl: string | null;
+  redirectUrl: string | null;
+}
+
 export interface ProviderWebhookExecution {
   provider: KycProvider;
   eventType: string;
@@ -110,6 +254,15 @@ export interface RegionalProviderAdapter {
   payUtility?(
     payload: ProviderProductPayload,
   ): Promise<ProviderOperationExecution>;
+  getAirtimeCatalog?(): Promise<ProviderAirtimeCatalog>;
+  getDataCatalog?(): Promise<ProviderDataCatalog>;
+  getUtilitiesCatalog?(): Promise<ProviderUtilitiesCatalog>;
+  validateUtilityCustomer?(
+    payload: ProviderUtilityValidationPayload,
+  ): Promise<ProviderUtilityValidationResult>;
+  getCardTopUpStatus?(
+    reference: string,
+  ): Promise<ProviderCardTopUpStatus | null>;
   handleWebhook(
     payload: Record<string, any>,
     headers?: Record<string, string | string[] | undefined>,

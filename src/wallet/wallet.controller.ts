@@ -20,6 +20,7 @@ import { AirtimePurchaseDto } from './dto/airtime-purchase.dto';
 import { DataPurchaseDto } from './dto/data-purchase.dto';
 import { UtilityPaymentDto } from './dto/utility-payment.dto';
 import { CreateCardTopUpIntentDto } from './dto/create-card-topup-intent.dto';
+import { ValidateUtilityCustomerDto } from './dto/validate-utility-customer.dto';
 
 @Controller('wallet')
 export class WalletController {
@@ -89,6 +90,40 @@ export class WalletController {
   ) {
     return this.walletService.createCardTopUpIntent(
       createCardTopUpIntentDto,
+      user.sub,
+    );
+  }
+
+  @Get('top-up/card/:reference')
+  getCardTopUpStatus(
+    @Param('reference') reference: string,
+    @ActiveUser() user: ActiveUserData,
+  ) {
+    return this.walletService.getCardTopUpStatus(reference, user.sub);
+  }
+
+  @Get('catalogs/airtime')
+  getAirtimeCatalog(@ActiveUser() user: ActiveUserData) {
+    return this.walletService.getAirtimeCatalog(user.sub);
+  }
+
+  @Get('catalogs/data')
+  getDataCatalog(@ActiveUser() user: ActiveUserData) {
+    return this.walletService.getDataCatalog(user.sub);
+  }
+
+  @Get('catalogs/utilities')
+  getUtilitiesCatalog(@ActiveUser() user: ActiveUserData) {
+    return this.walletService.getUtilitiesCatalog(user.sub);
+  }
+
+  @Post('utilities/validate')
+  validateUtilityCustomer(
+    @Body() validateUtilityCustomerDto: ValidateUtilityCustomerDto,
+    @ActiveUser() user: ActiveUserData,
+  ) {
+    return this.walletService.validateUtilityCustomer(
+      validateUtilityCustomerDto,
       user.sub,
     );
   }

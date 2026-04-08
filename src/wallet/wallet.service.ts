@@ -36,6 +36,7 @@ import { SupportedRegion } from 'src/common/enum/supported-region.enum';
 import { API_MESSAGES } from 'src/utils/apiMessages';
 import { ProviderOperationRepository } from 'src/database/repositories/provider-operation.repository';
 import { CreateCardTopUpIntentDto } from './dto/create-card-topup-intent.dto';
+import { ValidateUtilityCustomerDto } from './dto/validate-utility-customer.dto';
 
 @Injectable()
 export class WalletService {
@@ -453,6 +454,7 @@ export class WalletService {
       {
         phoneNumber: airtimePurchaseDto.phoneNumber,
         pin: airtimePurchaseDto.pin,
+        serviceCode: airtimePurchaseDto.serviceCode ?? null,
         metadata: airtimePurchaseDto.metadata ?? null,
       },
     );
@@ -517,6 +519,41 @@ export class WalletService {
       currency: createCardTopUpIntentDto.currency,
       redirectUrl: createCardTopUpIntentDto.redirectUrl ?? null,
       metadata: createCardTopUpIntentDto.metadata ?? null,
+    });
+  }
+
+  async getCardTopUpStatus(reference: string, userId: string) {
+    return this.providerOperationsService.getCardTopUpStatus(userId, reference);
+  }
+
+  async getAirtimeCatalog(userId: string) {
+    const region = await this.assertNgServiceCatalogAccess(userId, 'airtime');
+    return this.providerOperationsService.getAirtimeCatalog(region);
+  }
+
+  async getDataCatalog(userId: string) {
+    const region = await this.assertNgServiceCatalogAccess(userId, 'data');
+    return this.providerOperationsService.getDataCatalog(region);
+  }
+
+  async getUtilitiesCatalog(userId: string) {
+    const region = await this.assertNgServiceCatalogAccess(userId, 'utilities');
+    return this.providerOperationsService.getUtilitiesCatalog(region);
+  }
+
+  async validateUtilityCustomer(
+    validateUtilityCustomerDto: ValidateUtilityCustomerDto,
+    userId: string,
+  ) {
+    const region = await this.assertNgServiceCatalogAccess(userId, 'utilities');
+    return this.providerOperationsService.validateUtilityCustomer(region, {
+      customerReference: validateUtilityCustomerDto.customerReference,
+      serviceCode: validateUtilityCustomerDto.serviceCode ?? null,
+      billerCode: validateUtilityCustomerDto.billerCode ?? null,
+      itemCode: validateUtilityCustomerDto.itemCode ?? null,
+      providerCode: validateUtilityCustomerDto.providerCode ?? null,
+      providerTitle: validateUtilityCustomerDto.providerTitle ?? null,
+      type: validateUtilityCustomerDto.type ?? null,
     });
   }
 
@@ -802,5 +839,28 @@ export class WalletService {
     }
 
     return true;
+  }
+
+  private async assertNgServiceCatalogAccess(
+    userId: string,
+    product: 'airtime' | 'data' | 'utilities',
+  ) {
+    const accountOverview = await this.userService.getAccountOverview(userId);
+    const region = accountOverview.region;
+
+    if (region !== SupportedRegion.NG) {
+      throw new BadRequestException(API_MESSAGES.PRODUCT_NOT_AVAILABLE_FOR_REGION);
+    }
+
+    if (
+      (product === 'airtime' && !accountOverview.productAvailability.airtime) ||
+      (product === 'data' && !accountOverview.productAvailability.data) ||
+      (product === 'utilities' &&
+        !accountOverview.productAvailability.utilities)
+    ) {
+      throw new BadRequestException(API_MESSAGES.PRODUCT_NOT_AVAILABLE_FOR_REGION);
+    }
+
+    return region;
   }
 }
