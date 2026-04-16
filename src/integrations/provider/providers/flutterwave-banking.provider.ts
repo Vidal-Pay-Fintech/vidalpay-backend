@@ -19,7 +19,10 @@ import { Currency } from 'src/utils/enums/wallet.enum';
 import {
   CardTopUpIntentPayload,
   ExternalTransferPayload,
+  ProviderAccountResolutionPayload,
+  ProviderAccountResolutionResult,
   ProviderAirtimeCatalog,
+  ProviderBankCatalog,
   ProviderCardTopUpStatus,
   ProviderCardTopUpIntentExecution,
   ProviderDataCatalog,
@@ -63,6 +66,30 @@ type FlutterwaveBillItem = {
   default_commission?: number | string | null;
   country?: string | null;
   country_code?: string | null;
+};
+
+type FlutterwaveBank = {
+  id?: number | string;
+  code?: string;
+  name?: string;
+};
+
+const FLUTTERWAVE_BANK_FALLBACK_CATALOG: ProviderBankCatalog = {
+  region: SupportedRegion.NG,
+  provider: KycProvider.FLUTTERWAVE,
+  source: 'CURATED_FALLBACK',
+  message:
+    'Using the VidalPay fallback NG bank directory while live bank discovery is unavailable.',
+  banks: [
+    { id: '044', code: '044', name: 'Access Bank', country: SupportedRegion.NG, currency: Currency.NGN, enabled: true },
+    { id: '011', code: '011', name: 'First Bank of Nigeria', country: SupportedRegion.NG, currency: Currency.NGN, enabled: true },
+    { id: '058', code: '058', name: 'Guaranty Trust Bank', country: SupportedRegion.NG, currency: Currency.NGN, enabled: true },
+    { id: '033', code: '033', name: 'United Bank for Africa', country: SupportedRegion.NG, currency: Currency.NGN, enabled: true },
+    { id: '057', code: '057', name: 'Zenith Bank', country: SupportedRegion.NG, currency: Currency.NGN, enabled: true },
+    { id: '50211', code: '50211', name: 'Kuda Microfinance Bank', country: SupportedRegion.NG, currency: Currency.NGN, enabled: true },
+    { id: '999992', code: '999992', name: 'OPay', country: SupportedRegion.NG, currency: Currency.NGN, enabled: true },
+    { id: '100004', code: '100004', name: 'PalmPay', country: SupportedRegion.NG, currency: Currency.NGN, enabled: true },
+  ],
 };
 
 interface FlutterwaveConfig {
@@ -178,6 +205,111 @@ export class FlutterwaveBankingProviderService implements RegionalProviderAdapte
         return FLUTTERWAVE_UTILITIES_FALLBACK_CATALOG;
       }
     });
+  }
+
+  async getBankCatalog(): Promise<ProviderBankCatalog> {
+    return this.getCachedCatalog('banks', async () => {
+      try {
+        const response = await this.flutterwaveRequest<{
+          data?: FlutterwaveBank[];
+        }>('GET', '/banks/NG');
+        const banks = (response?.data ?? [])
+          .map((bank) => ({
+            id: String(bank.id ?? bank.code ?? bank.name ?? ''),
+            code: String(bank.code ?? '').trim(),
+            name: String(bank.name ?? '').trim(),
+            country: this.region,
+            currency: Currency.NGN,
+            enabled: Boolean(String(bank.code ?? '').trim() && String(bank.name ?? '').trim()),
+          }))
+          .filter((bank) => bank.enabled);
+
+        if (!banks.length) {
+          return FLUTTERWAVE_BANK_FALLBACK_CATALOG;
+        }
+
+        return {
+          region: this.region,
+          provider: this.provider,
+          source: 'PROVIDER',
+          message: null,
+          banks,
+        };
+      } catch (error) {
+        this.logger.warn(
+          `Flutterwave bank catalog discovery failed: ${(error as Error).message}`,
+        );
+        return FLUTTERWAVE_BANK_FALLBACK_CATALOG;
+      }
+    });
+  }
+
+  async resolveExternalAccount(
+    payload: ProviderAccountResolutionPayload,
+  ): Promise<ProviderAccountResolutionResult> {
+    const bankCode = await this.resolveBankCode({
+      destinationAccountNumber: payload.destinationAccountNumber,
+      destinationBankCode: payload.destinationBankCode ?? null,
+      destinationBankName: payload.destinationBankName ?? null,
+      user: {} as User,
+      wallet: {} as Wallet,
+      amount: 0,
+      currency: payload.currency,
+      narration: null,
+      metadata: null,
+    });
+
+    if (!bankCode) {
+      return {
+        resolved: false,
+        accountNumber: payload.destinationAccountNumber,
+        accountName: null,
+        bankCode: null,
+        bankName: payload.destinationBankName ?? null,
+        currency: payload.currency,
+        provider: this.provider,
+        message: 'A valid destination bank is required for NG external transfers.',
+      };
+    }
+
+    try {
+      const response = await this.flutterwaveRequest<{
+        data?: Record<string, any>;
+      }>('POST', '/accounts/resolve', {
+        account_number: payload.destinationAccountNumber,
+        account_bank: bankCode,
+      });
+      const data = (response?.data ?? response ?? {}) as Record<string, any>;
+      const bankName =
+        payload.destinationBankName ??
+        this.findBankNameByCode(bankCode) ??
+        this.normalizeOptionalString(data?.bank_name);
+
+      return {
+        resolved: Boolean(this.normalizeOptionalString(data?.account_name)),
+        accountNumber: payload.destinationAccountNumber,
+        accountName: this.normalizeOptionalString(data?.account_name),
+        bankCode,
+        bankName,
+        currency: payload.currency,
+        provider: this.provider,
+        message: this.normalizeOptionalString(data?.response_message) ?? 'Account resolved.',
+        metadata: data,
+      };
+    } catch (error) {
+      return {
+        resolved: false,
+        accountNumber: payload.destinationAccountNumber,
+        accountName: null,
+        bankCode,
+        bankName: payload.destinationBankName ?? this.findBankNameByCode(bankCode),
+        currency: payload.currency,
+        provider: this.provider,
+        message:
+          (error as Error)?.message ??
+          'We could not validate this destination account right now.',
+      };
+    }
   }
 
   async validateUtilityCustomer(
@@ -436,7 +568,7 @@ export class FlutterwaveBankingProviderService implements RegionalProviderAdapte
   async createExternalTransfer(
     payload: ExternalTransferPayload,
   ): Promise<ProviderOperationExecution> {
-    const bankCode = this.extractBankCode(payload.metadata, payload);
+    const bankCode = await this.resolveBankCode(payload);
     if (!bankCode) {
       throw new BadRequestException(
         'Flutterwave bank code is required for NG external transfers.',
@@ -1191,12 +1323,50 @@ export class FlutterwaveBankingProviderService implements RegionalProviderAdapte
     payload: ExternalTransferPayload,
   ): string | null {
     const bankCode =
+      payload.destinationBankCode ??
       metadata?.bankCode ??
       metadata?.destinationBankCode ??
       payload.destinationRoutingNumber ??
       null;
 
     return bankCode ? String(bankCode) : null;
+  }
+
+  private async resolveBankCode(
+    payload: ExternalTransferPayload,
+  ): Promise<string | null> {
+    const directBankCode = this.extractBankCode(payload.metadata, payload);
+    if (directBankCode) {
+      return directBankCode;
+    }
+
+    const normalizedBankName = this.normalizeOptionalString(
+      payload.destinationBankName,
+    )?.toLowerCase();
+    if (!normalizedBankName) {
+      return null;
+    }
+
+    const catalog = await this.getBankCatalog();
+    const matchedBank = catalog.banks.find((bank) => {
+      const bankName = bank.name.toLowerCase();
+      return (
+        bankName === normalizedBankName ||
+        bankName.includes(normalizedBankName) ||
+        normalizedBankName.includes(bankName)
+      );
+    });
+
+    return matchedBank?.code ?? null;
+  }
+
+  private findBankNameByCode(bankCode: string): string | null {
+    const cachedCatalog = this.catalogCache.get('banks');
+    const banks =
+      (cachedCatalog?.value as ProviderBankCatalog | undefined)?.banks ??
+      FLUTTERWAVE_BANK_FALLBACK_CATALOG.banks;
+    const matchedBank = banks.find((bank) => bank.code === bankCode);
+    return matchedBank?.name ?? null;
   }
 
   private resolveBillRoute(

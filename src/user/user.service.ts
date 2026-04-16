@@ -9,6 +9,7 @@ import {
   KycDocumentStage,
   KycDocumentStorage,
 } from 'src/common/enum/kyc-document.enum';
+import { KycProvider } from 'src/common/enum/kyc-provider.enum';
 import { KycStatus } from 'src/common/enum/kyc-status.enum';
 import { SupportedRegion } from 'src/common/enum/supported-region.enum';
 import {
@@ -88,6 +89,17 @@ export class UserService {
       hasTransactionPin: capabilities.hasTransactionPin,
       requiresTransactionPinSetup: !capabilities.hasTransactionPin,
       biometricManagedByDevice: true,
+      transactionPinRequiredFor: [
+        'INTERNAL_TRANSFER',
+        'EXTERNAL_TRANSFER',
+        'AIRTIME',
+        'DATA',
+        'UTILITIES',
+      ],
+      policy: {
+        approvalModel: 'PIN_REQUIRED_FOR_OUTGOING_WALLET_ACTIONS',
+        biometricAssistance: 'DEVICE_MANAGED',
+      },
       availableActions: {
         createTransactionPin: !capabilities.hasTransactionPin,
         resetTransactionPin: capabilities.hasTransactionPin,
@@ -304,6 +316,7 @@ export class UserService {
     const walletRails = this.buildWalletRailDetails(user, capabilities);
     const accountRails = this.buildAccountRailSummary(walletRails);
     const fundingMethods = this.buildFundingMethods(capabilities, walletRails);
+    const pendingActions = this.buildPendingActions(user, capabilities, walletRails);
     const serializedProfile = this.serializeProfile(
       user,
       capabilities,
@@ -320,9 +333,42 @@ export class UserService {
       capabilities,
       productAvailability: capabilities.productAvailability,
       limits: capabilities.limits,
+      tier: capabilities.limits.tier,
+      pendingActions,
       wallets: walletRails,
       accountRails,
       fundingMethods,
+    };
+  }
+
+  async getHomeOverview(userId: string) {
+    const overview = await this.getAccountOverview(userId);
+
+    return {
+      summary: {
+        region: overview.region,
+        provider: overview.provider,
+        tier: overview.tier,
+        wallets: overview.wallets,
+        capabilities: overview.capabilities,
+        productAvailability: overview.productAvailability,
+      },
+      pendingActions: overview.pendingActions,
+      quickActions: {
+        internalTransfer: overview.capabilities.canInternalTransfer,
+        externalTransfer: overview.capabilities.canExternalTransfer,
+        receive: overview.productAvailability.receive ?? overview.capabilities.canReceive,
+        deposit: overview.productAvailability.deposit,
+        cardTopUp: overview.productAvailability.cardTopUp,
+        airtime: overview.productAvailability.airtime,
+        data: overview.productAvailability.data,
+        utilities: overview.productAvailability.utilities,
+        conversion: overview.productAvailability.conversion,
+      },
+      marketSummary: this.buildMarketSummary(overview.region),
+      promotions: this.buildHomePromotions(overview.user),
+      fundingMethods: overview.fundingMethods,
+      accountRails: overview.accountRails,
     };
   }
 
@@ -1217,6 +1263,10 @@ export class UserService {
         hasTransactionPin: effectiveCapabilities.hasTransactionPin,
         requiresTransactionPinSetup: !effectiveCapabilities.hasTransactionPin,
         canUsePinProtectedTransfers: effectiveCapabilities.canTransfer,
+        canUseInternalTransfers: effectiveCapabilities.canInternalTransfer,
+        canUseExternalTransfers: effectiveCapabilities.canExternalTransfer,
+        canReceiveExternal: effectiveCapabilities.canExternalReceive,
+        biometricManagedByDevice: true,
       },
       wallet: effectiveWalletRails,
       wallets: effectiveWalletRails,
@@ -1235,6 +1285,13 @@ export class UserService {
     const hasBankTransferRail = walletRails.some(
       (wallet) => wallet.externalReceiveEnabled,
     );
+    const bankTransferBlockedReason =
+      walletRails.find((wallet) => wallet.blockedReason)?.blockedReason ??
+      (capabilities.region === SupportedRegion.NG
+        ? 'Bank transfer rails are still being provisioned for this account.'
+        : capabilities.region
+          ? API_MESSAGES.EXTERNAL_TRANSFER_UNAVAILABLE
+          : null);
 
     return [
       {
@@ -1244,9 +1301,11 @@ export class UserService {
         enabled: hasBankTransferRail,
         provider: capabilities.provider,
         blockedReason:
-          hasBankTransferRail || capabilities.region
+          hasBankTransferRail
             ? null
-            : API_MESSAGES.KYC_REGION_REQUIRED,
+            : capabilities.region
+              ? bankTransferBlockedReason
+              : API_MESSAGES.KYC_REGION_REQUIRED,
         currencies: walletRails
           .filter((wallet) => wallet.externalReceiveEnabled)
           .map((wallet) => wallet.currency),
@@ -1350,14 +1409,68 @@ export class UserService {
         null;
       const provider = wallet.routingProvider ?? capabilities.provider ?? null;
       const railType =
-        wallet.accountNumber && wallet.routingNumber
+        region === SupportedRegion.US &&
+        provider === KycProvider.LEAD_BANK
+          ? 'INTERNAL_ONLY'
+          : wallet.accountNumber && wallet.routingNumber
           ? 'ACH'
           : wallet.accountNumber
             ? 'VIRTUAL_ACCOUNT'
             : 'INTERNAL_ONLY';
+      const providerMetadata = wallet.providerMetadata ?? null;
       const supportsExternalRails =
         (region === SupportedRegion.NG && wallet.currency === Currency.NGN) ||
         (region === SupportedRegion.US && wallet.currency === Currency.USD);
+      const leadBankUnavailable =
+        region === SupportedRegion.US && provider === KycProvider.LEAD_BANK;
+      const externalReceiveEnabled = Boolean(
+        supportsExternalRails &&
+          wallet.accountNumber &&
+          wallet.receiveEnabled &&
+          !providerMetadata?.staging &&
+          !leadBankUnavailable,
+      );
+      const externalTransferEnabled = Boolean(
+        supportsExternalRails &&
+          capabilities.canExternalTransfer &&
+          !leadBankUnavailable,
+      );
+      const provisioningStatus =
+        externalReceiveEnabled
+          ? 'READY'
+          : providerMetadata?.provisioningDeferred
+            ? 'DEFERRED'
+            : leadBankUnavailable
+              ? 'UNAVAILABLE'
+              : supportsExternalRails
+                ? 'PENDING'
+                : 'UNAVAILABLE';
+      const blockedReason =
+        externalReceiveEnabled || externalTransferEnabled
+          ? null
+          : providerMetadata?.provisioningError ??
+            (leadBankUnavailable
+              ? 'Lead Bank receive rails are not connected yet in staging.'
+              : capabilities.region
+                ? capabilities.blockedReason
+                : API_MESSAGES.KYC_REGION_REQUIRED);
+      const supportedOperations: Array<'RECEIVE' | 'TRANSFER' | 'TOP_UP'> = [];
+
+      if (externalReceiveEnabled) {
+        supportedOperations.push('RECEIVE');
+      }
+
+      if (externalTransferEnabled) {
+        supportedOperations.push('TRANSFER');
+      }
+
+      if (
+        region === SupportedRegion.NG &&
+        wallet.currency === Currency.NGN &&
+        capabilities.productAvailability.cardTopUp
+      ) {
+        supportedOperations.push('TOP_UP');
+      }
 
       return {
         walletId: wallet.id,
@@ -1366,24 +1479,23 @@ export class UserService {
         region,
         railType,
         balance: wallet.balance,
-        accountNumber: wallet.accountNumber,
-        routingNumber: wallet.routingNumber,
-        accountName: wallet.accountName,
-        bankName: wallet.bankName,
-        sortCode: wallet.sortCode,
+        accountNumber: leadBankUnavailable ? null : wallet.accountNumber,
+        routingNumber: leadBankUnavailable ? null : wallet.routingNumber,
+        accountName: leadBankUnavailable ? null : wallet.accountName,
+        bankName: leadBankUnavailable ? null : wallet.bankName,
+        sortCode: leadBankUnavailable ? null : wallet.sortCode,
         receiveEnabled: wallet.receiveEnabled,
         transferEnabled: wallet.transferEnabled,
-        externalReceiveEnabled: Boolean(
-          supportsExternalRails && wallet.accountNumber && wallet.receiveEnabled,
-        ),
-        externalTransferEnabled: Boolean(
-          supportsExternalRails && capabilities.canTransfer,
-        ),
+        externalReceiveEnabled,
+        externalTransferEnabled,
         providerCustomerId: wallet.providerCustomerId,
         providerAccountId: wallet.providerAccountId,
         providerVirtualAccountId: wallet.providerVirtualAccountId,
         providerReference: wallet.providerReference,
-        providerMetadata: wallet.providerMetadata,
+        providerMetadata,
+        provisioningStatus,
+        blockedReason,
+        supportedOperations,
       };
     });
   }
@@ -1402,7 +1514,112 @@ export class UserService {
     return {
       primary,
       byCurrency,
+      provisioningState: primary?.provisioningStatus ?? 'UNAVAILABLE',
+      blockedReason: primary?.blockedReason ?? null,
     };
+  }
+
+  private buildPendingActions(
+    user: User,
+    capabilities: UserCapabilities,
+    walletRails: WalletRailDetails[],
+  ) {
+    const pendingActions: Array<{
+      code: string;
+      title: string;
+      description: string;
+      blocking: boolean;
+    }> = [];
+
+    if (!user.isVerified) {
+      pendingActions.push({
+        code: 'VERIFY_EMAIL',
+        title: 'Verify your email',
+        description: 'Email verification is required before login can complete normally.',
+        blocking: true,
+      });
+    }
+
+    if (!capabilities.hasTransactionPin) {
+      pendingActions.push({
+        code: 'SET_TRANSACTION_PIN',
+        title: 'Set transaction PIN',
+        description: API_MESSAGES.TRANSFER_PIN_REQUIRED,
+        blocking: true,
+      });
+    }
+
+    if (!capabilities.canTransfer && capabilities.blockedReason) {
+      pendingActions.push({
+        code: 'COMPLETE_KYC',
+        title: 'Complete account verification',
+        description: capabilities.blockedReason,
+        blocking: true,
+      });
+    }
+
+    const railPending = walletRails.find(
+      (wallet) =>
+        wallet.region === SupportedRegion.NG &&
+        wallet.currency === Currency.NGN &&
+        wallet.provisioningStatus !== 'READY',
+    );
+
+    if (railPending?.blockedReason) {
+      pendingActions.push({
+        code: 'WAIT_FOR_BANK_RAIL',
+        title: 'Bank transfer rails pending',
+        description: railPending.blockedReason,
+        blocking: false,
+      });
+    }
+
+    return pendingActions;
+  }
+
+  private buildMarketSummary(region: SupportedRegion | null) {
+    if (region === SupportedRegion.NG) {
+      return {
+        enabled: true,
+        source: 'CURATED_STAGING',
+        message: 'Reference market summary for staging home content.',
+        pairs: [
+          { pair: 'USD/NGN', rate: 1520, direction: 'NEUTRAL' },
+          { pair: 'GBP/NGN', rate: 1940, direction: 'NEUTRAL' },
+        ],
+      };
+    }
+
+    if (region === SupportedRegion.US) {
+      return {
+        enabled: true,
+        source: 'CURATED_STAGING',
+        message: 'Reference market summary for staging home content.',
+        pairs: [
+          { pair: 'USD/NGN', rate: 1520, direction: 'NEUTRAL' },
+          { pair: 'USD/GBP', rate: 0.78, direction: 'NEUTRAL' },
+        ],
+      };
+    }
+
+    return {
+      enabled: false,
+      source: 'UNAVAILABLE',
+      message: API_MESSAGES.KYC_REGION_REQUIRED,
+      pairs: [],
+    };
+  }
+
+  private buildHomePromotions(user: any) {
+    return [
+      {
+        code: 'REFER_AND_EARN',
+        title: 'Invite friends to VidalPay',
+        description: 'Share your referral code and complete more funded accounts.',
+        cta: 'Share referral code',
+        value: user.referralCode ?? null,
+      },
+    ];
   }
 
   private buildMobileKycIdentity(

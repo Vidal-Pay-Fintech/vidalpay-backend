@@ -1,28 +1,22 @@
 import { BadRequestException, Injectable } from '@nestjs/common';
-import { CreateTransactionDto } from './dto/create-transaction.dto';
-import { UpdateTransactionDto } from './dto/update-transaction.dto';
-import { TransactionRepository } from 'src/database/repositories/transaction.repository';
-import { TransactionInterface } from 'src/vault/interface/transaction-interface';
-import { WalletService } from 'src/wallet/wallet.service';
-import { TransactionType } from 'src/utils/enums/transaction-type.enum';
-import { WalletRepository } from 'src/database/repositories/wallet.repository';
-import { Currency } from 'src/utils/enums/wallet.enum';
 import { PageOptionsDto } from 'src/common/pagination/pageOptionsDto.dto';
+import { ProviderOperationRepository } from 'src/database/repositories/provider-operation.repository';
+import { TransactionRepository } from 'src/database/repositories/transaction.repository';
+import { WalletRepository } from 'src/database/repositories/wallet.repository';
+import { TransactionInterface } from 'src/vault/interface/transaction-interface';
+import { Currency } from 'src/utils/enums/wallet.enum';
+import { TransactionType } from 'src/utils/enums/transaction-type.enum';
 
 @Injectable()
 export class TransactionService {
   constructor(
     private readonly transactionRepository: TransactionRepository,
-    // private readonly walletService: WalletService,
     private readonly walletRepository: WalletRepository,
+    private readonly providerOperationRepository: ProviderOperationRepository,
   ) {}
 
   async debitUserWallet(userId: string, currency: Currency, amount: Number) {
-    const walletDetails = await this.checkWalletBalance(
-      userId,
-      currency,
-      amount,
-    );
+    const walletDetails = await this.checkWalletBalance(userId, currency, amount);
     const newBalance = Number(walletDetails.balance) - Number(amount);
 
     await this.walletRepository.findOneAndUpdate(walletDetails.id, {
@@ -108,6 +102,7 @@ export class TransactionService {
     }
     return walletInfo;
   }
+
   async getUserWalletByCurrencyandUserId(userId: string, currency: Currency) {
     const res = await this.walletRepository.findOne({
       where: { userId, currency },
@@ -119,30 +114,127 @@ export class TransactionService {
 
     return res;
   }
+
   async getUserTransaction(userId: string, pageOptionsDto: PageOptionsDto) {
-    const res = await this.transactionRepository.getUserTransactions(
-      pageOptionsDto,
+    return this.transactionRepository.getUserTransactions(pageOptionsDto, userId);
+  }
+
+  async getUserTransactionDetail(userId: string, id: string) {
+    const transaction = await this.transactionRepository.findUserTransactionById(
+      userId,
+      id,
+    );
+    const receipt = await this.buildReceipt(transaction);
+
+    return {
+      transaction,
+      receipt,
+    };
+  }
+
+  async getUserTransactionReceipt(userId: string, id: string) {
+    const transaction = await this.transactionRepository.findUserTransactionById(
+      userId,
+      id,
+    );
+
+    return this.buildReceipt(transaction);
+  }
+
+  async getUserStatement(userId: string, pageOptionsDto: PageOptionsDto) {
+    const statement = await this.transactionRepository.getUserTransactions(
+      {
+        ...pageOptionsDto,
+        isExport: undefined,
+      } as PageOptionsDto,
       userId,
     );
-    return res;
+
+    const items = Array.isArray(statement) ? statement : statement.data;
+    const totals = items.reduce(
+      (accumulator, item) => {
+        if (item.type === TransactionType.CREDIT) {
+          accumulator.inflow[item.currency] =
+            (accumulator.inflow[item.currency] ?? 0) + Number(item.amount);
+        } else {
+          accumulator.outflow[item.currency] =
+            (accumulator.outflow[item.currency] ?? 0) + Number(item.amount);
+        }
+
+        return accumulator;
+      },
+      {
+        inflow: {} as Record<string, number>,
+        outflow: {} as Record<string, number>,
+      },
+    );
+
+    return {
+      period: {
+        from: pageOptionsDto.from || null,
+        to: pageOptionsDto.to || null,
+      },
+      totals,
+      transactions: items,
+      meta: Array.isArray(statement) ? null : statement.meta,
+      export: {
+        availableFormats: ['JSON'],
+        message: 'Statement export is available through the API response in staging.',
+      },
+    };
   }
-  create(createTransactionDto: CreateTransactionDto) {
-    return 'This action adds a new transaction';
+
+  create() {
+    return null;
   }
 
   findAll() {
-    return `This action returns all transaction`;
+    return [];
   }
 
-  findOne(id: number) {
-    return `This action returns a #${id} transaction`;
+  findOne() {
+    return null;
   }
 
-  update(id: number, updateTransactionDto: UpdateTransactionDto) {
-    return `This action updates a #${id} transaction`;
+  update() {
+    return null;
   }
 
-  remove(id: number) {
-    return `This action removes a #${id} transaction`;
+  remove() {
+    return null;
+  }
+
+  private async buildReceipt(transaction: any) {
+    const providerOperation = transaction.reference
+      ? await this.providerOperationRepository.findByReference(transaction.reference)
+      : null;
+
+    return {
+      id: transaction.id,
+      reference: transaction.reference,
+      type: transaction.type,
+      tag: transaction.tag,
+      currency: transaction.currency,
+      amount: transaction.amount,
+      balanceBefore: transaction.balanceBefore,
+      balanceAfter: transaction.balanceAfter,
+      status:
+        providerOperation?.status ??
+        (transaction.type === TransactionType.DEBIT ? 'COMPLETED' : 'COMPLETED'),
+      title: transaction.info,
+      description: transaction.description,
+      provider: providerOperation?.provider ?? null,
+      providerReference: providerOperation?.externalReference ?? null,
+      createdAt: transaction.createdAt,
+      share: {
+        title: `VidalPay ${transaction.tag} receipt`,
+        message: `${transaction.info} | ${transaction.currency} ${transaction.amount} | Ref: ${transaction.reference}`,
+        fields: [
+          { label: 'Reference', value: transaction.reference },
+          { label: 'Amount', value: `${transaction.currency} ${transaction.amount}` },
+          { label: 'Description', value: transaction.description ?? transaction.info },
+        ],
+      },
+    };
   }
 }

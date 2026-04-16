@@ -32,6 +32,7 @@ export interface ExternalTransferPayload {
   amount: number;
   currency: Currency;
   destinationAccountNumber: string;
+  destinationBankCode?: string | null;
   destinationAccountName?: string | null;
   destinationBankName?: string | null;
   destinationRoutingNumber?: string | null;
@@ -220,6 +221,43 @@ export interface ProviderCardTopUpStatus {
   redirectUrl: string | null;
 }
 
+export interface ProviderBankOption {
+  id: string;
+  code: string;
+  name: string;
+  country: SupportedRegion;
+  currency: Currency;
+  enabled: boolean;
+  metadata?: Record<string, any> | null;
+}
+
+export interface ProviderBankCatalog {
+  region: SupportedRegion;
+  provider: KycProvider;
+  source: 'PROVIDER' | 'CURATED_FALLBACK';
+  message: string | null;
+  banks: ProviderBankOption[];
+}
+
+export interface ProviderAccountResolutionPayload {
+  currency: Currency;
+  destinationAccountNumber: string;
+  destinationBankCode?: string | null;
+  destinationBankName?: string | null;
+}
+
+export interface ProviderAccountResolutionResult {
+  resolved: boolean;
+  accountNumber: string;
+  accountName: string | null;
+  bankCode: string | null;
+  bankName: string | null;
+  currency: Currency;
+  provider: KycProvider;
+  message: string;
+  metadata?: Record<string, any> | null;
+}
+
 export interface ProviderWebhookExecution {
   provider: KycProvider;
   eventType: string;
@@ -260,6 +298,10 @@ export interface RegionalProviderAdapter {
   validateUtilityCustomer?(
     payload: ProviderUtilityValidationPayload,
   ): Promise<ProviderUtilityValidationResult>;
+  getBankCatalog?(): Promise<ProviderBankCatalog>;
+  resolveExternalAccount?(
+    payload: ProviderAccountResolutionPayload,
+  ): Promise<ProviderAccountResolutionResult>;
   getCardTopUpStatus?(
     reference: string,
   ): Promise<ProviderCardTopUpStatus | null>;

@@ -23,7 +23,10 @@ import { Currency } from 'src/utils/enums/wallet.enum';
 import { ProviderRouterService } from './provider-router.service';
 import {
   CardTopUpIntentPayload,
+  ProviderAccountResolutionPayload,
+  ProviderAccountResolutionResult,
   ProviderAirtimeCatalog,
+  ProviderBankCatalog,
   ProviderCardTopUpStatus,
   ProviderDataCatalog,
   ProviderProductPayload,
@@ -86,6 +89,27 @@ export class ProviderOperationsService {
     return provider.validateUtilityCustomer(payload);
   }
 
+  async getBankCatalog(region: SupportedRegion): Promise<ProviderBankCatalog> {
+    const provider = this.providerRouter.getProviderByRegion(region);
+    if (!provider?.getBankCatalog) {
+      throw new BadRequestException(API_MESSAGES.EXTERNAL_TRANSFER_UNAVAILABLE);
+    }
+
+    return provider.getBankCatalog();
+  }
+
+  async resolveExternalAccount(
+    region: SupportedRegion,
+    payload: ProviderAccountResolutionPayload,
+  ): Promise<ProviderAccountResolutionResult> {
+    const provider = this.providerRouter.getProviderByRegion(region);
+    if (!provider?.resolveExternalAccount) {
+      throw new BadRequestException(API_MESSAGES.EXTERNAL_TRANSFER_UNAVAILABLE);
+    }
+
+    return provider.resolveExternalAccount(payload);
+  }
+
   async getCardTopUpStatus(
     userId: string,
     reference: string,
@@ -126,7 +150,11 @@ export class ProviderOperationsService {
         ? user.wallet
         : await this.walletRepository.findUserWallets(user.id);
 
-    if (!provider || !wallets.length) {
+    if (
+      !provider ||
+      !wallets.length ||
+      !provider.supportsOperation(ProviderOperationType.RAIL_PROVISIONING)
+    ) {
       return wallets;
     }
 
@@ -146,7 +174,9 @@ export class ProviderOperationsService {
         wallet.providerReference !== rail.providerReference ||
         wallet.providerAccountId !== rail.providerAccountId ||
         wallet.providerCustomerId !== rail.providerCustomerId ||
-        wallet.providerVirtualAccountId !== rail.providerVirtualAccountId;
+        wallet.providerVirtualAccountId !== rail.providerVirtualAccountId ||
+        JSON.stringify(wallet.providerMetadata ?? null) !==
+          JSON.stringify(rail.providerMetadata ?? null);
 
       if (!railChanged) {
         continue;
@@ -203,6 +233,7 @@ export class ProviderOperationsService {
     amount: number;
     currency: Currency;
     destinationAccountNumber: string;
+    destinationBankCode?: string | null;
     destinationAccountName?: string | null;
     destinationBankName?: string | null;
     destinationRoutingNumber?: string | null;
@@ -224,6 +255,7 @@ export class ProviderOperationsService {
       amount: input.amount,
       currency: input.currency,
       destinationAccountNumber: input.destinationAccountNumber,
+      destinationBankCode: input.destinationBankCode,
       destinationAccountName: input.destinationAccountName,
       destinationBankName: input.destinationBankName,
       destinationRoutingNumber: input.destinationRoutingNumber,
@@ -244,6 +276,7 @@ export class ProviderOperationsService {
       amount: input.amount,
       requestPayload: {
         destinationAccountNumber: input.destinationAccountNumber,
+        destinationBankCode: input.destinationBankCode ?? null,
         destinationAccountName: input.destinationAccountName ?? null,
         destinationBankName: input.destinationBankName ?? null,
         destinationRoutingNumber: input.destinationRoutingNumber ?? null,

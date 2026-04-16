@@ -34,6 +34,11 @@ export class UserController {
     return this.userService.getMe(user.sub);
   }
 
+  @Get('home')
+  getHome(@ActiveUser() user: ActiveUserData) {
+    return this.userService.getHomeOverview(user.sub);
+  }
+
   @Patch('profile')
   updateProfile(
     @ActiveUser() user: ActiveUserData,

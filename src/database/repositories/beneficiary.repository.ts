@@ -1,17 +1,13 @@
 import { Injectable, Logger, NotFoundException } from '@nestjs/common';
 import { InjectRepository } from '@nestjs/typeorm';
-import { Repository, Brackets } from 'typeorm';
-import { AbstractRepository } from 'src/database/abstract.repository';
-import { Beneficiary } from 'src/database/entities/beneficiary.entity';
-import { PageOptionsDto } from 'src/common/pagination/pageOptionsDto.dto';
-import { PageMetaDto } from 'src/common/pagination/meta.dto';
 import { PageDto } from 'src/common/pagination/page.dto';
-import { User } from '../entities/user.entity';
-// import { API_MESSAGES } from 'src/utils/apiMessages';
-// import {
-//   PageOptionsDto,
-//   ReportRange,
-// } from 'src/common/pagination/pageOptionsDto.dto';
+import { PageMetaDto } from 'src/common/pagination/meta.dto';
+import { PageOptionsDto } from 'src/common/pagination/pageOptionsDto.dto';
+import { AbstractRepository } from 'src/database/abstract.repository';
+import { Beneficiary, BeneficiaryType } from 'src/database/entities/beneficiary.entity';
+import { User } from 'src/database/entities/user.entity';
+import { Currency } from 'src/utils/enums/wallet.enum';
+import { Brackets, Repository } from 'typeorm';
 
 @Injectable()
 export class BeneficiaryRepository extends AbstractRepository<Beneficiary> {
@@ -24,44 +20,48 @@ export class BeneficiaryRepository extends AbstractRepository<Beneficiary> {
     super(beneficiaryEntityRepository);
   }
 
-  public async getUserBeneficiaries(
+  async getUserBeneficiaries(
     pageOptionsDto: PageOptionsDto,
     userId: string,
-  ) {
-    this.logger.log(`Fetching all users with pagination`);
-    console.log(pageOptionsDto, 'THE PAGE OPTIONS');
-    console.log(userId, 'USERIDOOOOOOO');
-    const { search, role, skip, isExport } = pageOptionsDto;
+  ): Promise<PageDto<Beneficiary> | Beneficiary[]> {
+    const { search, skip, isExport } = pageOptionsDto;
     const query = this.beneficiaryEntityRepository
       .createQueryBuilder('beneficiary')
+      .leftJoinAndMapOne(
+        'beneficiary.recipient',
+        User,
+        'recipient',
+        'beneficiary.beneficiaryId = recipient.id',
+      )
       .where('beneficiary.senderId = :userId', { userId });
 
-    query.leftJoinAndMapOne(
-      'beneficiary.recipient',
-      User,
-      'recipient',
-      'beneficiary.beneficiaryId = recipient.id',
-    );
-
-    // Apply search filters if a search term is provided
     if (search) {
-      query.where(
+      query.andWhere(
         new Brackets((qb) => {
-          qb.where('recipient.id LIKE :search', { search: `%${search}%` })
+          qb.where('beneficiary.displayName LIKE :search', {
+            search: `%${search}%`,
+          })
+            .orWhere('beneficiary.accountName LIKE :search', {
+              search: `%${search}%`,
+            })
+            .orWhere('beneficiary.bankName LIKE :search', {
+              search: `%${search}%`,
+            })
+            .orWhere('beneficiary.accountNumber LIKE :search', {
+              search: `%${search}%`,
+            })
+            .orWhere('beneficiary.tagId LIKE :search', {
+              search: `%${search}%`,
+            })
             .orWhere('recipient.firstName LIKE :search', {
               search: `%${search}%`,
             })
             .orWhere('recipient.lastName LIKE :search', {
               search: `%${search}%`,
-            })
-            .orWhere('recipient.tagId LIKE :search', {
-              search: `%${search}%`,
             });
         }),
       );
     }
-
-    console.log(pageOptionsDto, 'THE PAGE OPTIONS DTO');
 
     if (pageOptionsDto.from && pageOptionsDto.to) {
       query.andWhere('beneficiary.createdAt BETWEEN :from AND :to', {
@@ -73,40 +73,144 @@ export class BeneficiaryRepository extends AbstractRepository<Beneficiary> {
     const page = Number(pageOptionsDto.page) || 1;
     const limit = Number(pageOptionsDto.limit) || 50;
 
-    console.log(page, limit, 'THE PAGE');
-    console.log(isExport, 'THE EXPORT');
     if (isExport) {
-      console.log('EXPORTING');
-      return await query.orderBy('beneficiary.createdAt', 'DESC').getMany();
+      return query.orderBy('beneficiary.updatedAt', 'DESC').getMany();
     }
 
     const [entities, itemCount] = await query
       .skip(skip || (page - 1) * limit)
       .take(limit)
-      .orderBy('beneficiary.createdAt', 'DESC')
+      .orderBy('beneficiary.updatedAt', 'DESC')
       .getManyAndCount();
 
-    // Return paginated result
-    const pageMetaDto = new PageMetaDto({ itemCount, pageOptionsDto });
-    return new PageDto(entities, pageMetaDto);
+    return new PageDto(
+      entities,
+      new PageMetaDto({
+        itemCount,
+        pageOptionsDto,
+      }),
+    );
   }
 
-  /**
-   * Delete a beneficiary by ID and sender ID
-   * @param beneficiaryId - The ID of the beneficiary to delete
-   * @param senderId - The ID of the user who owns the beneficiary
-   * @returns Promise<void>
-   * @throws NotFoundException if beneficiary not found
-   */
-  public async deleteBeneficiary(
-    beneficiaryId: string,
+  async findInternalBeneficiary(
     senderId: string,
-  ): Promise<void> {
-    // First, check if the beneficiary exists and belongs to the sender
+    beneficiaryId: string,
+  ): Promise<Beneficiary | null> {
+    return this.findOne({
+      where: {
+        senderId,
+        beneficiaryId,
+        type: BeneficiaryType.INTERNAL_TAG,
+      },
+    });
+  }
+
+  async findBankBeneficiary(
+    senderId: string,
+    currency: Currency,
+    accountNumber: string,
+    bankCode?: string | null,
+  ): Promise<Beneficiary | null> {
+    const query = this.beneficiaryEntityRepository
+      .createQueryBuilder('beneficiary')
+      .where('beneficiary.senderId = :senderId', { senderId })
+      .andWhere('beneficiary.type = :type', {
+        type: BeneficiaryType.BANK_ACCOUNT,
+      })
+      .andWhere('beneficiary.currency = :currency', { currency })
+      .andWhere('beneficiary.accountNumber = :accountNumber', { accountNumber });
+
+    if (bankCode) {
+      query.andWhere('beneficiary.bankCode = :bankCode', { bankCode });
+    }
+
+    return query.getOne();
+  }
+
+  async upsertInternalRecipient(input: {
+    senderId: string;
+    beneficiaryId: string;
+    tagId: string | null;
+    displayName: string | null;
+    currency: Currency;
+  }): Promise<Beneficiary> {
+    const existing = await this.findInternalBeneficiary(
+      input.senderId,
+      input.beneficiaryId,
+    );
+
+    if (existing) {
+      await this.findOneAndUpdate(existing.id, {
+        tagId: input.tagId ?? undefined,
+        displayName: input.displayName ?? undefined,
+        currency: input.currency,
+        lastUsedAt: new Date(),
+      });
+
+      return (await this.findOne({ where: { id: existing.id } })) as Beneficiary;
+    }
+
+    return this.create({
+      senderId: input.senderId,
+      beneficiaryId: input.beneficiaryId,
+      type: BeneficiaryType.INTERNAL_TAG,
+      tagId: input.tagId,
+      displayName: input.displayName,
+      currency: input.currency,
+      lastUsedAt: new Date(),
+    });
+  }
+
+  async upsertBankRecipient(input: {
+    senderId: string;
+    currency: Currency;
+    accountNumber: string;
+    accountName?: string | null;
+    bankName?: string | null;
+    routingNumber?: string | null;
+    bankCode?: string | null;
+    displayName?: string | null;
+    provider?: any;
+    metadata?: Record<string, any> | null;
+  }): Promise<Beneficiary> {
+    const existing = await this.findBankBeneficiary(
+      input.senderId,
+      input.currency,
+      input.accountNumber,
+      input.bankCode,
+    );
+
+    const patch = {
+      type: BeneficiaryType.BANK_ACCOUNT,
+      currency: input.currency,
+      accountNumber: input.accountNumber,
+      accountName: input.accountName ?? null,
+      bankName: input.bankName ?? null,
+      routingNumber: input.routingNumber ?? null,
+      bankCode: input.bankCode ?? null,
+      displayName: input.displayName ?? input.accountName ?? null,
+      provider: input.provider ?? null,
+      metadata: input.metadata ?? null,
+      lastUsedAt: new Date(),
+    };
+
+    if (existing) {
+      await this.findOneAndUpdate(existing.id, patch);
+      return (await this.findOne({ where: { id: existing.id } })) as Beneficiary;
+    }
+
+    return this.create({
+      senderId: input.senderId,
+      beneficiaryId: null,
+      ...patch,
+    });
+  }
+
+  async deleteBeneficiary(beneficiaryId: string, senderId: string): Promise<void> {
     const beneficiary = await this.beneficiaryEntityRepository.findOne({
       where: {
         id: beneficiaryId,
-        senderId: senderId,
+        senderId,
       },
     });
 
@@ -119,14 +223,9 @@ export class BeneficiaryRepository extends AbstractRepository<Beneficiary> {
       );
     }
 
-    // Delete the beneficiary
     await this.beneficiaryEntityRepository.delete({
       id: beneficiaryId,
-      senderId: senderId,
+      senderId,
     });
-
-    this.logger.log(
-      `Successfully deleted beneficiary with ID: ${beneficiaryId}`,
-    );
   }
 }
