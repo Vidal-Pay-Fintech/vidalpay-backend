@@ -8,6 +8,9 @@ export interface UserCapabilities {
   hasTransactionPin: boolean;
   canReceive: boolean;
   canTransfer: boolean;
+  canInternalTransfer: boolean;
+  canExternalTransfer: boolean;
+  canExternalReceive: boolean;
   blockedReason: string | null;
   limits: DynamicLimitProfile;
   productAvailability: ProductAvailability;

@@ -16,6 +16,7 @@ import { BeneficiaryModule } from './beneficiary/beneficiary.module';
 import { SupportModule } from './support/support.module';
 import { LegalModule } from './legal/legal.module';
 import { CryptoModule } from './crypto/crypto.module';
+import { HealthModule } from './health/health.module';
 
 @Module({
   imports: [
@@ -35,6 +36,7 @@ import { CryptoModule } from './crypto/crypto.module';
     SupportModule,
     LegalModule,
     CryptoModule,
+    HealthModule,
   ],
   controllers: [AppController],
   providers: [AppService, ConfigService],

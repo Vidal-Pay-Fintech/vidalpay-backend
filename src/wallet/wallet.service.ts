@@ -37,6 +37,7 @@ import { API_MESSAGES } from 'src/utils/apiMessages';
 import { ProviderOperationRepository } from 'src/database/repositories/provider-operation.repository';
 import { CreateCardTopUpIntentDto } from './dto/create-card-topup-intent.dto';
 import { ValidateUtilityCustomerDto } from './dto/validate-utility-customer.dto';
+import { ResolveExternalAccountDto } from './dto/resolve-external-account.dto';
 
 @Injectable()
 export class WalletService {
@@ -155,37 +156,16 @@ export class WalletService {
         },
       );
 
-      //beneficiary service.addtobeneficiary
-      //emailservice
-      // await this.mailService.sendTransactionMail(
-      //   userInfo.id,
-      //   amount,
-      //   info,
-      //   currency,
-      // );
-
-      const findBeneficiary = await this.beneficiaryRepository.findOne({
-        where: {
-          beneficiaryId: recipientInfo.id,
-        },
-      });
-
-      const beneficiaryEixt =
-        findBeneficiary?.beneficiaryId == recipientInfo.id;
-
-      // console.log('beneficiaryEixt', beneficiaryEixt);
-      // console.log('beneficiaryId', findBeneficiary?.beneficiaryId);
-      // console.log('recipientInfo', recipientInfo.id);
-      // if (!beneficiaryEixt) {
-      await this.beneficiaryRepository.create({
-        beneficiaryId: recipientInfo.id,
+      await this.beneficiaryRepository.upsertInternalRecipient({
         senderId: userInfo.id,
+        beneficiaryId: recipientInfo.id,
+        tagId: recipientInfo.tagId ?? recipientTag,
+        displayName: [recipientInfo.firstName, recipientInfo.lastName]
+          .filter(Boolean)
+          .join(' ')
+          .trim(),
+        currency,
       });
-      // }
-      // const beneficiaryres = await this.beneficiaryRepository.create({
-      //   beneficiaryId: recipientInfo.id,
-      //   senderId: userInfo.id,
-      // });
 
       return userDebitRes;
     } catch (err) {
@@ -415,8 +395,29 @@ export class WalletService {
       externalTransferDto.currency,
       externalTransferDto.amount,
     );
+    const resolvedRecipient = await this.providerOperationsService.resolveExternalAccount(
+      region,
+      {
+        currency: externalTransferDto.currency,
+        destinationAccountNumber: externalTransferDto.destinationAccountNumber,
+        destinationBankCode: externalTransferDto.destinationBankCode ?? null,
+        destinationBankName: externalTransferDto.destinationBankName ?? null,
+      },
+    );
 
-    return this.executeDebitedProviderOperation({
+    const destinationBankCode =
+      externalTransferDto.destinationBankCode ??
+      resolvedRecipient.bankCode ??
+      externalTransferDto.destinationRoutingNumber ??
+      null;
+
+    if (!destinationBankCode) {
+      throw new BadRequestException(
+        'A valid destination bank is required for NG external transfers.',
+      );
+    }
+
+    const response = await this.executeDebitedProviderOperation({
       userId,
       amount: externalTransferDto.amount,
       currency: externalTransferDto.currency,
@@ -434,15 +435,90 @@ export class WalletService {
           amount: externalTransferDto.amount,
           currency: externalTransferDto.currency,
           destinationAccountNumber: externalTransferDto.destinationAccountNumber,
+          destinationBankCode,
           destinationAccountName:
-            externalTransferDto.destinationAccountName ?? null,
-          destinationBankName: externalTransferDto.destinationBankName ?? null,
+            externalTransferDto.destinationAccountName ??
+            resolvedRecipient.accountName ??
+            null,
+          destinationBankName:
+            externalTransferDto.destinationBankName ??
+            resolvedRecipient.bankName ??
+            null,
           destinationRoutingNumber:
             externalTransferDto.destinationRoutingNumber ?? null,
           narration: externalTransferDto.narration ?? null,
-          metadata: externalTransferDto.metadata ?? null,
+          metadata: {
+            ...(externalTransferDto.metadata ?? {}),
+            destinationBankCode,
+            resolvedAccountName: resolvedRecipient.accountName,
+          },
         }),
     });
+
+    if (externalTransferDto.saveBeneficiary !== false) {
+      await this.beneficiaryRepository.upsertBankRecipient({
+        senderId: userId,
+        currency: externalTransferDto.currency,
+        accountNumber: externalTransferDto.destinationAccountNumber,
+        accountName:
+          externalTransferDto.destinationAccountName ??
+          resolvedRecipient.accountName ??
+          null,
+        bankName:
+          externalTransferDto.destinationBankName ??
+          resolvedRecipient.bankName ??
+          null,
+        routingNumber: externalTransferDto.destinationRoutingNumber ?? null,
+        bankCode: destinationBankCode,
+        displayName:
+          externalTransferDto.destinationAccountName ??
+          resolvedRecipient.accountName ??
+          null,
+        provider: capabilities.provider,
+        metadata: {
+          source: 'EXTERNAL_TRANSFER',
+        },
+      });
+    }
+
+    return response;
+  }
+
+  async getExternalBankCatalog(userId: string) {
+    const accountOverview = await this.userService.getAccountOverview(userId);
+    if (!accountOverview.region) {
+      throw new BadRequestException(API_MESSAGES.KYC_REGION_REQUIRED);
+    }
+
+    if (accountOverview.region !== SupportedRegion.NG) {
+      throw new BadRequestException(API_MESSAGES.EXTERNAL_TRANSFER_UNAVAILABLE);
+    }
+
+    return this.providerOperationsService.getBankCatalog(accountOverview.region);
+  }
+
+  async resolveExternalTransferRecipient(
+    resolveExternalAccountDto: ResolveExternalAccountDto,
+    userId: string,
+  ) {
+    const accountOverview = await this.userService.getAccountOverview(userId);
+    if (!accountOverview.region) {
+      throw new BadRequestException(API_MESSAGES.KYC_REGION_REQUIRED);
+    }
+
+    if (accountOverview.region !== SupportedRegion.NG) {
+      throw new BadRequestException(API_MESSAGES.EXTERNAL_TRANSFER_UNAVAILABLE);
+    }
+
+    return this.providerOperationsService.resolveExternalAccount(
+      accountOverview.region,
+      {
+        currency: resolveExternalAccountDto.currency,
+        destinationAccountNumber: resolveExternalAccountDto.destinationAccountNumber,
+        destinationBankCode: resolveExternalAccountDto.destinationBankCode ?? null,
+        destinationBankName: resolveExternalAccountDto.destinationBankName ?? null,
+      },
+    );
   }
 
   async purchaseAirtime(airtimePurchaseDto: AirtimePurchaseDto, userId: string) {

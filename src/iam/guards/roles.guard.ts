@@ -27,7 +27,6 @@ export class RolesGuard implements CanActivate {
       return false;
     }
     const decodedToken = await this.authService.verifyToken(token);
-    console.log(decodedToken, 'THE DECODED TOKEN');
     if (!decodedToken) {
       return false;
     }

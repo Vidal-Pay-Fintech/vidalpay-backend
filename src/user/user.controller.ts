@@ -34,6 +34,11 @@ export class UserController {
     return this.userService.getMe(user.sub);
   }
 
+  @Get('home')
+  getHome(@ActiveUser() user: ActiveUserData) {
+    return this.userService.getHomeOverview(user.sub);
+  }
+
   @Patch('profile')
   updateProfile(
     @ActiveUser() user: ActiveUserData,
@@ -128,5 +133,10 @@ export class UserController {
     @Body() submitKycDto: SubmitKycDto,
   ) {
     return this.userService.submitKyc(user.sub, submitKycDto);
+  }
+
+  @Post('kyc/staging/verify')
+  stagingVerifyKyc(@ActiveUser() user: ActiveUserData) {
+    return this.userService.stagingVerifyKyc(user.sub);
   }
 }

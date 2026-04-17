@@ -1,4 +1,5 @@
 import {
+  IsBoolean,
   IsEnum,
   IsNotEmpty,
   IsNumber,
@@ -44,9 +45,17 @@ export class ExternalTransferDto {
 
   @IsOptional()
   @IsString()
+  destinationBankCode?: string;
+
+  @IsOptional()
+  @IsString()
   narration?: string;
 
   @IsOptional()
   @IsObject()
   metadata?: Record<string, any>;
+
+  @IsOptional()
+  @IsBoolean()
+  saveBeneficiary?: boolean;
 }

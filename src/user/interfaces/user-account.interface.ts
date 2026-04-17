@@ -7,6 +7,9 @@ import { Currency } from 'src/utils/enums/wallet.enum';
 export interface ProductAvailability {
   wallet: boolean;
   transfer: boolean;
+  internalTransfer?: boolean;
+  externalTransfer?: boolean;
+  receive?: boolean;
   deposit: boolean;
   cardTopUp: boolean;
   conversion: boolean;
@@ -78,6 +81,13 @@ export interface WalletRailDetails {
   providerVirtualAccountId: string | null;
   providerReference: string | null;
   providerMetadata: Record<string, any> | null;
+  provisioningStatus?:
+    | 'READY'
+    | 'PENDING'
+    | 'DEFERRED'
+    | 'UNAVAILABLE';
+  blockedReason?: string | null;
+  supportedOperations?: Array<'RECEIVE' | 'TRANSFER' | 'TOP_UP'>;
 }
 
 export interface FundingMethodAvailability {

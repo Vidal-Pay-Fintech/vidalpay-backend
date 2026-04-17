@@ -21,6 +21,7 @@ import { DataPurchaseDto } from './dto/data-purchase.dto';
 import { UtilityPaymentDto } from './dto/utility-payment.dto';
 import { CreateCardTopUpIntentDto } from './dto/create-card-topup-intent.dto';
 import { ValidateUtilityCustomerDto } from './dto/validate-utility-customer.dto';
+import { ResolveExternalAccountDto } from './dto/resolve-external-account.dto';
 
 @Controller('wallet')
 export class WalletController {
@@ -40,6 +41,22 @@ export class WalletController {
     @ActiveUser() user: ActiveUserData,
   ) {
     return this.walletService.externalTransfer(externalTransferDto, user.sub);
+  }
+
+  @Get('catalogs/banks')
+  getExternalBankCatalog(@ActiveUser() user: ActiveUserData) {
+    return this.walletService.getExternalBankCatalog(user.sub);
+  }
+
+  @Post('external-transfer/resolve')
+  resolveExternalTransferRecipient(
+    @Body() resolveExternalAccountDto: ResolveExternalAccountDto,
+    @ActiveUser() user: ActiveUserData,
+  ) {
+    return this.walletService.resolveExternalTransferRecipient(
+      resolveExternalAccountDto,
+      user.sub,
+    );
   }
 
   @Post('internal-exchange')

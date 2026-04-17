@@ -171,6 +171,9 @@ export class UserPolicyService {
       hasTransactionPin,
       canReceive,
       canTransfer,
+      canInternalTransfer: canTransfer,
+      canExternalTransfer: canTransfer && productAvailability.externalTransfer !== false,
+      canExternalReceive: productAvailability.deposit,
       blockedReason,
       limits: this.buildDynamicLimits(
         resolution,
@@ -591,6 +594,9 @@ export class UserPolicyService {
     const baseAvailability: ProductAvailability = {
       wallet: true,
       transfer: false,
+      internalTransfer: false,
+      externalTransfer: false,
+      receive: true,
       deposit: false,
       cardTopUp: false,
       conversion: false,
@@ -609,10 +615,13 @@ export class UserPolicyService {
     if (resolution.region === SupportedRegion.NG) {
       return {
         ...baseAvailability,
+        receive: true,
         deposit: true,
         cardTopUp: true,
         conversion: true,
         transfer: canTransfer,
+        internalTransfer: canTransfer,
+        externalTransfer: canTransfer,
         airtime: true,
         data: true,
         utilities: true,
@@ -622,11 +631,15 @@ export class UserPolicyService {
     if (resolution.region === SupportedRegion.US) {
       return {
         ...baseAvailability,
-        deposit: true,
+        receive: true,
         conversion: true,
         transfer: canTransfer,
-        loan: true,
-        taxFiling: true,
+        internalTransfer: canTransfer,
+        externalTransfer: false,
+        deposit: false,
+        cardTopUp: false,
+        loan: false,
+        taxFiling: false,
       };
     }
 

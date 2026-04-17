@@ -279,7 +279,7 @@ export class AuthenticationService {
 
   async signIn(signInDto: SignInDto) {
     const { email, phoneNumber, password } = signInDto;
-    console.log(`[AUTH] login start for ${email ?? phoneNumber}`);
+    this.logger.log(`[AUTH] login start for ${email ?? phoneNumber}`);
 
     try {
       // Validate that at least one identifier is provided
@@ -325,13 +325,13 @@ export class AuthenticationService {
       // Check the account status of the user
       await this.checkAccountStatus(user);
 
-      console.log(`[AUTH] login success for user ${user.id}`);
+      this.logger.log(`[AUTH] login success for user ${user.id}`);
       return {
         ...tokens,
         user: user,
       };
     } catch (error) {
-      console.error(
+      this.logger.error(
         `[AUTH] login failed for ${email ?? phoneNumber}: ${error.message}`,
         error.stack,
       );
@@ -400,7 +400,6 @@ export class AuthenticationService {
     }
 
     const tokens = await this.generateToken(admin);
-    console.log(tokens);
     // delete admin.password;
     return {
       ...tokens,
@@ -409,7 +408,6 @@ export class AuthenticationService {
   }
 
   async sendResetPasswordLink(resetPasswordLinkDto: ResetPasswordLinkDto) {
-    console.log(resetPasswordLinkDto);
     const { email } = resetPasswordLinkDto;
     const user = await this.userRepository.findUserByEmail(email);
     if (!user) {
@@ -460,7 +458,7 @@ export class AuthenticationService {
 
   async generateToken(user: User) {
     if (!this.jwtConfiguration.secret) {
-      console.error('[AUTH] JWT secret is missing');
+      this.logger.error('[AUTH] JWT secret is missing');
       throw new InternalServerErrorException(
         'Authentication configuration is incomplete.',
       );

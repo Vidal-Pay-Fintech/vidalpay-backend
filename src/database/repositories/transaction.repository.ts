@@ -1,15 +1,12 @@
 import { Injectable, Logger, NotFoundException } from '@nestjs/common';
 import { InjectRepository } from '@nestjs/typeorm';
-import { Brackets, Repository } from 'typeorm';
-import { AbstractRepository } from 'src/database/abstract.repository';
-import { TransactionEntity } from '../entities/transaction.entity';
-// import { API_MESSAGES } from 'src/utils/apiMessages';
-import {
-  PageOptionsDto,
-  ReportRange,
-} from 'src/common/pagination/pageOptionsDto.dto';
-import { PageMetaDto } from 'src/common/pagination/meta.dto';
 import { PageDto } from 'src/common/pagination/page.dto';
+import { PageMetaDto } from 'src/common/pagination/meta.dto';
+import { PageOptionsDto } from 'src/common/pagination/pageOptionsDto.dto';
+import { AbstractRepository } from 'src/database/abstract.repository';
+import { TransactionEntity } from 'src/database/entities/transaction.entity';
+import { TransactionType } from 'src/utils/enums/transaction-type.enum';
+import { Brackets, Repository } from 'typeorm';
 
 @Injectable()
 export class TransactionRepository extends AbstractRepository<TransactionEntity> {
@@ -22,20 +19,17 @@ export class TransactionRepository extends AbstractRepository<TransactionEntity>
     super(transactionEntityRepository);
   }
 
-  public async getUserTransactions(
+  async getUserTransactions(
     pageOptionsDto: PageOptionsDto,
     userId: string,
-  ) {
-    this.logger.log(`Fetching all users with pagination`);
-    console.log(pageOptionsDto, 'THE PAGE OPTIONS');
-    const { search, role, skip, isExport } = pageOptionsDto;
+  ): Promise<PageDto<TransactionEntity> | TransactionEntity[]> {
+    const { search, skip, isExport, transactionType, status } = pageOptionsDto;
     const query = this.transactionEntityRepository
       .createQueryBuilder('transaction')
       .where('transaction.userId = :userId', { userId });
 
-    // Apply search filters if a search term is provided
     if (search) {
-      query.where(
+      query.andWhere(
         new Brackets((qb) => {
           qb.where('transaction.info LIKE :search', { search: `%${search}%` })
             .orWhere('transaction.currency LIKE :search', {
@@ -47,12 +41,26 @@ export class TransactionRepository extends AbstractRepository<TransactionEntity>
             .orWhere('transaction.id LIKE :search', { search: `%${search}%` })
             .orWhere('transaction.reference LIKE :search', {
               search: `%${search}%`,
+            })
+            .orWhere('transaction.description LIKE :search', {
+              search: `%${search}%`,
             });
         }),
       );
     }
 
-    console.log(pageOptionsDto, 'THE PAGE OPTIONS DTO');
+    if (transactionType) {
+      const normalizedType = transactionType.toUpperCase();
+      if (normalizedType === TransactionType.CREDIT || normalizedType === TransactionType.DEBIT) {
+        query.andWhere('transaction.type = :type', { type: normalizedType });
+      }
+    }
+
+    if (status) {
+      query.andWhere('transaction.info LIKE :status', {
+        status: `%${status}%`,
+      });
+    }
 
     if (pageOptionsDto.from && pageOptionsDto.to) {
       query.andWhere('transaction.createdAt BETWEEN :from AND :to', {
@@ -64,11 +72,8 @@ export class TransactionRepository extends AbstractRepository<TransactionEntity>
     const page = Number(pageOptionsDto.page) || 1;
     const limit = Number(pageOptionsDto.limit) || 50;
 
-    console.log(page, limit, 'THE PAGE');
-    console.log(isExport, 'THE EXPORT');
     if (isExport) {
-      console.log('EXPORTING');
-      return await query.orderBy('transaction.createdAt', 'DESC').getMany();
+      return query.orderBy('transaction.createdAt', 'DESC').getMany();
     }
 
     const [entities, itemCount] = await query
@@ -77,8 +82,30 @@ export class TransactionRepository extends AbstractRepository<TransactionEntity>
       .orderBy('transaction.createdAt', 'DESC')
       .getManyAndCount();
 
-    // Return paginated result
-    const pageMetaDto = new PageMetaDto({ itemCount, pageOptionsDto });
-    return new PageDto(entities, pageMetaDto);
+    return new PageDto(
+      entities,
+      new PageMetaDto({
+        itemCount,
+        pageOptionsDto,
+      }),
+    );
+  }
+
+  async findUserTransactionById(
+    userId: string,
+    id: string,
+  ): Promise<TransactionEntity> {
+    const transaction = await this.transactionEntityRepository.findOne({
+      where: {
+        id,
+        userId,
+      },
+    });
+
+    if (!transaction) {
+      throw new NotFoundException('Transaction not found.');
+    }
+
+    return transaction;
   }
 }

@@ -23,7 +23,10 @@ import { Currency } from 'src/utils/enums/wallet.enum';
 import { ProviderRouterService } from './provider-router.service';
 import {
   CardTopUpIntentPayload,
+  ProviderAccountResolutionPayload,
+  ProviderAccountResolutionResult,
   ProviderAirtimeCatalog,
+  ProviderBankCatalog,
   ProviderCardTopUpStatus,
   ProviderDataCatalog,
   ProviderProductPayload,
@@ -86,6 +89,27 @@ export class ProviderOperationsService {
     return provider.validateUtilityCustomer(payload);
   }
 
+  async getBankCatalog(region: SupportedRegion): Promise<ProviderBankCatalog> {
+    const provider = this.providerRouter.getProviderByRegion(region);
+    if (!provider?.getBankCatalog) {
+      throw new BadRequestException(API_MESSAGES.EXTERNAL_TRANSFER_UNAVAILABLE);
+    }
+
+    return provider.getBankCatalog();
+  }
+
+  async resolveExternalAccount(
+    region: SupportedRegion,
+    payload: ProviderAccountResolutionPayload,
+  ): Promise<ProviderAccountResolutionResult> {
+    const provider = this.providerRouter.getProviderByRegion(region);
+    if (!provider?.resolveExternalAccount) {
+      throw new BadRequestException(API_MESSAGES.EXTERNAL_TRANSFER_UNAVAILABLE);
+    }
+
+    return provider.resolveExternalAccount(payload);
+  }
+
   async getCardTopUpStatus(
     userId: string,
     reference: string,
@@ -126,7 +150,11 @@ export class ProviderOperationsService {
         ? user.wallet
         : await this.walletRepository.findUserWallets(user.id);
 
-    if (!provider || !wallets.length) {
+    if (
+      !provider ||
+      !wallets.length ||
+      !provider.supportsOperation(ProviderOperationType.RAIL_PROVISIONING)
+    ) {
       return wallets;
     }
 
@@ -137,6 +165,8 @@ export class ProviderOperationsService {
         continue;
       }
 
+      const railOperationStatus = this.mapRailProvisioningStatus(rail);
+
       const railChanged =
         wallet.accountNumber !== rail.accountNumber ||
         wallet.routingNumber !== rail.routingNumber ||
@@ -146,26 +176,26 @@ export class ProviderOperationsService {
         wallet.providerReference !== rail.providerReference ||
         wallet.providerAccountId !== rail.providerAccountId ||
         wallet.providerCustomerId !== rail.providerCustomerId ||
-        wallet.providerVirtualAccountId !== rail.providerVirtualAccountId;
+        wallet.providerVirtualAccountId !== rail.providerVirtualAccountId ||
+        JSON.stringify(wallet.providerMetadata ?? null) !==
+          JSON.stringify(rail.providerMetadata ?? null);
 
-      if (!railChanged) {
-        continue;
+      if (railChanged) {
+        await this.walletRepository.findOneAndUpdate(wallet.id, {
+          accountNumber: rail.accountNumber ?? undefined,
+          routingNumber: rail.routingNumber ?? undefined,
+          accountName: rail.accountName ?? undefined,
+          bankName: rail.bankName ?? undefined,
+          sortCode: rail.sortCode ?? undefined,
+          routingRegionCode: rail.region,
+          routingProvider: rail.provider,
+          providerCustomerId: rail.providerCustomerId ?? undefined,
+          providerAccountId: rail.providerAccountId ?? undefined,
+          providerVirtualAccountId: rail.providerVirtualAccountId ?? undefined,
+          providerReference: rail.providerReference ?? undefined,
+          providerMetadata: rail.providerMetadata ?? undefined,
+        });
       }
-
-      await this.walletRepository.findOneAndUpdate(wallet.id, {
-        accountNumber: rail.accountNumber ?? undefined,
-        routingNumber: rail.routingNumber ?? undefined,
-        accountName: rail.accountName ?? undefined,
-        bankName: rail.bankName ?? undefined,
-        sortCode: rail.sortCode ?? undefined,
-        routingRegionCode: rail.region,
-        routingProvider: rail.provider,
-        providerCustomerId: rail.providerCustomerId ?? undefined,
-        providerAccountId: rail.providerAccountId ?? undefined,
-        providerVirtualAccountId: rail.providerVirtualAccountId ?? undefined,
-        providerReference: rail.providerReference ?? undefined,
-        providerMetadata: rail.providerMetadata ?? undefined,
-      });
 
       const existingOperation = rail.providerReference
         ? await this.providerOperationRepository.findByReference(
@@ -173,14 +203,28 @@ export class ProviderOperationsService {
           )
         : null;
 
-      if (!existingOperation) {
+      if (existingOperation) {
+        await this.providerOperationRepository.findOneAndUpdate(existingOperation.id, {
+          status: railOperationStatus,
+          responsePayload: rail.providerMetadata,
+          metadata: {
+            ...(existingOperation.metadata ?? {}),
+            provisioningState:
+              rail.providerMetadata?.provisioningState ?? null,
+          },
+          reconciledAt:
+            railOperationStatus === ProviderOperationStatus.COMPLETED
+              ? existingOperation.reconciledAt ?? new Date()
+              : null,
+        });
+      } else {
         await this.providerOperationRepository.create({
           userId: user.id,
           walletId: wallet.id,
           provider: rail.provider,
           regionCode: rail.region,
           operationType: ProviderOperationType.RAIL_PROVISIONING,
-          status: ProviderOperationStatus.COMPLETED,
+          status: railOperationStatus,
           reference: rail.providerReference,
           currency: rail.currency,
           requestPayload: {
@@ -188,7 +232,10 @@ export class ProviderOperationsService {
             currency: rail.currency,
           },
           responsePayload: rail.providerMetadata,
-          reconciledAt: new Date(),
+          reconciledAt:
+            railOperationStatus === ProviderOperationStatus.COMPLETED
+              ? new Date()
+              : null,
         });
       }
     }
@@ -203,6 +250,7 @@ export class ProviderOperationsService {
     amount: number;
     currency: Currency;
     destinationAccountNumber: string;
+    destinationBankCode?: string | null;
     destinationAccountName?: string | null;
     destinationBankName?: string | null;
     destinationRoutingNumber?: string | null;
@@ -224,6 +272,7 @@ export class ProviderOperationsService {
       amount: input.amount,
       currency: input.currency,
       destinationAccountNumber: input.destinationAccountNumber,
+      destinationBankCode: input.destinationBankCode,
       destinationAccountName: input.destinationAccountName,
       destinationBankName: input.destinationBankName,
       destinationRoutingNumber: input.destinationRoutingNumber,
@@ -244,6 +293,7 @@ export class ProviderOperationsService {
       amount: input.amount,
       requestPayload: {
         destinationAccountNumber: input.destinationAccountNumber,
+        destinationBankCode: input.destinationBankCode ?? null,
         destinationAccountName: input.destinationAccountName ?? null,
         destinationBankName: input.destinationBankName ?? null,
         destinationRoutingNumber: input.destinationRoutingNumber ?? null,
@@ -667,6 +717,31 @@ export class ProviderOperationsService {
     }
 
     return 'PENDING';
+  }
+
+  private mapRailProvisioningStatus(rail: {
+    accountNumber: string | null;
+    providerMetadata: Record<string, any> | null;
+  }): ProviderOperationStatus {
+    const provisioningState = String(
+      rail.providerMetadata?.provisioningState ?? '',
+    )
+      .trim()
+      .toUpperCase();
+
+    if (provisioningState === 'READY' || rail.accountNumber) {
+      return ProviderOperationStatus.COMPLETED;
+    }
+
+    if (provisioningState === 'DEFERRED') {
+      return ProviderOperationStatus.UNDER_REVIEW;
+    }
+
+    if (provisioningState === 'UNAVAILABLE') {
+      return ProviderOperationStatus.FAILED;
+    }
+
+    return ProviderOperationStatus.PROCESSING;
   }
 
   private buildCardTopUpStatusMessage(

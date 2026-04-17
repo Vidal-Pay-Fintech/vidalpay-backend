@@ -19,7 +19,10 @@ import { Currency } from 'src/utils/enums/wallet.enum';
 import {
   CardTopUpIntentPayload,
   ExternalTransferPayload,
+  ProviderAccountResolutionPayload,
+  ProviderAccountResolutionResult,
   ProviderAirtimeCatalog,
+  ProviderBankCatalog,
   ProviderCardTopUpStatus,
   ProviderCardTopUpIntentExecution,
   ProviderDataCatalog,
@@ -63,6 +66,36 @@ type FlutterwaveBillItem = {
   default_commission?: number | string | null;
   country?: string | null;
   country_code?: string | null;
+};
+
+type FlutterwaveBank = {
+  id?: number | string;
+  code?: string;
+  name?: string;
+};
+
+type RailProvisioningState =
+  | 'READY'
+  | 'PENDING'
+  | 'DEFERRED'
+  | 'UNAVAILABLE';
+
+const FLUTTERWAVE_BANK_FALLBACK_CATALOG: ProviderBankCatalog = {
+  region: SupportedRegion.NG,
+  provider: KycProvider.FLUTTERWAVE,
+  source: 'CURATED_FALLBACK',
+  message:
+    'Using the VidalPay fallback NG bank directory while live bank discovery is unavailable.',
+  banks: [
+    { id: '044', code: '044', name: 'Access Bank', country: SupportedRegion.NG, currency: Currency.NGN, enabled: true },
+    { id: '011', code: '011', name: 'First Bank of Nigeria', country: SupportedRegion.NG, currency: Currency.NGN, enabled: true },
+    { id: '058', code: '058', name: 'Guaranty Trust Bank', country: SupportedRegion.NG, currency: Currency.NGN, enabled: true },
+    { id: '033', code: '033', name: 'United Bank for Africa', country: SupportedRegion.NG, currency: Currency.NGN, enabled: true },
+    { id: '057', code: '057', name: 'Zenith Bank', country: SupportedRegion.NG, currency: Currency.NGN, enabled: true },
+    { id: '50211', code: '50211', name: 'Kuda Microfinance Bank', country: SupportedRegion.NG, currency: Currency.NGN, enabled: true },
+    { id: '999992', code: '999992', name: 'OPay', country: SupportedRegion.NG, currency: Currency.NGN, enabled: true },
+    { id: '100004', code: '100004', name: 'PalmPay', country: SupportedRegion.NG, currency: Currency.NGN, enabled: true },
+  ],
 };
 
 interface FlutterwaveConfig {
@@ -178,6 +211,111 @@ export class FlutterwaveBankingProviderService implements RegionalProviderAdapte
         return FLUTTERWAVE_UTILITIES_FALLBACK_CATALOG;
       }
     });
+  }
+
+  async getBankCatalog(): Promise<ProviderBankCatalog> {
+    return this.getCachedCatalog('banks', async () => {
+      try {
+        const response = await this.flutterwaveRequest<{
+          data?: FlutterwaveBank[];
+        }>('GET', '/banks/NG');
+        const banks = (response?.data ?? [])
+          .map((bank) => ({
+            id: String(bank.id ?? bank.code ?? bank.name ?? ''),
+            code: String(bank.code ?? '').trim(),
+            name: String(bank.name ?? '').trim(),
+            country: this.region,
+            currency: Currency.NGN,
+            enabled: Boolean(String(bank.code ?? '').trim() && String(bank.name ?? '').trim()),
+          }))
+          .filter((bank) => bank.enabled);
+
+        if (!banks.length) {
+          return FLUTTERWAVE_BANK_FALLBACK_CATALOG;
+        }
+
+        return {
+          region: this.region,
+          provider: this.provider,
+          source: 'PROVIDER',
+          message: null,
+          banks,
+        };
+      } catch (error) {
+        this.logger.warn(
+          `Flutterwave bank catalog discovery failed: ${(error as Error).message}`,
+        );
+        return FLUTTERWAVE_BANK_FALLBACK_CATALOG;
+      }
+    });
+  }
+
+  async resolveExternalAccount(
+    payload: ProviderAccountResolutionPayload,
+  ): Promise<ProviderAccountResolutionResult> {
+    const bankCode = await this.resolveBankCode({
+      destinationAccountNumber: payload.destinationAccountNumber,
+      destinationBankCode: payload.destinationBankCode ?? null,
+      destinationBankName: payload.destinationBankName ?? null,
+      user: {} as User,
+      wallet: {} as Wallet,
+      amount: 0,
+      currency: payload.currency,
+      narration: null,
+      metadata: null,
+    });
+
+    if (!bankCode) {
+      return {
+        resolved: false,
+        accountNumber: payload.destinationAccountNumber,
+        accountName: null,
+        bankCode: null,
+        bankName: payload.destinationBankName ?? null,
+        currency: payload.currency,
+        provider: this.provider,
+        message: 'A valid destination bank is required for NG external transfers.',
+      };
+    }
+
+    try {
+      const response = await this.flutterwaveRequest<{
+        data?: Record<string, any>;
+      }>('POST', '/accounts/resolve', {
+        account_number: payload.destinationAccountNumber,
+        account_bank: bankCode,
+      });
+      const data = (response?.data ?? response ?? {}) as Record<string, any>;
+      const bankName =
+        payload.destinationBankName ??
+        this.findBankNameByCode(bankCode) ??
+        this.normalizeOptionalString(data?.bank_name);
+
+      return {
+        resolved: Boolean(this.normalizeOptionalString(data?.account_name)),
+        accountNumber: payload.destinationAccountNumber,
+        accountName: this.normalizeOptionalString(data?.account_name),
+        bankCode,
+        bankName,
+        currency: payload.currency,
+        provider: this.provider,
+        message: this.normalizeOptionalString(data?.response_message) ?? 'Account resolved.',
+        metadata: data,
+      };
+    } catch (error) {
+      return {
+        resolved: false,
+        accountNumber: payload.destinationAccountNumber,
+        accountName: null,
+        bankCode,
+        bankName: payload.destinationBankName ?? this.findBankNameByCode(bankCode),
+        currency: payload.currency,
+        provider: this.provider,
+        message:
+          (error as Error)?.message ??
+          'We could not validate this destination account right now.',
+      };
+    }
   }
 
   async validateUtilityCustomer(
@@ -354,6 +492,9 @@ export class FlutterwaveBankingProviderService implements RegionalProviderAdapte
 
     return Promise.all(
       ngnWallets.map(async (wallet) => {
+        const txRef =
+          wallet.providerReference ?? this.buildReceiveRailReference(wallet, user);
+
         if (
           wallet.accountNumber &&
           wallet.bankName &&
@@ -363,7 +504,26 @@ export class FlutterwaveBankingProviderService implements RegionalProviderAdapte
           return this.mapExistingRail(wallet);
         }
 
-        const txRef = this.buildReceiveRailReference(wallet, user);
+        const missingRequirements = this.buildMissingRailIdentityRequirements(user);
+        if (missingRequirements.length) {
+          this.logger.log(
+            `Flutterwave rail provisioning deferred for wallet ${wallet.id}: missing ${missingRequirements.join(', ')}`,
+          );
+
+          return this.buildProvisioningRail(wallet, user, txRef, {
+            state: 'DEFERRED',
+            message: API_MESSAGES.NG_RECEIVE_RAIL_REQUIRES_IDENTITY,
+            additionalMetadata: {
+              missingRequirements,
+              requirements: {
+                nin: !missingRequirements.includes('NIN'),
+                bvn: !missingRequirements.includes('BVN'),
+              },
+              permanentAccountRequires: ['NIN', 'BVN'],
+            },
+          });
+        }
+
         const payload = this.buildVirtualAccountPayload(user, txRef);
 
         try {
@@ -371,63 +531,48 @@ export class FlutterwaveBankingProviderService implements RegionalProviderAdapte
             data?: Record<string, any>;
           }>('POST', '/virtual-account-numbers', payload);
           const data = (response?.data ?? response ?? {}) as Record<string, any>;
+          const accountNumber = this.normalizeOptionalString(data?.account_number);
+          const state: RailProvisioningState = accountNumber ? 'READY' : 'PENDING';
 
-          return {
-            walletId: wallet.id,
-            currency: wallet.currency,
-            provider: this.provider,
-            region: this.region,
-            railType: 'VIRTUAL_ACCOUNT',
-            accountNumber: String(data?.account_number ?? ''),
-            routingNumber: null,
-            accountName: String(
-              data?.account_name ??
-                data?.account_status ??
-                this.buildAccountName(user),
-            ),
-            bankName: String(data?.bank_name ?? 'Flutterwave'),
-            sortCode: String(data?.order_ref ?? txRef),
+          return this.buildProvisioningRail(wallet, user, txRef, {
+            state,
+            message:
+              state === 'PENDING' ? API_MESSAGES.NG_RECEIVE_RAIL_PENDING : null,
+            accountNumber,
+            accountName:
+              this.normalizeOptionalString(
+                data?.account_name ?? data?.account_status,
+              ) ?? this.buildAccountName(user),
+            bankName: this.normalizeOptionalString(data?.bank_name) ?? 'Flutterwave',
+            sortCode: data?.order_ref ? String(data.order_ref) : txRef,
             providerCustomerId: this.extractProviderCustomerId(data, user),
-            providerAccountId: String(data?.order_ref ?? txRef),
-            providerVirtualAccountId: String(data?.flw_ref ?? txRef),
-            providerReference: txRef,
-            providerMetadata: {
-              bankTransferReference: txRef,
+            providerAccountId: data?.order_ref ? String(data.order_ref) : txRef,
+            providerVirtualAccountId: data?.flw_ref
+              ? String(data.flw_ref)
+              : txRef,
+            additionalMetadata: {
               orderRef: data?.order_ref ?? null,
               flwRef: data?.flw_ref ?? null,
               note: data?.note ?? null,
               accountStatus: data?.account_status ?? null,
               responseCode: data?.response_code ?? null,
+              rawProviderResponse: data,
             },
-          };
+          });
         } catch (error) {
           const typedError = error as Error;
+          const resolvedError = this.resolveRailProvisioningError(typedError);
           this.logger.warn(
             `Flutterwave rail provisioning failed for wallet ${wallet.id}: ${typedError.message}`,
           );
 
-          return {
-            walletId: wallet.id,
-            currency: wallet.currency,
-            provider: this.provider,
-            region: this.region,
-            railType: 'VIRTUAL_ACCOUNT',
-            accountNumber: wallet.accountNumber ?? null,
-            routingNumber: wallet.routingNumber ?? null,
-            accountName: wallet.accountName ?? this.buildAccountName(user),
-            bankName: wallet.bankName ?? null,
-            sortCode: wallet.sortCode ?? null,
-            providerCustomerId: wallet.providerCustomerId ?? null,
-            providerAccountId: wallet.providerAccountId ?? null,
-            providerVirtualAccountId: wallet.providerVirtualAccountId ?? null,
-            providerReference: wallet.providerReference ?? txRef,
-            providerMetadata: {
-              ...(wallet.providerMetadata ?? {}),
-              bankTransferReference: txRef,
-              provisioningError: typedError.message,
-              provisioningDeferred: true,
+          return this.buildProvisioningRail(wallet, user, txRef, {
+            state: resolvedError.state,
+            message: resolvedError.message,
+            additionalMetadata: {
+              providerError: typedError.message,
             },
-          };
+          });
         }
       }),
     );
@@ -436,7 +581,7 @@ export class FlutterwaveBankingProviderService implements RegionalProviderAdapte
   async createExternalTransfer(
     payload: ExternalTransferPayload,
   ): Promise<ProviderOperationExecution> {
-    const bankCode = this.extractBankCode(payload.metadata, payload);
+    const bankCode = await this.resolveBankCode(payload);
     if (!bankCode) {
       throw new BadRequestException(
         'Flutterwave bank code is required for NG external transfers.',
@@ -1119,6 +1264,10 @@ export class FlutterwaveBankingProviderService implements RegionalProviderAdapte
   }
 
   private mapExistingRail(wallet: Wallet): ProviderWalletRail {
+    const provisioningState =
+      this.normalizeProvisioningState(wallet.providerMetadata?.provisioningState) ??
+      (wallet.accountNumber ? 'READY' : 'PENDING');
+
     return {
       walletId: wallet.id,
       currency: wallet.currency,
@@ -1134,7 +1283,62 @@ export class FlutterwaveBankingProviderService implements RegionalProviderAdapte
       providerAccountId: wallet.providerAccountId ?? null,
       providerVirtualAccountId: wallet.providerVirtualAccountId ?? null,
       providerReference: wallet.providerReference ?? null,
-      providerMetadata: wallet.providerMetadata ?? null,
+      providerMetadata: {
+        ...(wallet.providerMetadata ?? {}),
+        provisioningState,
+        provisioningDeferred: provisioningState === 'DEFERRED',
+        provisioningError:
+          provisioningState === 'READY'
+            ? null
+            : wallet.providerMetadata?.provisioningError ?? null,
+      },
+    };
+  }
+
+  private buildProvisioningRail(
+    wallet: Wallet,
+    user: User,
+    txRef: string,
+    input: {
+      state: RailProvisioningState;
+      message: string | null;
+      accountNumber?: string | null;
+      routingNumber?: string | null;
+      accountName?: string | null;
+      bankName?: string | null;
+      sortCode?: string | null;
+      providerCustomerId?: string | null;
+      providerAccountId?: string | null;
+      providerVirtualAccountId?: string | null;
+      additionalMetadata?: Record<string, any> | null;
+    },
+  ): ProviderWalletRail {
+    return {
+      walletId: wallet.id,
+      currency: wallet.currency,
+      provider: this.provider,
+      region: this.region,
+      railType: 'VIRTUAL_ACCOUNT',
+      accountNumber: input.accountNumber ?? wallet.accountNumber ?? null,
+      routingNumber: input.routingNumber ?? wallet.routingNumber ?? null,
+      accountName: input.accountName ?? wallet.accountName ?? this.buildAccountName(user),
+      bankName: input.bankName ?? wallet.bankName ?? null,
+      sortCode: input.sortCode ?? wallet.sortCode ?? null,
+      providerCustomerId:
+        input.providerCustomerId ?? wallet.providerCustomerId ?? null,
+      providerAccountId: input.providerAccountId ?? wallet.providerAccountId ?? null,
+      providerVirtualAccountId:
+        input.providerVirtualAccountId ?? wallet.providerVirtualAccountId ?? null,
+      providerReference: wallet.providerReference ?? txRef,
+      providerMetadata: {
+        ...(wallet.providerMetadata ?? {}),
+        bankTransferReference: txRef,
+        provisioningState: input.state,
+        provisioningDeferred: input.state === 'DEFERRED',
+        provisioningError: input.state === 'READY' ? null : input.message,
+        lastProvisioningAttemptAt: new Date().toISOString(),
+        ...(input.additionalMetadata ?? {}),
+      },
     };
   }
 
@@ -1186,17 +1390,116 @@ export class FlutterwaveBankingProviderService implements RegionalProviderAdapte
     );
   }
 
+  private buildMissingRailIdentityRequirements(user: User) {
+    const identity = user.kyc?.identityData ?? {};
+    const missingRequirements: string[] = [];
+
+    if (!this.normalizeOptionalString(identity?.nin)) {
+      missingRequirements.push('NIN');
+    }
+
+    if (!this.normalizeOptionalString(identity?.bvn)) {
+      missingRequirements.push('BVN');
+    }
+
+    return missingRequirements;
+  }
+
+  private resolveRailProvisioningError(error: Error): {
+    state: RailProvisioningState;
+    message: string;
+  } {
+    const normalized = String(error?.message ?? '').toLowerCase();
+
+    if (normalized.includes('nin') || normalized.includes('bvn')) {
+      return {
+        state: 'DEFERRED',
+        message: API_MESSAGES.NG_RECEIVE_RAIL_REQUIRES_IDENTITY,
+      };
+    }
+
+    if (
+      normalized.includes('processing') ||
+      normalized.includes('pending') ||
+      normalized.includes('queued')
+    ) {
+      return {
+        state: 'PENDING',
+        message: API_MESSAGES.NG_RECEIVE_RAIL_PENDING,
+      };
+    }
+
+    return {
+      state: 'UNAVAILABLE',
+      message:
+        this.normalizeOptionalString(error?.message) ??
+        API_MESSAGES.NG_RECEIVE_RAIL_UNAVAILABLE,
+    };
+  }
+
+  private normalizeProvisioningState(value: unknown): RailProvisioningState | null {
+    const normalized = String(value ?? '').trim().toUpperCase();
+    if (
+      normalized === 'READY' ||
+      normalized === 'PENDING' ||
+      normalized === 'DEFERRED' ||
+      normalized === 'UNAVAILABLE'
+    ) {
+      return normalized;
+    }
+
+    return null;
+  }
+
   private extractBankCode(
     metadata: Record<string, any> | null | undefined,
     payload: ExternalTransferPayload,
   ): string | null {
     const bankCode =
+      payload.destinationBankCode ??
       metadata?.bankCode ??
       metadata?.destinationBankCode ??
       payload.destinationRoutingNumber ??
       null;
 
     return bankCode ? String(bankCode) : null;
+  }
+
+  private async resolveBankCode(
+    payload: ExternalTransferPayload,
+  ): Promise<string | null> {
+    const directBankCode = this.extractBankCode(payload.metadata, payload);
+    if (directBankCode) {
+      return directBankCode;
+    }
+
+    const normalizedBankName = this.normalizeOptionalString(
+      payload.destinationBankName,
+    )?.toLowerCase();
+    if (!normalizedBankName) {
+      return null;
+    }
+
+    const catalog = await this.getBankCatalog();
+    const matchedBank = catalog.banks.find((bank) => {
+      const bankName = bank.name.toLowerCase();
+      return (
+        bankName === normalizedBankName ||
+        bankName.includes(normalizedBankName) ||
+        normalizedBankName.includes(bankName)
+      );
+    });
+
+    return matchedBank?.code ?? null;
+  }
+
+  private findBankNameByCode(bankCode: string): string | null {
+    const cachedCatalog = this.catalogCache.get('banks');
+    const banks =
+      (cachedCatalog?.value as ProviderBankCatalog | undefined)?.banks ??
+      FLUTTERWAVE_BANK_FALLBACK_CATALOG.banks;
+    const matchedBank = banks.find((bank) => bank.code === bankCode);
+    return matchedBank?.name ?? null;
   }
 
   private resolveBillRoute(

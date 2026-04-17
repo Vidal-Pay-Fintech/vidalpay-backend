@@ -23,7 +23,6 @@ export class GoogleStrategy extends PassportStrategy(Strategy, 'google') {
   }
 
   async validate(accessToken: string, refreshToken: string, profile: Profile) {
-    console.log(profile, 'THE PROFILE OOOO');
     const { id, displayName, emails, name, photos } = profile;
     const checkUserExists = await this.userRepository.findOne({
       where: {
