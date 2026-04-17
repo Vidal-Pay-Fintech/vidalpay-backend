@@ -165,6 +165,8 @@ export class ProviderOperationsService {
         continue;
       }
 
+      const railOperationStatus = this.mapRailProvisioningStatus(rail);
+
       const railChanged =
         wallet.accountNumber !== rail.accountNumber ||
         wallet.routingNumber !== rail.routingNumber ||
@@ -178,24 +180,22 @@ export class ProviderOperationsService {
         JSON.stringify(wallet.providerMetadata ?? null) !==
           JSON.stringify(rail.providerMetadata ?? null);
 
-      if (!railChanged) {
-        continue;
+      if (railChanged) {
+        await this.walletRepository.findOneAndUpdate(wallet.id, {
+          accountNumber: rail.accountNumber ?? undefined,
+          routingNumber: rail.routingNumber ?? undefined,
+          accountName: rail.accountName ?? undefined,
+          bankName: rail.bankName ?? undefined,
+          sortCode: rail.sortCode ?? undefined,
+          routingRegionCode: rail.region,
+          routingProvider: rail.provider,
+          providerCustomerId: rail.providerCustomerId ?? undefined,
+          providerAccountId: rail.providerAccountId ?? undefined,
+          providerVirtualAccountId: rail.providerVirtualAccountId ?? undefined,
+          providerReference: rail.providerReference ?? undefined,
+          providerMetadata: rail.providerMetadata ?? undefined,
+        });
       }
-
-      await this.walletRepository.findOneAndUpdate(wallet.id, {
-        accountNumber: rail.accountNumber ?? undefined,
-        routingNumber: rail.routingNumber ?? undefined,
-        accountName: rail.accountName ?? undefined,
-        bankName: rail.bankName ?? undefined,
-        sortCode: rail.sortCode ?? undefined,
-        routingRegionCode: rail.region,
-        routingProvider: rail.provider,
-        providerCustomerId: rail.providerCustomerId ?? undefined,
-        providerAccountId: rail.providerAccountId ?? undefined,
-        providerVirtualAccountId: rail.providerVirtualAccountId ?? undefined,
-        providerReference: rail.providerReference ?? undefined,
-        providerMetadata: rail.providerMetadata ?? undefined,
-      });
 
       const existingOperation = rail.providerReference
         ? await this.providerOperationRepository.findByReference(
@@ -203,14 +203,28 @@ export class ProviderOperationsService {
           )
         : null;
 
-      if (!existingOperation) {
+      if (existingOperation) {
+        await this.providerOperationRepository.findOneAndUpdate(existingOperation.id, {
+          status: railOperationStatus,
+          responsePayload: rail.providerMetadata,
+          metadata: {
+            ...(existingOperation.metadata ?? {}),
+            provisioningState:
+              rail.providerMetadata?.provisioningState ?? null,
+          },
+          reconciledAt:
+            railOperationStatus === ProviderOperationStatus.COMPLETED
+              ? existingOperation.reconciledAt ?? new Date()
+              : null,
+        });
+      } else {
         await this.providerOperationRepository.create({
           userId: user.id,
           walletId: wallet.id,
           provider: rail.provider,
           regionCode: rail.region,
           operationType: ProviderOperationType.RAIL_PROVISIONING,
-          status: ProviderOperationStatus.COMPLETED,
+          status: railOperationStatus,
           reference: rail.providerReference,
           currency: rail.currency,
           requestPayload: {
@@ -218,7 +232,10 @@ export class ProviderOperationsService {
             currency: rail.currency,
           },
           responsePayload: rail.providerMetadata,
-          reconciledAt: new Date(),
+          reconciledAt:
+            railOperationStatus === ProviderOperationStatus.COMPLETED
+              ? new Date()
+              : null,
         });
       }
     }
@@ -700,6 +717,31 @@ export class ProviderOperationsService {
     }
 
     return 'PENDING';
+  }
+
+  private mapRailProvisioningStatus(rail: {
+    accountNumber: string | null;
+    providerMetadata: Record<string, any> | null;
+  }): ProviderOperationStatus {
+    const provisioningState = String(
+      rail.providerMetadata?.provisioningState ?? '',
+    )
+      .trim()
+      .toUpperCase();
+
+    if (provisioningState === 'READY' || rail.accountNumber) {
+      return ProviderOperationStatus.COMPLETED;
+    }
+
+    if (provisioningState === 'DEFERRED') {
+      return ProviderOperationStatus.UNDER_REVIEW;
+    }
+
+    if (provisioningState === 'UNAVAILABLE') {
+      return ProviderOperationStatus.FAILED;
+    }
+
+    return ProviderOperationStatus.PROCESSING;
   }
 
   private buildCardTopUpStatusMessage(

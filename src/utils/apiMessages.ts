@@ -192,6 +192,16 @@ class ApiMessages {
     'This product is not available for your current region.';
   public CARD_TOPUP_UNAVAILABLE =
     'Card top-up is not available for your current region or provider.';
+  public NG_RECEIVE_RAIL_REQUIRES_IDENTITY =
+    'Complete NIN and BVN to generate your NGN account number.';
+  public NG_RECEIVE_RAIL_PENDING =
+    'Your NGN account number is being generated. Please try again shortly.';
+  public NG_RECEIVE_RAIL_UNAVAILABLE =
+    'NGN account number generation is unavailable right now. Please try again later.';
+  public STAGING_KYC_OVERRIDE_DISABLED =
+    'Staging KYC verification override is disabled.';
+  public STAGING_KYC_VERIFIED =
+    'KYC marked as VERIFIED for staging QA.';
   public EMAIL_CHANGE_CODE_SENT =
     'A verification code has been sent to your new email address.';
   public EMAIL_CHANGE_SUCCESSFUL = 'Your email address has been updated successfully.';

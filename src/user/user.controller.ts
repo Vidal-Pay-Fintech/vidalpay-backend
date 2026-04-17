@@ -134,4 +134,9 @@ export class UserController {
   ) {
     return this.userService.submitKyc(user.sub, submitKycDto);
   }
+
+  @Post('kyc/staging/verify')
+  stagingVerifyKyc(@ActiveUser() user: ActiveUserData) {
+    return this.userService.stagingVerifyKyc(user.sub);
+  }
 }

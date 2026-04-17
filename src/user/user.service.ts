@@ -1,6 +1,7 @@
 import {
   BadRequestException,
   Injectable,
+  NotFoundException,
   PreconditionFailedException,
   ServiceUnavailableException,
 } from '@nestjs/common';
@@ -852,6 +853,86 @@ export class UserService {
     return this.getKyc(userId);
   }
 
+  async stagingVerifyKyc(userId: string) {
+    if (process.env.ALLOW_STAGING_KYC_OVERRIDE !== 'true') {
+      throw new NotFoundException(API_MESSAGES.STAGING_KYC_OVERRIDE_DISABLED);
+    }
+
+    const user = await this.loadUserContext(userId);
+    const userKyc = await this.ensureUserKyc(user);
+    const region = this.resolveSupportedRegionOrThrow(user, userKyc);
+    const provider = this.kycProviderRouter.mapRegionToProvider(region);
+
+    if (!provider) {
+      throw new BadRequestException(API_MESSAGES.KYC_PROVIDER_UNAVAILABLE);
+    }
+
+    const effectiveAddress = this.userPolicy.buildAddressSnapshotFromSources(
+      userKyc.addressData ?? undefined,
+      this.getUserAddressSnapshot(user),
+    );
+    const stagedKyc = {
+      ...userKyc,
+      addressData: effectiveAddress,
+      country: effectiveAddress.country ?? userKyc.country ?? user.country ?? null,
+      countryCode:
+        effectiveAddress.countryCode ??
+        userKyc.countryCode ??
+        user.countryCode ??
+        region,
+      provider,
+    } as UserKyc;
+
+    this.userPolicy.validateStoredKycForSubmission(region, stagedKyc);
+
+    const now = new Date();
+
+    await this.userKycRepository.findOneAndUpdate(userKyc.id, {
+      status: KycStatus.VERIFIED,
+      provider,
+      country: stagedKyc.country,
+      countryCode: stagedKyc.countryCode,
+      addressData: effectiveAddress,
+      blockedReason: null,
+      providerResponse: {
+        ...(userKyc.providerResponse ?? {}),
+        stagingOverride: true,
+        overrideReason: 'STAGING_QA_VERIFICATION',
+        reviewedAt: now.toISOString(),
+      },
+      submittedAt: userKyc.submittedAt ?? now,
+      reviewedAt: now,
+    });
+
+    await this.userRepository.findOneAndUpdate(user.id, {
+      addressLine1:
+        effectiveAddress.addressLine1 ?? user.addressLine1 ?? undefined,
+      addressLine2:
+        effectiveAddress.addressLine2 ?? user.addressLine2 ?? undefined,
+      city: effectiveAddress.city ?? user.city ?? undefined,
+      stateOrRegion:
+        effectiveAddress.stateOrRegion ?? user.stateOrRegion ?? undefined,
+      postalCode: effectiveAddress.postalCode ?? user.postalCode ?? undefined,
+      country: stagedKyc.country ?? undefined,
+      countryCode: stagedKyc.countryCode ?? undefined,
+      kycStatus: KycStatus.VERIFIED,
+      kycProvider: provider,
+      kycSubmittedAt: user.kycSubmittedAt ?? now,
+      kycReviewedAt: now,
+    });
+
+    const refreshedUser = await this.loadUserContext(userId);
+    const refreshedCapabilities =
+      this.userPolicy.computeCapabilities(refreshedUser);
+    await this.syncWalletRouting(userId, refreshedUser, refreshedCapabilities);
+
+    return {
+      message: API_MESSAGES.STAGING_KYC_VERIFIED,
+      account: await this.getAccountOverview(userId),
+      kyc: await this.getKyc(userId),
+    };
+  }
+
   async ensureCanTransfer(userId: string) {
     const user = await this.loadUserContext(userId);
     const capabilities = this.userPolicy.computeCapabilities(user);
@@ -1282,11 +1363,23 @@ export class UserService {
     capabilities: UserCapabilities,
     walletRails: WalletRailDetails[],
   ): FundingMethodAvailability[] {
-    const hasBankTransferRail = walletRails.some(
-      (wallet) => wallet.externalReceiveEnabled,
-    );
+    const bankTransferWallet =
+      walletRails.find(
+        (wallet) =>
+          wallet.region === SupportedRegion.NG &&
+          wallet.currency === Currency.NGN,
+      ) ??
+      walletRails.find(
+        (wallet) =>
+          wallet.region === SupportedRegion.US &&
+          wallet.currency === Currency.USD,
+      ) ??
+      walletRails.find((wallet) => wallet.externalReceiveEnabled) ??
+      walletRails[0] ??
+      null;
+    const hasBankTransferRail = Boolean(bankTransferWallet?.externalReceiveEnabled);
     const bankTransferBlockedReason =
-      walletRails.find((wallet) => wallet.blockedReason)?.blockedReason ??
+      bankTransferWallet?.blockedReason ??
       (capabilities.region === SupportedRegion.NG
         ? 'Bank transfer rails are still being provisioned for this account.'
         : capabilities.region
@@ -1306,9 +1399,13 @@ export class UserService {
             : capabilities.region
               ? bankTransferBlockedReason
               : API_MESSAGES.KYC_REGION_REQUIRED,
-        currencies: walletRails
-          .filter((wallet) => wallet.externalReceiveEnabled)
-          .map((wallet) => wallet.currency),
+        currencies: hasBankTransferRail
+          ? walletRails
+              .filter((wallet) => wallet.externalReceiveEnabled)
+              .map((wallet) => wallet.currency)
+          : bankTransferWallet
+            ? [bankTransferWallet.currency]
+            : [],
         action: {
           type: 'INFO',
           path: null,
@@ -1374,13 +1471,29 @@ export class UserService {
     return normalized ? normalized.toUpperCase() : null;
   }
 
+  private normalizeProvisioningStatus(
+    value: unknown,
+  ): WalletRailDetails['provisioningStatus'] | null {
+    const normalized = String(value ?? '').trim().toUpperCase();
+    if (
+      normalized === 'READY' ||
+      normalized === 'PENDING' ||
+      normalized === 'DEFERRED' ||
+      normalized === 'UNAVAILABLE'
+    ) {
+      return normalized;
+    }
+
+    return null;
+  }
+
   private generateSixDigitToken() {
     return Math.floor(100000 + Math.random() * 900000).toString();
   }
 
   private async syncWalletRouting(
     userId: string,
-    user: User,
+    _user: User,
     capabilities: UserCapabilities,
   ) {
     await this.walletRepository.syncRoutingForUser(userId, {
@@ -1391,8 +1504,9 @@ export class UserService {
     });
 
     if (capabilities.region) {
+      const routingUser = await this.loadUserContext(userId);
       await this.providerOperationsService.ensureReceiveRailsForUser(
-        user,
+        routingUser,
         capabilities.region,
       );
     }
@@ -1423,6 +1537,8 @@ export class UserService {
         (region === SupportedRegion.US && wallet.currency === Currency.USD);
       const leadBankUnavailable =
         region === SupportedRegion.US && provider === KycProvider.LEAD_BANK;
+      const explicitProvisioningStatus =
+        this.normalizeProvisioningStatus(providerMetadata?.provisioningState);
       const externalReceiveEnabled = Boolean(
         supportsExternalRails &&
           wallet.accountNumber &&
@@ -1438,17 +1554,19 @@ export class UserService {
       const provisioningStatus =
         externalReceiveEnabled
           ? 'READY'
-          : providerMetadata?.provisioningDeferred
-            ? 'DEFERRED'
-            : leadBankUnavailable
-              ? 'UNAVAILABLE'
-              : supportsExternalRails
-                ? 'PENDING'
-                : 'UNAVAILABLE';
+          : explicitProvisioningStatus ??
+            (providerMetadata?.provisioningDeferred
+              ? 'DEFERRED'
+              : leadBankUnavailable
+                ? 'UNAVAILABLE'
+                : supportsExternalRails
+                  ? 'PENDING'
+                  : 'UNAVAILABLE');
       const blockedReason =
-        externalReceiveEnabled || externalTransferEnabled
+        externalReceiveEnabled
           ? null
-          : providerMetadata?.provisioningError ??
+          : providerMetadata?.blockedReason ??
+            providerMetadata?.provisioningError ??
             (leadBankUnavailable
               ? 'Lead Bank receive rails are not connected yet in staging.'
               : capabilities.region
@@ -1503,7 +1621,18 @@ export class UserService {
   private buildAccountRailSummary(walletRails: WalletRailDetails[]) {
     const primary =
       walletRails.find((wallet) => wallet.externalReceiveEnabled) ??
+      walletRails.find(
+        (wallet) =>
+          wallet.region === SupportedRegion.NG &&
+          wallet.currency === Currency.NGN,
+      ) ??
+      walletRails.find(
+        (wallet) =>
+          wallet.region === SupportedRegion.US &&
+          wallet.currency === Currency.USD,
+      ) ??
       walletRails.find((wallet) => wallet.accountNumber) ??
+      walletRails[0] ??
       null;
     const byCurrency: Partial<Record<Currency, WalletRailDetails>> = {};
 
