@@ -16,4 +16,8 @@ export class ResolveExternalAccountDto {
   @IsOptional()
   @IsString()
   destinationBankName?: string;
+
+  @IsOptional()
+  @IsString()
+  destinationRoutingNumber?: string;
 }

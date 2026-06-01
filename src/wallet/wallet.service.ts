@@ -515,7 +515,10 @@ export class WalletService {
       {
         currency: resolveExternalAccountDto.currency,
         destinationAccountNumber: resolveExternalAccountDto.destinationAccountNumber,
-        destinationBankCode: resolveExternalAccountDto.destinationBankCode ?? null,
+        destinationBankCode:
+          resolveExternalAccountDto.destinationBankCode ??
+          resolveExternalAccountDto.destinationRoutingNumber ??
+          null,
         destinationBankName: resolveExternalAccountDto.destinationBankName ?? null,
       },
     );
