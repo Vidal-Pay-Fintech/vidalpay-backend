@@ -41,8 +41,7 @@ class ApiCall {
       // return response.data;
       return JSON.parse(response.data);
     } catch (error: any) {
-      this.logger.log('ApiCall Failed ()');
-      console.log(error, 'THE ERROR BACK');
+      this.logger.error(`ApiCall failed for ${method} ${url}: ${error.message}`);
 
       let errMsg: any;
 
@@ -57,8 +56,10 @@ class ApiCall {
         if (message) {
           throw new BadRequestException(message);
         }
-      } catch (parsingError) {
-        console.log(parsingError, 'THE ERROR PARSEDD');
+      } catch (parsingError: any) {
+        this.logger.warn(
+          `Unable to parse API error response for ${method} ${url}: ${parsingError.message}`,
+        );
         const errMessage = parsingError?.response?.message;
         throw new BadRequestException(errMessage || API_MESSAGES.SERVER_ERROR);
       }

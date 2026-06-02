@@ -7,6 +7,10 @@ import { FlutterwaveBankingProviderService } from './provider/providers/flutterw
 import { LeadBankingProviderService } from './provider/providers/lead-bank-banking.provider';
 import { ProviderOperationsService } from './provider/provider-operations.service';
 import { ProviderWebhookController } from './provider/provider-webhook.controller';
+import {
+  MockFlutterwaveBankingProviderService,
+  MockLeadBankingProviderService,
+} from './provider/providers/mock-banking.provider';
 
 @Module({
   controllers: [ProviderWebhookController],
@@ -17,6 +21,8 @@ import { ProviderWebhookController } from './provider/provider-webhook.controlle
     ProviderRouterService,
     FlutterwaveBankingProviderService,
     LeadBankingProviderService,
+    MockFlutterwaveBankingProviderService,
+    MockLeadBankingProviderService,
     ProviderOperationsService,
   ],
   exports: [KycProviderRouterService, ProviderRouterService, ProviderOperationsService],

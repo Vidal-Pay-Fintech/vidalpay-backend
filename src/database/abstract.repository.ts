@@ -94,7 +94,6 @@ export abstract class AbstractRepository<T extends AbstractEntity> {
         where: { id: id as any },
         withDeleted: true,
       });
-      console.log(existingEntity, 'isisisiis');
       if (!existingEntity) {
         this.logger.warn(`Entity not found with id: ${id}`);
         throw new NotFoundException('The entity was not found');

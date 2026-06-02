@@ -8,6 +8,7 @@ import {
 import { CreateWalletDto } from './dto/create-wallet.dto';
 import { UpdateWalletDto } from './dto/update-wallet.dto';
 import { WalletRepository } from 'src/database/repositories/wallet.repository';
+import { TransactionRepository } from 'src/database/repositories/transaction.repository';
 import { Currency } from 'src/utils/enums/wallet.enum';
 import { InternalTransferDto } from './dto/internal-transafer.dto';
 import { JournalService } from 'src/journal/journal.service';
@@ -38,6 +39,11 @@ import { ProviderOperationRepository } from 'src/database/repositories/provider-
 import { CreateCardTopUpIntentDto } from './dto/create-card-topup-intent.dto';
 import { ValidateUtilityCustomerDto } from './dto/validate-utility-customer.dto';
 import { ResolveExternalAccountDto } from './dto/resolve-external-account.dto';
+import { FeatureFlagService } from 'src/feature-flags/feature-flag.service';
+import { TransactionService } from 'src/transaction/transaction.service';
+import { NotificationService } from 'src/notifications/notification.service';
+import { DemoFundWalletDto } from './dto/demo-fund-wallet.dto';
+import { CardsService } from 'src/cards/cards.service';
 
 @Injectable()
 export class WalletService {
@@ -53,6 +59,11 @@ export class WalletService {
     private readonly userService: UserService,
     private readonly providerOperationsService: ProviderOperationsService,
     private readonly providerOperationRepository: ProviderOperationRepository,
+    private readonly transactionRepository: TransactionRepository,
+    private readonly transactionService: TransactionService,
+    private readonly featureFlags: FeatureFlagService,
+    private readonly notificationService: NotificationService,
+    private readonly cardsService: CardsService,
   ) {}
   create(createWalletDto: CreateWalletDto) {
     return 'This action adds a new wallet';
@@ -81,9 +92,10 @@ export class WalletService {
 
         await this.walletRepository.createWalletInTransaction(
           {
-            userId,
-            currency,
-          },
+        userId,
+        currency,
+        availableBalance: 0,
+      },
           manager,
         );
         createdCurrencies.push(currency);
@@ -123,16 +135,23 @@ export class WalletService {
     internalTransferDTO: InternalTransferDto,
     userId: string,
   ) {
+    this.featureFlags.assertEnabled('ENABLE_INTERNAL_TRANSFER');
     await this.userService.ensureCanTransfer(userId);
 
-    const { amount, recipientTag, currency, pin } = internalTransferDTO;
+    const { amount, recipientTag, currency, pin, note } = internalTransferDTO;
+    this.assertWalletCurrencyEnabled(currency);
     const recipientInfo = await this.userRepository.findUserByTag(recipientTag);
     const userInfo = await this.userRepository.findUserById(userId);
 
     let userDebitRes: any;
     let recipientCreditRes: any;
     const info = `Sent to @${recipientInfo.firstName} ${recipientInfo.lastName}`;
-    const description = `Internal transfer from ${userInfo.firstName} ${userInfo.lastName} to ${recipientTag}`;
+    const description = [
+      `Internal transfer from ${userInfo.firstName} ${userInfo.lastName} to ${recipientTag}`,
+      note?.trim() ? `Note: ${note.trim()}` : null,
+    ]
+      .filter(Boolean)
+      .join(' | ');
     try {
       await this.assertTransactionPinAuthorized(userId, pin);
 
@@ -165,6 +184,30 @@ export class WalletService {
           .join(' ')
           .trim(),
         currency,
+      });
+
+      await this.notificationService.create({
+        userId,
+        type: 'INTERNAL_TRANSFER_SENT',
+        title: 'Transfer sent',
+        body: `${currency} ${amount} was sent to @${recipientInfo.tagId ?? recipientTag}.`,
+        metadata: {
+          reference: userDebitRes?.reference ?? null,
+          recipientId: recipientInfo.id,
+          note: note ?? null,
+        },
+      });
+
+      await this.notificationService.create({
+        userId: recipientInfo.id,
+        type: 'INTERNAL_TRANSFER_RECEIVED',
+        title: 'Transfer received',
+        body: `${currency} ${amount} was received from @${userInfo.tagId}.`,
+        metadata: {
+          reference: recipientCreditRes?.reference ?? null,
+          senderId: userInfo.id,
+          note: note ?? null,
+        },
       });
 
       return userDebitRes;
@@ -262,7 +305,10 @@ export class WalletService {
   // }
 
   async internalExchange(exchageDto: ExchangeDto, userId: string) {
+    this.featureFlags.assertEnabled('ENABLE_FX_CONVERSION_DEMO');
     const { fromCurrency, toCurrency, amount } = exchageDto;
+    this.assertWalletCurrencyEnabled(fromCurrency);
+    this.assertWalletCurrencyEnabled(toCurrency);
 
     const fee = UTILITIES.getPercentageAmount(amount, 1);
     const amountToCharge = amount + Number(fee);
@@ -339,21 +385,17 @@ export class WalletService {
       const headers = {
         'Content-Type': 'application/json',
       };
-      console.log('fromto', fromCurrency, toCurrency);
       const response = await APICall.sendRequest(
         `https://api.exchangerate-api.com/v4/latest/${fromCurrency}`,
         APIType.GET,
         headers,
       );
-      console.log('REATEres', response);
-      console.log('RESPONSERATEEEE', response?.rates);
 
       if (!response || !response.rates) {
         throw new Error('Invalid response from exchange rate API');
       }
 
       const rate = response.rates[toCurrency];
-      console.log('MYRATEOOOO', rate);
 
       if (!rate) {
         throw new Error(`No rate found for ${toCurrency} in API response`);
@@ -379,6 +421,12 @@ export class WalletService {
   }
 
   async externalTransfer(externalTransferDto: ExternalTransferDto, userId: string) {
+    if (externalTransferDto.currency === Currency.NGN) {
+      this.featureFlags.assertEnabled('ENABLE_NGN_BANK_TRANSFER');
+    }
+    if (externalTransferDto.currency === Currency.USD) {
+      this.featureFlags.assertEnabled('ENABLE_USD_BANK_TRANSFER');
+    }
     const capabilities = await this.userService.ensureCanTransfer(userId);
     await this.assertTransactionPinAuthorized(userId, externalTransferDto.pin);
 
@@ -637,6 +685,7 @@ export class WalletService {
   }
 
   async getUserWalletByCurrencyandUserId(userId: string, currency: Currency) {
+    this.assertWalletCurrencyEnabled(currency);
     const res = await this.walletRepository.findOne({
       where: { userId, currency },
     });
@@ -646,6 +695,90 @@ export class WalletService {
     }
 
     return res;
+  }
+
+  async getUserWallets(userId: string) {
+    const wallets = await this.walletRepository.findUserWallets(userId);
+    const walletLedgers = await Promise.all(
+      wallets.map((wallet) => this.serializeWalletLedger(wallet)),
+    );
+    const cardLedgers = this.featureFlags.isEnabled('ENABLE_VIRTUAL_CARD_DEMO')
+      ? await this.cardsService.getCards(userId)
+      : [];
+
+    return [...walletLedgers, ...cardLedgers];
+  }
+
+  async getUserWalletByCurrency(userId: string, currency: Currency) {
+    const wallet = await this.getUserWalletByCurrencyandUserId(userId, currency);
+    return this.serializeWalletLedger(wallet);
+  }
+
+  async fundDemoWallet(userId: string, dto: DemoFundWalletDto) {
+    this.featureFlags.assertEnabled('ENABLE_DEMO_MODE');
+    this.assertWalletCurrencyEnabled(dto.currency);
+
+    let wallet = await this.walletRepository.findOne({
+      where: { userId, currency: dto.currency },
+    });
+
+    if (!wallet) {
+      wallet = await this.walletRepository.create({
+        userId,
+        currency: dto.currency,
+        balance: 0,
+        availableBalance: 0,
+        receiveEnabled: true,
+        transferEnabled: true,
+        providerReference: `demo_wallet_${dto.currency.toLowerCase()}_${userId}`,
+        providerMetadata: {
+          demoCreated: true,
+        },
+      });
+    }
+
+    const reference = `demo_dep_${Date.now()}_${Math.random()
+      .toString(36)
+      .slice(2, 8)}`;
+    const transaction = await this.transactionService.creditTransaction({
+      userId,
+      amount: dto.amount,
+      currency: dto.currency,
+      info: `Demo wallet funding`,
+      description: dto.note?.trim() || `Demo ${dto.currency} wallet funding`,
+      reference,
+      tag: TagType.WALLET,
+    });
+
+    const receipt = await this.transactionService.getUserTransactionReceipt(
+      userId,
+      transaction.id,
+    );
+
+    const notification = await this.notificationService.create({
+      userId,
+      type: 'WALLET_FUNDED_DEMO',
+      title: 'Wallet funded',
+      body: `${dto.currency} ${dto.amount} was added to your demo wallet.`,
+      metadata: {
+        reference,
+        transactionId: transaction.id,
+      },
+    });
+
+    return {
+      status: 'COMPLETED',
+      depositTransaction: transaction,
+      receipt,
+      ledgerEntry: {
+        walletId: wallet.id,
+        ledgerType: `wallet_${dto.currency.toLowerCase()}`,
+        reference,
+        amount: dto.amount,
+        currency: dto.currency,
+      },
+      notification,
+    };
   }
 
   findAll() {
@@ -747,6 +880,53 @@ export class WalletService {
           },
         }),
     });
+  }
+
+  private async serializeWalletLedger(wallet: Wallet) {
+    const transactions = await this.transactionRepository.getUserTransactions(
+      {
+        page: 1,
+        limit: 20,
+        skip: 0,
+        isExport: '',
+      } as any,
+      wallet.userId,
+    );
+    const data = Array.isArray(transactions)
+      ? transactions
+      : transactions.data.filter((transaction) => transaction.currency === wallet.currency);
+
+    return {
+      id: wallet.id,
+      ledgerType: `wallet_${wallet.currency.toLowerCase()}`,
+      balance: Number(wallet.balance ?? 0),
+      availableBalance: Number(wallet.availableBalance ?? wallet.balance ?? 0),
+      currency: wallet.currency,
+      providerReference: wallet.providerReference,
+      receiveEnabled: wallet.receiveEnabled,
+      transferEnabled: wallet.transferEnabled,
+      rails: {
+        accountNumber: wallet.accountNumber,
+        routingNumber: wallet.routingNumber,
+        accountName: wallet.accountName,
+        bankName: wallet.bankName,
+        sortCode: wallet.sortCode,
+        provider: wallet.routingProvider,
+        metadata: wallet.providerMetadata,
+      },
+      transactionHistory: data,
+      updatedAt: wallet.updatedAt,
+    };
+  }
+
+  private assertWalletCurrencyEnabled(currency: Currency) {
+    if (currency === Currency.NGN) {
+      this.featureFlags.assertEnabled('ENABLE_NGN_WALLET');
+    }
+
+    if (currency === Currency.USD) {
+      this.featureFlags.assertEnabled('ENABLE_USD_WALLET');
+    }
   }
 
   private async executeDebitedProviderOperation(input: {

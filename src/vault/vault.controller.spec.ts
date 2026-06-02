@@ -4,11 +4,12 @@ import { VaultService } from './vault.service';
 
 describe('VaultController', () => {
   let controller: VaultController;
+  const vaultService = {};
 
   beforeEach(async () => {
     const module: TestingModule = await Test.createTestingModule({
       controllers: [VaultController],
-      providers: [VaultService],
+      providers: [{ provide: VaultService, useValue: vaultService }],
     }).compile();
 
     controller = module.get<VaultController>(VaultController);

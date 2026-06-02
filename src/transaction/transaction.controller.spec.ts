@@ -4,11 +4,12 @@ import { TransactionService } from './transaction.service';
 
 describe('TransactionController', () => {
   let controller: TransactionController;
+  const transactionService = {};
 
   beforeEach(async () => {
     const module: TestingModule = await Test.createTestingModule({
       controllers: [TransactionController],
-      providers: [TransactionService],
+      providers: [{ provide: TransactionService, useValue: transactionService }],
     }).compile();
 
     controller = module.get<TransactionController>(TransactionController);

@@ -13,7 +13,7 @@ export class HealthController {
   @Get('health')
   getHealth() {
     return {
-      service: 'vidalpay-backend',
+      service: process.env.APP_NAME ?? 'vidalpay-backend',
       status: 'ok',
       timestamp: new Date().toISOString(),
       environment: process.env.NODE_ENV ?? 'development',
@@ -35,7 +35,7 @@ export class HealthController {
     const database = await this.checkDatabase();
 
     return {
-      service: 'vidalpay-backend',
+      service: process.env.APP_NAME ?? 'vidalpay-backend',
       status: database.connected ? 'ready' : 'degraded',
       timestamp: new Date().toISOString(),
       apiBasePath: '/api/v1',

@@ -23,6 +23,19 @@ import { KycDocument } from './entities/kyc-document.entity';
 import { ProviderOperation } from './entities/provider-operation.entity';
 import { ProviderWebhookEvent } from './entities/provider-webhook-event.entity';
 import { SupportTicket } from './entities/support-ticket.entity';
+import { Card } from './entities/card.entity';
+import { CardFunding } from './entities/card-funding.entity';
+import { CardSettings } from './entities/card-settings.entity';
+import { CardTransaction } from './entities/card-transaction.entity';
+import { DeviceToken } from './entities/device-token.entity';
+import { FeatureFlag } from './entities/feature-flag.entity';
+import { Notification } from './entities/notification.entity';
+import { NotificationPreference } from './entities/notification-preference.entity';
+import { ProviderConfiguration } from './entities/provider-configuration.entity';
+import { ProviderStatus } from './entities/provider-status.entity';
+import { RewardAccount } from './entities/reward-account.entity';
+import { RewardBalance } from './entities/reward-balance.entity';
+import { RewardTransaction } from './entities/reward-transaction.entity';
 
 //REPOSITORIES
 import { UserRepository } from './repositories/user.repository';
@@ -38,6 +51,14 @@ import { KycDocumentRepository } from './repositories/kyc-document.repository';
 import { ProviderOperationRepository } from './repositories/provider-operation.repository';
 import { ProviderWebhookEventRepository } from './repositories/provider-webhook-event.repository';
 import { SupportTicketRepository } from './repositories/support-ticket.repository';
+import { CardFundingRepository } from './repositories/card-funding.repository';
+import { CardRepository } from './repositories/card.repository';
+import { CardSettingsRepository } from './repositories/card-settings.repository';
+import { CardTransactionRepository } from './repositories/card-transaction.repository';
+import { NotificationRepository } from './repositories/notification.repository';
+import { RewardAccountRepository } from './repositories/reward-account.repository';
+import { RewardBalanceRepository } from './repositories/reward-balance.repository';
+import { RewardTransactionRepository } from './repositories/reward-transaction.repository';
 
 interface DatabaseConfig {
   MYSQL_HOST: string;
@@ -108,6 +129,19 @@ let transactionalContextInitialized = false;
       ProviderOperation,
       ProviderWebhookEvent,
       SupportTicket,
+      Card,
+      CardFunding,
+      CardSettings,
+      CardTransaction,
+      DeviceToken,
+      FeatureFlag,
+      Notification,
+      NotificationPreference,
+      ProviderConfiguration,
+      ProviderStatus,
+      RewardAccount,
+      RewardBalance,
+      RewardTransaction,
     ]),
   ],
   providers: [
@@ -124,6 +158,14 @@ let transactionalContextInitialized = false;
     ProviderOperationRepository,
     ProviderWebhookEventRepository,
     SupportTicketRepository,
+    CardRepository,
+    CardFundingRepository,
+    CardSettingsRepository,
+    CardTransactionRepository,
+    NotificationRepository,
+    RewardAccountRepository,
+    RewardBalanceRepository,
+    RewardTransactionRepository,
   ],
   exports: [
     TypeOrmModule,
@@ -139,6 +181,14 @@ let transactionalContextInitialized = false;
     ProviderOperationRepository,
     ProviderWebhookEventRepository,
     SupportTicketRepository,
+    CardRepository,
+    CardFundingRepository,
+    CardSettingsRepository,
+    CardTransactionRepository,
+    NotificationRepository,
+    RewardAccountRepository,
+    RewardBalanceRepository,
+    RewardTransactionRepository,
   ],
 })
 export class DatabaseModule {}

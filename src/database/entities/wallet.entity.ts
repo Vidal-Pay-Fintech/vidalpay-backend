@@ -18,6 +18,15 @@ export class Wallet extends AbstractEntity {
   })
   balance: number;
 
+  @Column({
+    type: 'float',
+    precision: 20,
+    scale: 2,
+    nullable: true,
+    default: 0.0,
+  })
+  availableBalance: number;
+
   @Column({ type: 'boolean', default: false })
   withdrawalSuspended: boolean;
 

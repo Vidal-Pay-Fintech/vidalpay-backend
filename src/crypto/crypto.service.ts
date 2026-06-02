@@ -1,4 +1,5 @@
 import { Injectable } from '@nestjs/common';
+import { FeatureFlagService } from 'src/feature-flags/feature-flag.service';
 import { UserService } from 'src/user/user.service';
 import { API_MESSAGES } from 'src/utils/apiMessages';
 
@@ -25,19 +26,23 @@ const CRYPTO_ASSETS = [
 
 @Injectable()
 export class CryptoService {
-  constructor(private readonly userService: UserService) {}
+  constructor(
+    private readonly userService: UserService,
+    private readonly featureFlags: FeatureFlagService,
+  ) {}
 
   async getOverview(userId: string) {
     const accountOverview = await this.userService.getAccountOverview(userId);
+    const enabled = this.featureFlags.isEnabled('ENABLE_CRYPTO_DEMO');
 
     return {
-      enabled: false,
-      comingSoon: true,
-      message: API_MESSAGES.CRYPTO_COMING_SOON,
+      enabled,
+      comingSoon: !enabled,
+      message: enabled ? 'Crypto demo mode is enabled.' : API_MESSAGES.CRYPTO_COMING_SOON,
       region: accountOverview.region,
       provider: accountOverview.provider,
       productAvailability: {
-        crypto: false,
+        crypto: enabled,
         staking: false,
         microLoans: false,
       },
@@ -50,7 +55,7 @@ export class CryptoService {
         {
           code: 'CRYPTO_WALLET',
           title: 'Crypto Wallet',
-          enabled: false,
+          enabled,
         },
         {
           code: 'STAKING',
