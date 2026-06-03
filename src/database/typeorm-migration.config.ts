@@ -1,5 +1,6 @@
 import 'dotenv/config';
 import { DataSource } from 'typeorm';
+import { InitialBaseSchema1743000000000 } from './migrations/1743000000000-InitialBaseSchema';
 import { AddProfileKycSchema1743584400000 } from './migrations/1743584400000-AddProfileKycSchema';
 import { ReconcileUserProfileKycColumns1743660000000 } from './migrations/1743660000000-ReconcileUserProfileKycColumns';
 import { ReconcileWalletAndKycSchema1743663600000 } from './migrations/1743663600000-ReconcileWalletAndKycSchema';
@@ -19,7 +20,9 @@ const requiredEnv = [
 
 for (const envKey of requiredEnv) {
   if (!process.env[envKey]) {
-    throw new Error(`Missing required database environment variable: ${envKey}`);
+    throw new Error(
+      `Missing required database environment variable: ${envKey}`,
+    );
   }
 }
 
@@ -33,6 +36,7 @@ export default new DataSource({
   synchronize: false,
   migrationsTableName: 'migrations',
   migrations: [
+    InitialBaseSchema1743000000000,
     AddProfileKycSchema1743584400000,
     ReconcileUserProfileKycColumns1743660000000,
     ReconcileWalletAndKycSchema1743663600000,
