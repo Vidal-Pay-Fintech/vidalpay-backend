@@ -14,6 +14,7 @@ import {
   UserKyc,
 } from 'src/database/entities/user-kyc.entity';
 import { User } from 'src/database/entities/user.entity';
+import { FeatureFlagService } from 'src/feature-flags/feature-flag.service';
 import { KycProviderRouterService } from 'src/integrations/kyc/kyc-provider-router.service';
 import { API_MESSAGES } from 'src/utils/apiMessages';
 import { UpsertKycIdentityDto } from './dto/upsert-kyc-identity.dto';
@@ -38,7 +39,10 @@ export interface RegionResolution {
 
 @Injectable()
 export class UserPolicyService {
-  constructor(private readonly kycProviderRouter: KycProviderRouterService) {}
+  constructor(
+    private readonly kycProviderRouter: KycProviderRouterService,
+    private readonly featureFlags: FeatureFlagService,
+  ) {}
 
   resolveRegionForUser(
     user: Partial<User>,
@@ -544,7 +548,7 @@ export class UserPolicyService {
             ? 'PIN_GATE'
             : 'FUTURE_PROGRESSIVE_POLICY';
 
-    return {
+    return this.applyFeatureFlags({
       policyVersion: 'staging-region-products-v2',
       tier,
       outbound: {
@@ -584,6 +588,19 @@ export class UserPolicyService {
         transactionConsistency: null,
         activeDurationDays: null,
       },
+    });
+  }
+
+  private applyFeatureFlags(profile: DynamicLimitProfile): DynamicLimitProfile {
+    return {
+      ...profile,
+      futureProducts: {
+        ...profile.futureProducts,
+        taxFilingEligible:
+          profile.futureProducts.taxFilingEligible &&
+          this.featureFlags.isEnabled('ENABLE_TAX_DEMO'),
+        loanEligible: profile.futureProducts.loanEligible,
+      },
     };
   }
 
@@ -592,7 +609,9 @@ export class UserPolicyService {
     canTransfer: boolean,
   ): ProductAvailability {
     const baseAvailability: ProductAvailability = {
-      wallet: true,
+      wallet:
+        this.featureFlags.isEnabled('ENABLE_NGN_WALLET') ||
+        this.featureFlags.isEnabled('ENABLE_USD_WALLET'),
       transfer: false,
       internalTransfer: false,
       externalTransfer: false,
@@ -604,8 +623,8 @@ export class UserPolicyService {
       data: false,
       utilities: false,
       loan: false,
-      taxFiling: false,
-      crypto: false,
+      taxFiling: this.featureFlags.isEnabled('ENABLE_TAX_DEMO'),
+      crypto: this.featureFlags.isEnabled('ENABLE_CRYPTO_DEMO'),
     };
 
     if (resolution.state !== 'RESOLVED' || !resolution.region) {
@@ -617,11 +636,13 @@ export class UserPolicyService {
         ...baseAvailability,
         receive: true,
         deposit: true,
-        cardTopUp: true,
-        conversion: true,
+        cardTopUp: this.featureFlags.isEnabled('ENABLE_VIRTUAL_CARD_DEMO'),
+        conversion: this.featureFlags.isEnabled('ENABLE_FX_CONVERSION_DEMO'),
         transfer: canTransfer,
-        internalTransfer: canTransfer,
-        externalTransfer: canTransfer,
+        internalTransfer:
+          canTransfer && this.featureFlags.isEnabled('ENABLE_INTERNAL_TRANSFER'),
+        externalTransfer:
+          canTransfer && this.featureFlags.isEnabled('ENABLE_NGN_BANK_TRANSFER'),
         airtime: true,
         data: true,
         utilities: true,
@@ -632,14 +653,16 @@ export class UserPolicyService {
       return {
         ...baseAvailability,
         receive: true,
-        conversion: true,
+        conversion: this.featureFlags.isEnabled('ENABLE_FX_CONVERSION_DEMO'),
         transfer: canTransfer,
-        internalTransfer: canTransfer,
-        externalTransfer: false,
+        internalTransfer:
+          canTransfer && this.featureFlags.isEnabled('ENABLE_INTERNAL_TRANSFER'),
+        externalTransfer:
+          canTransfer && this.featureFlags.isEnabled('ENABLE_USD_BANK_TRANSFER'),
         deposit: false,
-        cardTopUp: false,
+        cardTopUp: this.featureFlags.isEnabled('ENABLE_VIRTUAL_CARD_DEMO'),
         loan: false,
-        taxFiling: false,
+        taxFiling: this.featureFlags.isEnabled('ENABLE_TAX_DEMO'),
       };
     }
 

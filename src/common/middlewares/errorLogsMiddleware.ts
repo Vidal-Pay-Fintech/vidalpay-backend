@@ -1,9 +1,11 @@
-import { Injectable, NestMiddleware } from '@nestjs/common';
+import { Injectable, Logger, NestMiddleware } from '@nestjs/common';
 import { Request, Response, NextFunction } from 'express';
 import { UTILITIES } from 'src/utils/helperFuncs';
 
 @Injectable()
 export class ErrorHandlingMiddleware implements NestMiddleware {
+  private readonly logger = new Logger(ErrorHandlingMiddleware.name);
+
   use(req: Request, res: Response, next: NextFunction): void {
     const requestDetails = {
       method: req.method,
@@ -24,7 +26,10 @@ export class ErrorHandlingMiddleware implements NestMiddleware {
             `${statusCode} - Request Details: ${JSON.stringify(requestDetails)}, Error Details: ${JSON.stringify(res)}`,
           );
         } catch (slackError) {
-          console.error('Failed to post to Slack:', slackError);
+          this.logger.error(
+            `Failed to post to Slack: ${(slackError as Error).message}`,
+            (slackError as Error).stack,
+          );
         }
 
         // Optional: Customize the response if not already handled

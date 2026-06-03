@@ -50,7 +50,7 @@ export class TransactionRepository extends AbstractRepository<TransactionEntity>
     }
 
     if (transactionType) {
-      const normalizedType = transactionType.toUpperCase();
+      const normalizedType = transactionType.toLowerCase();
       if (normalizedType === TransactionType.CREDIT || normalizedType === TransactionType.DEBIT) {
         query.andWhere('transaction.type = :type', { type: normalizedType });
       }

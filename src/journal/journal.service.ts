@@ -1,4 +1,4 @@
-import { Injectable } from '@nestjs/common';
+import { Injectable, Logger } from '@nestjs/common';
 import { CreateJournalDto } from './dto/create-journal.dto';
 import { UpdateJournalDto } from './dto/update-journal.dto';
 import { TransactionService } from 'src/transaction/transaction.service';
@@ -7,10 +7,11 @@ import { JournalInterface } from 'src/vault/interface/journal-interface';
 import { UTILITIES } from 'src/utils/helperFuncs';
 import { VaultType } from 'src/utils/enums/vault.enum';
 import { Currency } from 'src/utils/enums/wallet.enum';
-import { error } from 'console';
 
 @Injectable()
 export class JournalService {
+  private readonly logger = new Logger(JournalService.name);
+
   constructor(
     private readonly transactionService: TransactionService,
     private readonly vaultService: VaultService,
@@ -38,7 +39,6 @@ export class JournalService {
         tag,
         reference,
       });
-      console.log('creditSuccesfulRes', walletRes);
       vaultRes = await this.vaultService.debitVault({
         userId,
         amount,
@@ -75,7 +75,6 @@ export class JournalService {
     let walletRes: any;
     const vaultType =
       currency === Currency.NGN ? VaultType.NGN_WALLET : VaultType.USD_WALLET;
-    console.log(vaultType, reference);
     try {
       walletRes = await this.transactionService.debitTransaction({
         userId,
@@ -86,7 +85,6 @@ export class JournalService {
         tag,
         reference,
       });
-      console.log('walletRes', walletRes);
       vaultRes = await this.vaultService.creditVault({
         userId,
         amount,
@@ -97,7 +95,10 @@ export class JournalService {
       });
       return walletRes;
     } catch (err) {
-      console.log('wallError', err);
+      this.logger.error(
+        `Wallet debit journal failed for ${reference}: ${err.message}`,
+        err.stack,
+      );
       if (walletRes && !vaultRes) {
         walletRes = await this.transactionService.creditTransaction({
           userId,
@@ -123,7 +124,6 @@ export class JournalService {
     let vaultRes: any;
     let walletRes: any;
     const vaultType = VaultType.CHARGES;
-    console.log(vaultType, reference);
     try {
       walletRes = await this.transactionService.debitTransaction({
         userId,
@@ -134,7 +134,6 @@ export class JournalService {
         tag,
         reference,
       });
-      console.log('walletRes', walletRes);
       vaultRes = await this.vaultService.creditVault({
         userId,
         amount,
@@ -145,7 +144,10 @@ export class JournalService {
       });
       return walletRes;
     } catch (err) {
-      console.log('wallError', err);
+      this.logger.error(
+        `Credit charges journal failed for ${reference}: ${err.message}`,
+        err.stack,
+      );
       if (walletRes && !vaultRes) {
         walletRes = await this.transactionService.creditTransaction({
           userId,
@@ -171,7 +173,6 @@ export class JournalService {
     let vaultRes: any;
     let walletRes: any;
     const vaultType = VaultType.CHARGES;
-    console.log(vaultType, reference);
     try {
       walletRes = await this.transactionService.creditTransaction({
         userId,
@@ -182,7 +183,6 @@ export class JournalService {
         tag,
         reference,
       });
-      console.log('walletRes', walletRes);
       vaultRes = await this.vaultService.debitVault({
         userId,
         amount,
@@ -193,7 +193,10 @@ export class JournalService {
       });
       return walletRes;
     } catch (err) {
-      console.log('wallError', err);
+      this.logger.error(
+        `Debit charges journal failed for ${reference}: ${err.message}`,
+        err.stack,
+      );
       if (walletRes && !vaultRes) {
         walletRes = await this.transactionService.debitTransaction({
           userId,

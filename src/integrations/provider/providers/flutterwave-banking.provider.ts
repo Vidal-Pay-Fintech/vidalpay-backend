@@ -230,22 +230,18 @@ export class FlutterwaveBankingProviderService implements RegionalProviderAdapte
           }))
           .filter((bank) => bank.enabled);
 
-        if (!banks.length) {
-          return FLUTTERWAVE_BANK_FALLBACK_CATALOG;
-        }
-
-        return {
-          region: this.region,
-          provider: this.provider,
-          source: 'PROVIDER',
-          message: null,
-          banks,
-        };
+        return this.buildBankCatalogResponse(
+          banks.length ? banks : FLUTTERWAVE_BANK_FALLBACK_CATALOG.banks,
+          banks.length ? 'PROVIDER' : 'CURATED_FALLBACK',
+        );
       } catch (error) {
         this.logger.warn(
           `Flutterwave bank catalog discovery failed: ${(error as Error).message}`,
         );
-        return FLUTTERWAVE_BANK_FALLBACK_CATALOG;
+        return this.buildBankCatalogResponse(
+          FLUTTERWAVE_BANK_FALLBACK_CATALOG.banks,
+          'CURATED_FALLBACK',
+        );
       }
     });
   }
@@ -278,6 +274,10 @@ export class FlutterwaveBankingProviderService implements RegionalProviderAdapte
       };
     }
 
+    if (this.isFlutterwaveSandboxMode() && bankCode !== '044') {
+      return this.buildSandboxAccountResolutionResult(payload, bankCode);
+    }
+
     try {
       const response = await this.flutterwaveRequest<{
         data?: Record<string, any>;
@@ -303,6 +303,10 @@ export class FlutterwaveBankingProviderService implements RegionalProviderAdapte
         metadata: data,
       };
     } catch (error) {
+      if (this.isFlutterwaveSandboxResolutionLimit(error)) {
+        return this.buildSandboxAccountResolutionResult(payload, bankCode);
+      }
+
       return {
         resolved: false,
         accountNumber: payload.destinationAccountNumber,
@@ -351,11 +355,43 @@ export class FlutterwaveBankingProviderService implements RegionalProviderAdapte
         payload.customerReference,
       );
       const data = (validation?.data ?? validation ?? {}) as Record<string, any>;
+      const validationMessage =
+        this.normalizeOptionalString(data?.response_message) ??
+        'Customer validation did not succeed.';
       const isValid =
         String(data?.response_code ?? '').trim() === '00' ||
         String(data?.response_message ?? '')
           .toLowerCase()
           .includes('success');
+
+      if (!isValid && this.isUtilityValidationUnavailableMessage(validationMessage)) {
+        return {
+          valid: false,
+          validationAvailable: false,
+          resolvedName: null,
+          customerReference: payload.customerReference,
+          provider: {
+            code: payload.providerCode ?? null,
+            title: payload.providerTitle ?? null,
+            billerCode: this.normalizeOptionalString(
+              data?.biller_code ?? resolved.billerCode,
+            ),
+            itemCode: this.normalizeOptionalString(
+              data?.product_code ?? resolved.itemCode,
+            ),
+            type: resolved.type,
+          },
+          fee: this.toNullableNumber(data?.fee),
+          minimumAmount: this.toNullableNumber(data?.minimum),
+          maximumAmount: this.toNullableNumber(data?.maximum),
+          currency: Currency.NGN,
+          message: API_MESSAGES.UTILITY_VALIDATION_UNAVAILABLE,
+          metadata: {
+            rawResponseCode: this.normalizeOptionalString(data?.response_code),
+            providerMessage: validationMessage,
+          },
+        };
+      }
 
       return {
         valid: isValid,
@@ -377,10 +413,7 @@ export class FlutterwaveBankingProviderService implements RegionalProviderAdapte
         minimumAmount: this.toNullableNumber(data?.minimum),
         maximumAmount: this.toNullableNumber(data?.maximum),
         currency: Currency.NGN,
-        message: isValid
-          ? 'Customer validated'
-          : this.normalizeOptionalString(data?.response_message) ??
-            'Customer validation did not succeed.',
+        message: isValid ? 'Customer validated' : validationMessage,
         metadata: {
           address: this.normalizeOptionalString(data?.address),
           email: this.normalizeOptionalString(data?.email),
@@ -388,7 +421,10 @@ export class FlutterwaveBankingProviderService implements RegionalProviderAdapte
         },
       };
     } catch (error) {
-      if (error instanceof ServiceUnavailableException) {
+      if (
+        error instanceof ServiceUnavailableException ||
+        this.isUtilityValidationUnavailableMessage((error as Error)?.message)
+      ) {
         return {
           valid: false,
           validationAvailable: false,
@@ -405,8 +441,7 @@ export class FlutterwaveBankingProviderService implements RegionalProviderAdapte
           minimumAmount: null,
           maximumAmount: null,
           currency: Currency.NGN,
-          message:
-            'Live utility validation is unavailable right now. You can continue to review the payment details before submitting.',
+          message: API_MESSAGES.UTILITY_VALIDATION_UNAVAILABLE,
           metadata: null,
         };
       }
@@ -556,6 +591,7 @@ export class FlutterwaveBankingProviderService implements RegionalProviderAdapte
               note: data?.note ?? null,
               accountStatus: data?.account_status ?? null,
               responseCode: data?.response_code ?? null,
+              isPermanent: true,
               rawProviderResponse: data,
             },
           });
@@ -585,6 +621,12 @@ export class FlutterwaveBankingProviderService implements RegionalProviderAdapte
     if (!bankCode) {
       throw new BadRequestException(
         'Flutterwave bank code is required for NG external transfers.',
+      );
+    }
+
+    if (this.isFlutterwaveSandboxMode() && bankCode !== '044') {
+      throw new BadRequestException(
+        API_MESSAGES.FLW_SANDBOX_BANK_RESOLUTION_LIMIT,
       );
     }
 
@@ -1295,6 +1337,71 @@ export class FlutterwaveBankingProviderService implements RegionalProviderAdapte
     };
   }
 
+  private buildBankCatalogResponse(
+    banks: ProviderBankCatalog['banks'],
+    source: ProviderBankCatalog['source'],
+  ): ProviderBankCatalog {
+    if (!this.isFlutterwaveSandboxMode()) {
+      return {
+        region: this.region,
+        provider: this.provider,
+        source,
+        message: source === 'PROVIDER' ? null : FLUTTERWAVE_BANK_FALLBACK_CATALOG.message,
+        banks,
+      };
+    }
+
+    const accessBank =
+      banks.find((bank) => bank.code === '044') ??
+      FLUTTERWAVE_BANK_FALLBACK_CATALOG.banks.find((bank) => bank.code === '044') ??
+      null;
+
+    return {
+      region: this.region,
+      provider: this.provider,
+      source: 'CURATED_FALLBACK',
+      message: API_MESSAGES.FLW_SANDBOX_BANK_RESOLUTION_LIMIT,
+      banks: accessBank
+        ? [
+            {
+              ...accessBank,
+              enabled: true,
+              metadata: {
+                ...(accessBank.metadata ?? {}),
+                sandboxOnly: true,
+                supportedTestAccounts: [
+                  '0690000031',
+                  '0690000032',
+                  '0690000033',
+                  '0690000034',
+                ],
+              },
+            },
+          ]
+        : [],
+    };
+  }
+
+  private buildSandboxAccountResolutionResult(
+    payload: ProviderAccountResolutionPayload,
+    bankCode: string,
+  ): ProviderAccountResolutionResult {
+    return {
+      resolved: false,
+      accountNumber: payload.destinationAccountNumber,
+      accountName: null,
+      bankCode,
+      bankName: this.findBankNameByCode(bankCode),
+      currency: payload.currency,
+      provider: this.provider,
+      message: API_MESSAGES.FLW_SANDBOX_BANK_RESOLUTION_LIMIT,
+      metadata: {
+        sandboxOnly: true,
+        supportedBankCodes: ['044'],
+      },
+    };
+  }
+
   private buildProvisioningRail(
     wallet: Wallet,
     user: User,
@@ -1319,11 +1426,22 @@ export class FlutterwaveBankingProviderService implements RegionalProviderAdapte
       provider: this.provider,
       region: this.region,
       railType: 'VIRTUAL_ACCOUNT',
-      accountNumber: input.accountNumber ?? wallet.accountNumber ?? null,
-      routingNumber: input.routingNumber ?? wallet.routingNumber ?? null,
-      accountName: input.accountName ?? wallet.accountName ?? this.buildAccountName(user),
-      bankName: input.bankName ?? wallet.bankName ?? null,
-      sortCode: input.sortCode ?? wallet.sortCode ?? null,
+      accountNumber:
+        input.accountNumber !== undefined
+          ? input.accountNumber
+          : wallet.accountNumber ?? null,
+      routingNumber:
+        input.routingNumber !== undefined
+          ? input.routingNumber
+          : wallet.routingNumber ?? null,
+      accountName:
+        input.accountName !== undefined
+          ? input.accountName
+          : wallet.accountName ?? this.buildAccountName(user),
+      bankName:
+        input.bankName !== undefined ? input.bankName : wallet.bankName ?? null,
+      sortCode:
+        input.sortCode !== undefined ? input.sortCode : wallet.sortCode ?? null,
       providerCustomerId:
         input.providerCustomerId ?? wallet.providerCustomerId ?? null,
       providerAccountId: input.providerAccountId ?? wallet.providerAccountId ?? null,
@@ -1347,6 +1465,7 @@ export class FlutterwaveBankingProviderService implements RegionalProviderAdapte
     const payload: Record<string, any> = {
       email: user.email,
       tx_ref: txRef,
+      amount: 0,
       is_permanent: true,
       firstname: user.firstName ?? 'Vidal',
       lastname: user.lastName ?? 'User',
@@ -1500,6 +1619,34 @@ export class FlutterwaveBankingProviderService implements RegionalProviderAdapte
       FLUTTERWAVE_BANK_FALLBACK_CATALOG.banks;
     const matchedBank = banks.find((bank) => bank.code === bankCode);
     return matchedBank?.name ?? null;
+  }
+
+  private isFlutterwaveSandboxMode() {
+    const config = this.getConfig();
+    return (
+      config.secretKey.includes('_TEST-') ||
+      config.baseUrl.toLowerCase().includes('sandbox')
+    );
+  }
+
+  private isFlutterwaveSandboxResolutionLimit(error: unknown) {
+    const message = String((error as Error)?.message ?? '').toLowerCase();
+    return message.includes('only 044 is allowed');
+  }
+
+  private isUtilityValidationUnavailableMessage(message: string | null | undefined) {
+    const normalized = String(message ?? '').trim().toLowerCase();
+    if (!normalized) {
+      return false;
+    }
+
+    return (
+      normalized.includes('unknown biller') ||
+      normalized.includes('unknown product') ||
+      normalized.includes('service unavailable') ||
+      normalized.includes('temporarily unavailable') ||
+      normalized.includes('not available for validation')
+    );
   }
 
   private resolveBillRoute(

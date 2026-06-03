@@ -3,6 +3,7 @@ import {
   IsNotEmpty,
   Matches,
   IsNumber,
+  IsOptional,
   IsPositive,
   IsString,
   Min,
@@ -28,4 +29,8 @@ export class InternalTransferDto {
   @IsEnum(Currency)
   @IsNotEmpty()
   currency: Currency;
+
+  @IsString()
+  @IsOptional()
+  note?: string;
 }

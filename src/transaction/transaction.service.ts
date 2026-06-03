@@ -21,6 +21,7 @@ export class TransactionService {
 
     await this.walletRepository.findOneAndUpdate(walletDetails.id, {
       balance: newBalance,
+      availableBalance: newBalance,
     });
     return walletDetails;
   }
@@ -34,6 +35,7 @@ export class TransactionService {
 
     await this.walletRepository.findOneAndUpdate(walletDetails.id, {
       balance: newBalance,
+      availableBalance: newBalance,
     });
     return walletDetails;
   }

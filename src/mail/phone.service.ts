@@ -13,7 +13,6 @@ import { CONFIG_VARIABLES } from 'src/utils/config';
 
 @Injectable()
 export class PhoneService {
-  private readonly SENDER_ID = 'Lottonownow';
   private user: User;
   private readonly logger = new Logger(PhoneService.name);
   private twilioClient: Twilio;
@@ -141,15 +140,10 @@ export class PhoneService {
 
       // Detect country for potential message customization
       const formattedPhone = this.detectCountryAndFormatPhone(phone);
-      const isNigerian = formattedPhone.startsWith('+234');
-
-      // You can customize messages based on country if needed
       const message = `Welcome to ${CONFIG_VARIABLES.APP_NAME}, Your phone verification pin is: ${code}`;
 
       // Send SMS with Twilio
       const messageRes = await this.sendSMSTwilio(phone, message);
-
-      console.log(messageRes, 'THE MESSAGE RES');
 
       if (messageRes?.sid) {
         return `Message sent successfully to ${formattedPhone}`;

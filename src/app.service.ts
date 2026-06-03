@@ -8,7 +8,7 @@ export class AppService {
       process.env.NODE_ENV !== 'production';
 
     return {
-      service: 'vidalpay-backend',
+      service: process.env.APP_NAME ?? 'vidalpay-backend',
       status: 'ok',
       apiBasePath: '/api/v1',
       health: '/api/v1/health',

@@ -194,10 +194,16 @@ class ApiMessages {
     'Card top-up is not available for your current region or provider.';
   public NG_RECEIVE_RAIL_REQUIRES_IDENTITY =
     'Complete NIN and BVN to generate your NGN account number.';
+  public NG_RECEIVE_RAIL_TEMPORARY =
+    'A temporary NGN account number has been generated. Complete NIN and BVN to unlock a permanent account number.';
   public NG_RECEIVE_RAIL_PENDING =
     'Your NGN account number is being generated. Please try again shortly.';
   public NG_RECEIVE_RAIL_UNAVAILABLE =
     'NGN account number generation is unavailable right now. Please try again later.';
+  public FLW_SANDBOX_BANK_RESOLUTION_LIMIT =
+    'Flutterwave sandbox only verifies Access Bank (044) test accounts. Use an Access Bank test account for staging verification.';
+  public UTILITY_VALIDATION_UNAVAILABLE =
+    'Live utility validation is unavailable for this service right now. You can continue to review the payment details before submitting.';
   public STAGING_KYC_OVERRIDE_DISABLED =
     'Staging KYC verification override is disabled.';
   public STAGING_KYC_VERIFIED =

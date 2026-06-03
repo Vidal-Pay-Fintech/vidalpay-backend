@@ -7,6 +7,7 @@ import { AddProviderOperationsSchema1743912000000 } from './migrations/174391200
 import { AddProviderWebhookIdempotencyIndex1744000000000 } from './migrations/1744000000000-AddProviderWebhookIdempotencyIndex';
 import { AddSecuritySupportAndTopUpSchema1744070400000 } from './migrations/1744070400000-AddSecuritySupportAndTopUpSchema';
 import { AddBeneficiaryParitySchema1744857600000 } from './migrations/1744857600000-AddBeneficiaryParitySchema';
+import { AddDemoReadinessSchema1744944000000 } from './migrations/1744944000000-AddDemoReadinessSchema';
 
 const requiredEnv = [
   'MYSQL_HOST',
@@ -39,5 +40,6 @@ export default new DataSource({
     AddProviderWebhookIdempotencyIndex1744000000000,
     AddSecuritySupportAndTopUpSchema1744070400000,
     AddBeneficiaryParitySchema1744857600000,
+    AddDemoReadinessSchema1744944000000,
   ],
 });

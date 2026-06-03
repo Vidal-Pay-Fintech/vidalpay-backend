@@ -4,11 +4,12 @@ import { WalletService } from './wallet.service';
 
 describe('WalletController', () => {
   let controller: WalletController;
+  const walletService = {};
 
   beforeEach(async () => {
     const module: TestingModule = await Test.createTestingModule({
       controllers: [WalletController],
-      providers: [WalletService],
+      providers: [{ provide: WalletService, useValue: walletService }],
     }).compile();
 
     controller = module.get<WalletController>(WalletController);

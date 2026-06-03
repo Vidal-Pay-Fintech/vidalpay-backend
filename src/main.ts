@@ -1,4 +1,4 @@
-import { ValidationPipe, VersioningType } from '@nestjs/common';
+import { Logger, ValidationPipe, VersioningType } from '@nestjs/common';
 import { NestFactory } from '@nestjs/core';
 import { DocumentBuilder, SwaggerModule } from '@nestjs/swagger';
 import * as bodyParser from 'body-parser';
@@ -7,6 +7,7 @@ import { ResponseInterceptor } from './common/filters/success.filter';
 import { AppModule } from './app.module';
 
 async function bootstrap() {
+  const logger = new Logger('Bootstrap');
   const app = await NestFactory.create(AppModule, {
     cors: true,
   });
@@ -39,11 +40,12 @@ async function bootstrap() {
   });
 
   if (swaggerEnabled) {
+    const appName = process.env.APP_NAME || 'Vidal Pay Backend';
     const options = new DocumentBuilder()
-      .setTitle('Vidal Pay Backend')
-      .setDescription('API Documentation for Vidal Pay API')
+      .setTitle(appName)
+      .setDescription(`API Documentation for ${appName}`)
       .setVersion('1.0')
-      .addTag('Vidal Pay Backend')
+      .addTag(appName)
       .addBearerAuth()
       .build();
 
@@ -56,7 +58,7 @@ async function bootstrap() {
   const port = parseInt(process.env.PORT ?? '3000', 10);
   await app.listen(port, '0.0.0.0');
 
-  console.log(`Application is running on: ${await app.getUrl()}`);
+  logger.log(`Application is running on: ${await app.getUrl()}`);
 }
 
 bootstrap();

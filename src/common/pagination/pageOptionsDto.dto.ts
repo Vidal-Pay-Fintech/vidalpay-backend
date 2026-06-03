@@ -110,7 +110,6 @@ export class PageOptionsDto {
   }
 
   get skip(): number {
-    console.log('THE SKIP', this.page, this.limit);
     // Ensure skip calculation returns a valid number, even if `page` or `limit` is undefined.
     const page = Number(this.page) || 1;
     const limit = Number(this.limit) || 50;

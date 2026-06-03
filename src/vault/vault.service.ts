@@ -1,4 +1,4 @@
-import { Injectable, UnprocessableEntityException } from '@nestjs/common';
+import { Injectable, Logger } from '@nestjs/common';
 import { CreateVaultDto } from './dto/create-vault.dto';
 import { UpdateVaultDto } from './dto/update-vault.dto';
 import { VaultRepository } from 'src/database/repositories/vault.repository';
@@ -9,6 +9,8 @@ import { TransactionType } from 'src/utils/enums/transaction-type.enum';
 
 @Injectable()
 export class VaultService {
+  private readonly logger = new Logger(VaultService.name);
+
   constructor(
     private readonly vaultRepository: VaultRepository,
     private readonly vaultJournalRepository: VaultJournalRepository,
@@ -19,7 +21,14 @@ export class VaultService {
       where: { vaultType },
     });
     if (!res) {
-      throw new UnprocessableEntityException('Vault type not found');
+      this.logger.warn(`Vault type ${vaultType} was missing. Creating demo-safe vault.`);
+      return this.vaultRepository.create({
+        vaultName: vaultType,
+        vaultType,
+        totalDebit: 0,
+        totalCredit: 0,
+        workingBalance: 0,
+      });
     }
     return res;
   }
