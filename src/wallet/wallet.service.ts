@@ -3,6 +3,7 @@ import {
   ConflictException,
   Injectable,
   Logger,
+  NotImplementedException,
   PreconditionFailedException,
 } from '@nestjs/common';
 import { CreateWalletDto } from './dto/create-wallet.dto';
@@ -66,7 +67,9 @@ export class WalletService {
     private readonly cardsService: CardsService,
   ) {}
   create(createWalletDto: CreateWalletDto) {
-    return 'This action adds a new wallet';
+    throw new NotImplementedException(
+      'Wallet scaffold route is disabled. Use /wallets or supported wallet operation routes.',
+    );
   }
 
   async createCustomerWallets(
@@ -92,21 +95,25 @@ export class WalletService {
 
         await this.walletRepository.createWalletInTransaction(
           {
-        userId,
-        currency,
-        availableBalance: 0,
-      },
+            userId,
+            currency,
+            availableBalance: 0,
+          },
           manager,
         );
         createdCurrencies.push(currency);
-        this.logger.log(`[AUTH] wallet created for user ${userId}: ${currency}`);
+        this.logger.log(
+          `[AUTH] wallet created for user ${userId}: ${currency}`,
+        );
       }
 
       const finalWallets = await this.walletRepository.findUserWallets(
         userId,
         manager,
       );
-      const finalCurrencies = new Set(finalWallets.map((wallet) => wallet.currency));
+      const finalCurrencies = new Set(
+        finalWallets.map((wallet) => wallet.currency),
+      );
 
       if (
         !finalCurrencies.has(Currency.NGN) ||
@@ -420,7 +427,10 @@ export class WalletService {
     return walletInfo;
   }
 
-  async externalTransfer(externalTransferDto: ExternalTransferDto, userId: string) {
+  async externalTransfer(
+    externalTransferDto: ExternalTransferDto,
+    userId: string,
+  ) {
     if (externalTransferDto.currency === Currency.NGN) {
       this.featureFlags.assertEnabled('ENABLE_NGN_BANK_TRANSFER');
     }
@@ -443,15 +453,13 @@ export class WalletService {
       externalTransferDto.currency,
       externalTransferDto.amount,
     );
-    const resolvedRecipient = await this.providerOperationsService.resolveExternalAccount(
-      region,
-      {
+    const resolvedRecipient =
+      await this.providerOperationsService.resolveExternalAccount(region, {
         currency: externalTransferDto.currency,
         destinationAccountNumber: externalTransferDto.destinationAccountNumber,
         destinationBankCode: externalTransferDto.destinationBankCode ?? null,
         destinationBankName: externalTransferDto.destinationBankName ?? null,
-      },
-    );
+      });
 
     const destinationBankCode =
       externalTransferDto.destinationBankCode ??
@@ -482,7 +490,8 @@ export class WalletService {
           wallet,
           amount: externalTransferDto.amount,
           currency: externalTransferDto.currency,
-          destinationAccountNumber: externalTransferDto.destinationAccountNumber,
+          destinationAccountNumber:
+            externalTransferDto.destinationAccountNumber,
           destinationBankCode,
           destinationAccountName:
             externalTransferDto.destinationAccountName ??
@@ -542,7 +551,9 @@ export class WalletService {
       throw new BadRequestException(API_MESSAGES.EXTERNAL_TRANSFER_UNAVAILABLE);
     }
 
-    return this.providerOperationsService.getBankCatalog(accountOverview.region);
+    return this.providerOperationsService.getBankCatalog(
+      accountOverview.region,
+    );
   }
 
   async resolveExternalTransferRecipient(
@@ -562,17 +573,22 @@ export class WalletService {
       accountOverview.region,
       {
         currency: resolveExternalAccountDto.currency,
-        destinationAccountNumber: resolveExternalAccountDto.destinationAccountNumber,
+        destinationAccountNumber:
+          resolveExternalAccountDto.destinationAccountNumber,
         destinationBankCode:
           resolveExternalAccountDto.destinationBankCode ??
           resolveExternalAccountDto.destinationRoutingNumber ??
           null,
-        destinationBankName: resolveExternalAccountDto.destinationBankName ?? null,
+        destinationBankName:
+          resolveExternalAccountDto.destinationBankName ?? null,
       },
     );
   }
 
-  async purchaseAirtime(airtimePurchaseDto: AirtimePurchaseDto, userId: string) {
+  async purchaseAirtime(
+    airtimePurchaseDto: AirtimePurchaseDto,
+    userId: string,
+  ) {
     return this.processRegionalProductOperation(
       ProviderOperationType.AIRTIME,
       airtimePurchaseDto.currency,
@@ -710,12 +726,15 @@ export class WalletService {
   }
 
   async getUserWalletByCurrency(userId: string, currency: Currency) {
-    const wallet = await this.getUserWalletByCurrencyandUserId(userId, currency);
+    const wallet = await this.getUserWalletByCurrencyandUserId(
+      userId,
+      currency,
+    );
     return this.serializeWalletLedger(wallet);
   }
 
   async fundDemoWallet(userId: string, dto: DemoFundWalletDto) {
-    this.featureFlags.assertEnabled('ENABLE_DEMO_MODE');
+    this.featureFlags.assertDemoEnabled();
     this.assertWalletCurrencyEnabled(dto.currency);
 
     let wallet = await this.walletRepository.findOne({
@@ -768,6 +787,7 @@ export class WalletService {
 
     return {
       status: 'COMPLETED',
+      message: 'Demo funding completed',
       depositTransaction: transaction,
       receipt,
       ledgerEntry: {
@@ -782,19 +802,27 @@ export class WalletService {
   }
 
   findAll() {
-    return `This action returns all wallet`;
+    throw new NotImplementedException(
+      'Wallet scaffold route is disabled. Use /wallets.',
+    );
   }
 
   findOne(id: number) {
-    return `This action returns a #${id} wallet`;
+    throw new NotImplementedException(
+      'Wallet scaffold route is disabled. Use /wallets/ngn or /wallets/usd.',
+    );
   }
 
   update(id: number, updateWalletDto: UpdateWalletDto) {
-    return `This action updates a #${id} wallet`;
+    throw new NotImplementedException(
+      'Wallet scaffold route is disabled. Use supported wallet operation routes.',
+    );
   }
 
   remove(id: number) {
-    return `This action removes a #${id} wallet`;
+    throw new NotImplementedException(
+      'Wallet scaffold route is disabled. Wallet deletion is not a public product API.',
+    );
   }
 
   private async processRegionalProductOperation(
@@ -827,11 +855,14 @@ export class WalletService {
     if (
       (operationType === ProviderOperationType.AIRTIME &&
         !productAvailability.airtime) ||
-      (operationType === ProviderOperationType.DATA && !productAvailability.data) ||
+      (operationType === ProviderOperationType.DATA &&
+        !productAvailability.data) ||
       (operationType === ProviderOperationType.UTILITY &&
         !productAvailability.utilities)
     ) {
-      throw new BadRequestException(API_MESSAGES.PRODUCT_NOT_AVAILABLE_FOR_REGION);
+      throw new BadRequestException(
+        API_MESSAGES.PRODUCT_NOT_AVAILABLE_FOR_REGION,
+      );
     }
 
     const operationLabel =
@@ -894,7 +925,9 @@ export class WalletService {
     );
     const data = Array.isArray(transactions)
       ? transactions
-      : transactions.data.filter((transaction) => transaction.currency === wallet.currency);
+      : transactions.data.filter(
+          (transaction) => transaction.currency === wallet.currency,
+        );
 
     return {
       id: wallet.id,
@@ -1012,10 +1045,12 @@ export class WalletService {
         await this.attachOperationLedgerMetadata(
           this.extractProviderReference(error),
           {
-            walletDebitReversalReference: reversalTransaction?.reference ?? null,
+            walletDebitReversalReference:
+              reversalTransaction?.reference ?? null,
             walletDebitReversalId: reversalTransaction?.id ?? null,
             walletReversedAt: new Date().toISOString(),
-            walletReversalReason: error?.message ?? 'provider-initiation-failed',
+            walletReversalReason:
+              error?.message ?? 'provider-initiation-failed',
           },
         );
       }
@@ -1053,7 +1088,9 @@ export class WalletService {
 
     try {
       const operation =
-        await this.providerOperationRepository.findByReference(operationReference);
+        await this.providerOperationRepository.findByReference(
+          operationReference,
+        );
       if (!operation) {
         return;
       }
@@ -1108,7 +1145,9 @@ export class WalletService {
     const region = accountOverview.region;
 
     if (region !== SupportedRegion.NG) {
-      throw new BadRequestException(API_MESSAGES.PRODUCT_NOT_AVAILABLE_FOR_REGION);
+      throw new BadRequestException(
+        API_MESSAGES.PRODUCT_NOT_AVAILABLE_FOR_REGION,
+      );
     }
 
     if (
@@ -1117,7 +1156,9 @@ export class WalletService {
       (product === 'utilities' &&
         !accountOverview.productAvailability.utilities)
     ) {
-      throw new BadRequestException(API_MESSAGES.PRODUCT_NOT_AVAILABLE_FOR_REGION);
+      throw new BadRequestException(
+        API_MESSAGES.PRODUCT_NOT_AVAILABLE_FOR_REGION,
+      );
     }
 
     return region;

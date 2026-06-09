@@ -1,4 +1,8 @@
-import { Injectable, ServiceUnavailableException } from '@nestjs/common';
+import {
+  ForbiddenException,
+  Injectable,
+  ServiceUnavailableException,
+} from '@nestjs/common';
 import { ConfigService } from '@nestjs/config';
 import {
   FEATURE_FLAG_DESCRIPTIONS,
@@ -19,6 +23,14 @@ export class FeatureFlagService {
     if (!this.isEnabled(flag)) {
       throw new ServiceUnavailableException(
         `${flag} is disabled for this environment.`,
+      );
+    }
+  }
+
+  assertDemoEnabled() {
+    if (!this.isEnabled('ENABLE_DEMO_MODE')) {
+      throw new ForbiddenException(
+        'Demo operation disabled in this environment.',
       );
     }
   }

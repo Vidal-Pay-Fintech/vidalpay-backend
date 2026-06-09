@@ -4,6 +4,7 @@ import { RewardAccountRepository } from 'src/database/repositories/reward-accoun
 import { RewardBalanceRepository } from 'src/database/repositories/reward-balance.repository';
 import { RewardTransactionRepository } from 'src/database/repositories/reward-transaction.repository';
 import { NotificationService } from 'src/notifications/notification.service';
+import { FeatureFlagService } from 'src/feature-flags/feature-flag.service';
 import { RedeemRewardDto } from './dto/redeem-reward.dto';
 
 const DEMO_STARTER_POINTS = 1000;
@@ -15,9 +16,11 @@ export class RewardsService {
     private readonly rewardBalanceRepository: RewardBalanceRepository,
     private readonly rewardTransactionRepository: RewardTransactionRepository,
     private readonly notificationService: NotificationService,
+    private readonly featureFlags: FeatureFlagService,
   ) {}
 
   async getRewards(userId: string) {
+    this.featureFlags.assertDemoEnabled();
     const account = await this.ensureRewardAccount(userId);
     const balances = await this.rewardBalanceRepository.findForUser(userId);
 
@@ -40,11 +43,13 @@ export class RewardsService {
   }
 
   async getHistory(userId: string) {
+    this.featureFlags.assertDemoEnabled();
     await this.ensureRewardAccount(userId);
     return this.rewardTransactionRepository.findForUser(userId);
   }
 
   async redeem(userId: string, dto: RedeemRewardDto) {
+    this.featureFlags.assertDemoEnabled();
     const account = await this.ensureRewardAccount(userId);
 
     if (account.pointsBalance < dto.points) {

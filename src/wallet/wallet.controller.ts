@@ -22,6 +22,8 @@ import { UtilityPaymentDto } from './dto/utility-payment.dto';
 import { CreateCardTopUpIntentDto } from './dto/create-card-topup-intent.dto';
 import { ValidateUtilityCustomerDto } from './dto/validate-utility-customer.dto';
 import { ResolveExternalAccountDto } from './dto/resolve-external-account.dto';
+import { Role } from 'src/common/enum/role.enum';
+import { Roles } from 'src/iam/decorators/roles.decorator';
 
 @Controller('wallet')
 export class WalletController {
@@ -146,21 +148,25 @@ export class WalletController {
   }
 
   @Get()
+  @Roles(Role.ADMIN, Role.SUPER_ADMIN, Role.SETTLEMENT)
   findAll() {
     return this.walletService.findAll();
   }
 
   @Get(':id')
+  @Roles(Role.ADMIN, Role.SUPER_ADMIN, Role.SETTLEMENT)
   findOne(@Param('id') id: string) {
     return this.walletService.findOne(+id);
   }
 
   @Patch(':id')
+  @Roles(Role.ADMIN, Role.SUPER_ADMIN, Role.SETTLEMENT)
   update(@Param('id') id: string, @Body() updateWalletDto: UpdateWalletDto) {
     return this.walletService.update(+id, updateWalletDto);
   }
 
   @Delete(':id')
+  @Roles(Role.ADMIN, Role.SUPER_ADMIN, Role.SETTLEMENT)
   remove(@Param('id') id: string) {
     return this.walletService.remove(+id);
   }

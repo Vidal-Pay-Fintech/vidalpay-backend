@@ -6,10 +6,7 @@ import { UserRepository } from 'src/database/repositories/user.repository';
 import { FeatureFlagService } from 'src/feature-flags/feature-flag.service';
 import { KycProviderRouterService } from 'src/integrations/kyc/kyc-provider-router.service';
 import { NotificationService } from 'src/notifications/notification.service';
-import {
-  DemoKycStatus,
-  DemoKycSubmitDto,
-} from './dto/demo-kyc-submit.dto';
+import { DemoKycStatus, DemoKycSubmitDto } from './dto/demo-kyc-submit.dto';
 
 @Injectable()
 export class KycDemoService {
@@ -22,7 +19,7 @@ export class KycDemoService {
   ) {}
 
   async submit(userId: string, dto: DemoKycSubmitDto) {
-    this.featureFlags.assertEnabled('ENABLE_DEMO_MODE');
+    this.featureFlags.assertDemoEnabled();
     const user = await this.userRepository.getUserProfileContext(userId);
     const userKyc = await this.userKycRepository.getOrCreateForUser(user);
     const demoStatus = dto.status ?? DemoKycStatus.UNDER_REVIEW;
@@ -33,11 +30,14 @@ export class KycDemoService {
       user.countryCode ??
       SupportedRegion.NG;
     const region =
-      countryCode === SupportedRegion.US ? SupportedRegion.US : SupportedRegion.NG;
+      countryCode === SupportedRegion.US
+        ? SupportedRegion.US
+        : SupportedRegion.NG;
     const provider = this.kycProviderRouter.mapRegionToProvider(region);
     const now = new Date();
     const reviewedAt =
-      internalStatus === KycStatus.VERIFIED || internalStatus === KycStatus.REJECTED
+      internalStatus === KycStatus.VERIFIED ||
+      internalStatus === KycStatus.REJECTED
         ? now
         : null;
 
@@ -47,7 +47,9 @@ export class KycDemoService {
       countryCode: region,
       country: region === SupportedRegion.NG ? 'Nigeria' : 'United States',
       submittedAt:
-        internalStatus === KycStatus.NOT_STARTED ? null : userKyc.submittedAt ?? now,
+        internalStatus === KycStatus.NOT_STARTED
+          ? null
+          : (userKyc.submittedAt ?? now),
       reviewedAt,
       blockedReason: this.getBlockedReason(internalStatus),
       submissionReference: `demo_kyc_${userId}_${Date.now()}`,
@@ -64,7 +66,9 @@ export class KycDemoService {
       kycStatus: internalStatus,
       kycProvider: provider,
       kycSubmittedAt:
-        internalStatus === KycStatus.NOT_STARTED ? null : user.kycSubmittedAt ?? now,
+        internalStatus === KycStatus.NOT_STARTED
+          ? null
+          : (user.kycSubmittedAt ?? now),
       kycReviewedAt: reviewedAt,
     });
 
@@ -79,7 +83,10 @@ export class KycDemoService {
       },
     });
 
-    return this.getStatus(userId);
+    return {
+      message: 'Sandbox KYC submitted',
+      status: await this.getStatus(userId),
+    };
   }
 
   async getStatus(userId: string) {

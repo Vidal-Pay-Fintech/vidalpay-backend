@@ -1,4 +1,5 @@
 import { BadRequestException, Injectable } from '@nestjs/common';
+import { createHmac, createHash, timingSafeEqual } from 'crypto';
 import { KycProvider } from 'src/common/enum/kyc-provider.enum';
 import {
   ProviderOperationStatus,
@@ -7,6 +8,16 @@ import {
 import { ProviderOperationRepository } from 'src/database/repositories/provider-operation.repository';
 import { ProviderWebhookEventRepository } from 'src/database/repositories/provider-webhook-event.repository';
 import { WEBHOOK_PROVIDER_MAP } from './webhook-provider-map';
+
+const WEBHOOK_SECRET_ENV_BY_SLUG: Record<string, string> = {
+  flutterwave: 'FLW_WEBHOOK_SECRET_HASH',
+  smileid: 'SMILE_ID_WEBHOOK_SECRET',
+  leadbank: 'LEAD_BANK_WEBHOOK_SECRET',
+  verto: 'VERTO_WEBHOOK_SECRET',
+  zerohash: 'ZERO_HASH_WEBHOOK_SECRET',
+  cowrywise: 'COWRYWISE_WEBHOOK_SECRET',
+  sardine: 'SARDINE_WEBHOOK_SECRET',
+};
 
 @Injectable()
 export class WebhooksService {
@@ -19,6 +30,7 @@ export class WebhooksService {
     providerSlug: string,
     payload: Record<string, any>,
     headers?: Record<string, string | string[] | undefined>,
+    rawBody?: Buffer | string,
   ) {
     const provider = this.resolveProvider(providerSlug);
     const eventReference = this.pickFirstString(
@@ -40,21 +52,45 @@ export class WebhooksService {
     const eventType =
       this.pickFirstString(payload.event, payload.type, payload.data?.event) ??
       `${providerSlug}.webhook`;
-    const signaturePresent = this.hasSignature(headers);
+    const rawPayload = this.stringifyPayload(payload, rawBody);
+    const rawPayloadHash = createHash('sha256')
+      .update(rawPayload)
+      .digest('hex');
+    const signature = this.verifySignature(providerSlug, rawPayload, headers);
+    const idempotencyKey =
+      eventReference ?? `${providerSlug}_${eventType}_${rawPayloadHash}`;
+    const operation = operationReference
+      ? await this.providerOperationRepository.findByReference(
+          operationReference,
+        )
+      : null;
 
     const { event, created } =
       await this.providerWebhookEventRepository.createIfAbsentByReference({
         provider,
         eventType,
-        eventReference,
+        eventReference: idempotencyKey,
         operationReference,
-        status: ProviderWebhookEventStatus.RECEIVED,
+        operationId: operation?.id ?? null,
+        status: signature.signatureValid
+          ? ProviderWebhookEventStatus.VERIFIED
+          : ProviderWebhookEventStatus.FAILED,
         payload,
+        signatureValid: signature.signatureValid,
+        idempotencyKey,
+        rawPayloadHash,
         metadata: {
-          signatureVerification: signaturePresent ? 'PRESENT_PLACEHOLDER' : 'SKIPPED_DEMO_PLACEHOLDER',
+          signatureVerification: signature.signatureValid
+            ? 'VERIFIED'
+            : 'FAILED',
+          signatureHeader: signature.signatureHeader,
           providerSlug,
         },
         processedAt: null,
+        receivedAt: new Date(),
+        failureReason: signature.signatureValid
+          ? null
+          : signature.failureReason,
       });
 
     if (!created) {
@@ -63,15 +99,25 @@ export class WebhooksService {
         eventType,
         duplicate: true,
         processed: event.status === ProviderWebhookEventStatus.PROCESSED,
-        eventReference,
+        eventReference: idempotencyKey,
         operationReference,
+      };
+    }
+
+    if (!signature.signatureValid) {
+      return {
+        provider,
+        eventType,
+        duplicate: false,
+        processed: false,
+        eventReference: idempotencyKey,
+        operationReference,
+        failureReason: signature.failureReason,
       };
     }
 
     const nextStatus = this.mapPayloadStatus(payload);
     if (operationReference) {
-      const operation =
-        await this.providerOperationRepository.findByReference(operationReference);
       if (operation) {
         await this.providerOperationRepository.findOneAndUpdate(operation.id, {
           status: nextStatus,
@@ -85,7 +131,9 @@ export class WebhooksService {
             lastWebhookProvider: provider,
             lastWebhookEventType: eventType,
             lastWebhookAt: new Date().toISOString(),
+            lastWebhookEventId: event.id,
           },
+          lastWebhookEventId: event.id,
           reconciledAt:
             nextStatus === ProviderOperationStatus.COMPLETED
               ? new Date()
@@ -104,7 +152,7 @@ export class WebhooksService {
       eventType,
       duplicate: false,
       processed: true,
-      eventReference,
+      eventReference: idempotencyKey,
       operationReference,
       operationStatus: nextStatus,
     };
@@ -126,11 +174,17 @@ export class WebhooksService {
       .trim()
       .toUpperCase();
 
-    if (['SUCCESS', 'SUCCESSFUL', 'COMPLETED', 'COMPLETE', 'APPROVED'].includes(rawStatus)) {
+    if (
+      ['SUCCESS', 'SUCCESSFUL', 'COMPLETED', 'COMPLETE', 'APPROVED'].includes(
+        rawStatus,
+      )
+    ) {
       return ProviderOperationStatus.COMPLETED;
     }
 
-    if (['FAILED', 'FAILURE', 'DECLINED', 'REJECTED', 'ERROR'].includes(rawStatus)) {
+    if (
+      ['FAILED', 'FAILURE', 'DECLINED', 'REJECTED', 'ERROR'].includes(rawStatus)
+    ) {
       return ProviderOperationStatus.FAILED;
     }
 
@@ -145,17 +199,113 @@ export class WebhooksService {
     return ProviderOperationStatus.PROCESSING;
   }
 
-  private hasSignature(headers?: Record<string, string | string[] | undefined>) {
+  private verifySignature(
+    providerSlug: string,
+    rawPayload: string,
+    headers?: Record<string, string | string[] | undefined>,
+  ) {
+    const secretEnvKey = WEBHOOK_SECRET_ENV_BY_SLUG[providerSlug];
+    const secret = secretEnvKey ? process.env[secretEnvKey] : null;
+    const headerValue = this.pickHeader(headers, [
+      'verif-hash',
+      'x-signature',
+      'x-webhook-signature',
+      'x-sardine-signature',
+    ]);
+
+    if (!secretEnvKey || !secret) {
+      return {
+        signatureValid: false,
+        signatureHeader: headerValue.header,
+        failureReason: 'PROVIDER_WEBHOOK_SECRET_MISSING',
+      };
+    }
+
+    if (!headerValue.value) {
+      return {
+        signatureValid: false,
+        signatureHeader: headerValue.header,
+        failureReason: 'WEBHOOK_SIGNATURE_MISSING',
+      };
+    }
+
+    if (providerSlug === 'flutterwave') {
+      return {
+        signatureValid: this.safeCompare(headerValue.value, secret),
+        signatureHeader: headerValue.header,
+        failureReason: this.safeCompare(headerValue.value, secret)
+          ? null
+          : 'WEBHOOK_SIGNATURE_INVALID',
+      };
+    }
+
+    const expected = createHmac('sha256', secret)
+      .update(rawPayload)
+      .digest('hex');
+    const normalizedSignature = headerValue.value.replace(/^sha256=/i, '');
+
+    return {
+      signatureValid: this.safeCompare(normalizedSignature, expected),
+      signatureHeader: headerValue.header,
+      failureReason: this.safeCompare(normalizedSignature, expected)
+        ? null
+        : 'WEBHOOK_SIGNATURE_INVALID',
+    };
+  }
+
+  private pickHeader(
+    headers: Record<string, string | string[] | undefined> | undefined,
+    names: string[],
+  ) {
     if (!headers) {
+      return { header: null, value: null };
+    }
+
+    const normalizedHeaders = Object.entries(headers).reduce<
+      Record<string, string | string[] | undefined>
+    >((acc, [key, value]) => {
+      acc[key.toLowerCase()] = value;
+      return acc;
+    }, {});
+
+    for (const name of names) {
+      const value = normalizedHeaders[name.toLowerCase()];
+      const firstValue = Array.isArray(value) ? value[0] : value;
+      if (firstValue) {
+        return {
+          header: name,
+          value: firstValue,
+        };
+      }
+    }
+
+    return { header: null, value: null };
+  }
+
+  private safeCompare(left: string, right: string) {
+    const leftBuffer = Buffer.from(left);
+    const rightBuffer = Buffer.from(right);
+
+    if (leftBuffer.length !== rightBuffer.length) {
       return false;
     }
 
-    return Boolean(
-      headers['x-signature'] ||
-        headers['x-webhook-signature'] ||
-        headers['verif-hash'] ||
-        headers['x-sardine-signature'],
-    );
+    return timingSafeEqual(leftBuffer, rightBuffer);
+  }
+
+  private stringifyPayload(
+    payload: Record<string, any>,
+    rawBody?: Buffer | string,
+  ) {
+    if (Buffer.isBuffer(rawBody)) {
+      return rawBody.toString('utf8');
+    }
+
+    if (typeof rawBody === 'string' && rawBody.length > 0) {
+      return rawBody;
+    }
+
+    return JSON.stringify(payload ?? {});
   }
 
   private pickFirstString(...values: unknown[]): string | null {

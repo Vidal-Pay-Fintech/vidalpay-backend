@@ -50,23 +50,26 @@ export class ProviderWebhookEventRepository extends AbstractRepository<ProviderW
     eventType: string;
     eventReference: string | null;
     operationReference: string | null;
+    operationId?: string | null;
     status: ProviderWebhookEventStatus;
     payload: Record<string, any> | null;
+    signatureValid?: boolean | null;
+    idempotencyKey?: string | null;
+    rawPayloadHash?: string | null;
     metadata: Record<string, any> | null;
+    retryCount?: number;
+    receivedAt?: Date | null;
     processedAt: Date | null;
     failureReason?: string | null;
   }): Promise<{ event: ProviderWebhookEvent; created: boolean }> {
-    if (!input.eventReference) {
-      const event = await this.create(input);
-      return { event, created: true };
-    }
-
-    const existing = await this.findByProviderAndReference(
-      input.provider,
-      input.eventReference,
-    );
-    if (existing) {
-      return { event: existing, created: false };
+    if (input.eventReference) {
+      const existing = await this.findByProviderAndReference(
+        input.provider,
+        input.eventReference,
+      );
+      if (existing) {
+        return { event: existing, created: false };
+      }
     }
 
     const id = randomUUID();
@@ -78,20 +81,28 @@ export class ProviderWebhookEventRepository extends AbstractRepository<ProviderW
         eventType: input.eventType,
         eventReference: input.eventReference,
         operationReference: input.operationReference,
+        operationId: input.operationId ?? null,
         status: input.status,
         payload: input.payload,
+        signatureValid: input.signatureValid ?? null,
+        idempotencyKey: input.idempotencyKey ?? input.eventReference,
+        rawPayloadHash: input.rawPayloadHash ?? null,
         metadata: input.metadata,
+        retryCount: input.retryCount ?? 0,
+        receivedAt: input.receivedAt ?? new Date(),
         processedAt: input.processedAt,
         failureReason: input.failureReason ?? null,
       } as Partial<ProviderWebhookEvent>);
     } catch (error) {
       if (this.isDuplicateReferenceError(error)) {
-        const duplicate = await this.findByProviderAndReference(
-          input.provider,
-          input.eventReference,
-        );
-        if (duplicate) {
-          return { event: duplicate, created: false };
+        if (input.eventReference) {
+          const duplicate = await this.findByProviderAndReference(
+            input.provider,
+            input.eventReference,
+          );
+          if (duplicate) {
+            return { event: duplicate, created: false };
+          }
         }
       }
 
@@ -105,12 +116,14 @@ export class ProviderWebhookEventRepository extends AbstractRepository<ProviderW
     });
 
     if (!created) {
-      const duplicate = await this.findByProviderAndReference(
-        input.provider,
-        input.eventReference,
-      );
-      if (duplicate) {
-        return { event: duplicate, created: false };
+      if (input.eventReference) {
+        const duplicate = await this.findByProviderAndReference(
+          input.provider,
+          input.eventReference,
+        );
+        if (duplicate) {
+          return { event: duplicate, created: false };
+        }
       }
 
       throw new Error('Webhook event could not be persisted.');

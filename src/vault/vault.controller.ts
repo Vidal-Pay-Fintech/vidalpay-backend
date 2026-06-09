@@ -1,8 +1,19 @@
-import { Controller, Get, Post, Body, Patch, Param, Delete } from '@nestjs/common';
+import {
+  Controller,
+  Get,
+  Post,
+  Body,
+  Patch,
+  Param,
+  Delete,
+} from '@nestjs/common';
+import { Role } from 'src/common/enum/role.enum';
+import { Roles } from 'src/iam/decorators/roles.decorator';
 import { VaultService } from './vault.service';
 import { CreateVaultDto } from './dto/create-vault.dto';
 import { UpdateVaultDto } from './dto/update-vault.dto';
 
+@Roles(Role.ADMIN, Role.SUPER_ADMIN, Role.SETTLEMENT)
 @Controller('vault')
 export class VaultController {
   constructor(private readonly vaultService: VaultService) {}

@@ -37,6 +37,7 @@ export class FxService {
   ) {}
 
   createQuote(dto: FxQuoteDto): FxQuote {
+    this.featureFlags.assertDemoEnabled();
     this.featureFlags.assertEnabled('ENABLE_FX_CONVERSION_DEMO');
     this.assertSupportedPair(dto.sourceCurrency, dto.targetCurrency);
 
@@ -62,6 +63,7 @@ export class FxService {
   }
 
   async convert(userId: string, dto: FxConvertDto) {
+    this.featureFlags.assertDemoEnabled();
     this.featureFlags.assertEnabled('ENABLE_FX_CONVERSION_DEMO');
     const quote =
       dto.quoteId && this.quoteCache.has(dto.quoteId)
@@ -77,7 +79,9 @@ export class FxService {
       quote.targetCurrency !== dto.targetCurrency ||
       Number(quote.amount) !== Number(dto.amount)
     ) {
-      throw new BadRequestException('FX quote does not match conversion request.');
+      throw new BadRequestException(
+        'FX quote does not match conversion request.',
+      );
     }
 
     let sourceTransaction: any;
@@ -164,7 +168,9 @@ export class FxService {
 
   private assertSupportedPair(source: Currency, target: Currency) {
     if (source === target) {
-      throw new BadRequestException('Source and target currencies must differ.');
+      throw new BadRequestException(
+        'Source and target currencies must differ.',
+      );
     }
 
     const supported =
@@ -172,7 +178,9 @@ export class FxService {
       (source === Currency.USD && target === Currency.NGN);
 
     if (!supported) {
-      throw new BadRequestException('Only NGN/USD demo conversions are supported.');
+      throw new BadRequestException(
+        'Only NGN/USD demo conversions are supported.',
+      );
     }
   }
 

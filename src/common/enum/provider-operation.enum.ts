@@ -29,7 +29,10 @@ export enum ProviderOperationStatus {
 
 export enum ProviderWebhookEventStatus {
   RECEIVED = 'RECEIVED',
+  VERIFIED = 'VERIFIED',
   PROCESSED = 'PROCESSED',
+  DUPLICATE = 'DUPLICATE',
   FAILED = 'FAILED',
+  DEAD_LETTER = 'DEAD_LETTER',
   IGNORED = 'IGNORED',
 }

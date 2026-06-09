@@ -4,9 +4,13 @@ import { Column, Entity, Index } from 'typeorm';
 import { AbstractEntity } from '../abstract.entity';
 
 @Entity({ name: 'provider_webhook_event' })
-@Index('UQ_provider_webhook_event_provider_reference', ['provider', 'eventReference'], {
-  unique: true,
-})
+@Index(
+  'UQ_provider_webhook_event_provider_reference',
+  ['provider', 'eventReference'],
+  {
+    unique: true,
+  },
+)
 export class ProviderWebhookEvent extends AbstractEntity {
   @Column({
     type: 'enum',
@@ -24,6 +28,9 @@ export class ProviderWebhookEvent extends AbstractEntity {
   @Column({ type: 'varchar', nullable: true })
   operationReference: string | null;
 
+  @Column({ type: 'varchar', length: 36, nullable: true })
+  operationId: string | null;
+
   @Column({
     type: 'enum',
     enum: ProviderWebhookEventStatus,
@@ -34,11 +41,26 @@ export class ProviderWebhookEvent extends AbstractEntity {
   @Column({ type: 'simple-json', nullable: true })
   payload: Record<string, any> | null;
 
+  @Column({ type: 'boolean', nullable: true })
+  signatureValid: boolean | null;
+
+  @Column({ type: 'varchar', nullable: true })
+  idempotencyKey: string | null;
+
+  @Column({ type: 'varchar', length: 64, nullable: true })
+  rawPayloadHash: string | null;
+
   @Column({ type: 'simple-json', nullable: true })
   metadata: Record<string, any> | null;
 
   @Column({ type: 'text', nullable: true })
   failureReason: string | null;
+
+  @Column({ type: 'int', default: 0 })
+  retryCount: number;
+
+  @Column({ type: 'timestamp', nullable: true })
+  receivedAt: Date | null;
 
   @Column({ type: 'timestamp', nullable: true })
   processedAt: Date | null;

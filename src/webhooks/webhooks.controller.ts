@@ -5,6 +5,7 @@ import {
   HttpCode,
   HttpStatus,
   Post,
+  Req,
 } from '@nestjs/common';
 import { ApiTags } from '@nestjs/swagger';
 import { Auth } from 'src/iam/authentication/decorators/auth.decorator';
@@ -22,8 +23,14 @@ export class WebhooksController {
   flutterwave(
     @Body() payload: Record<string, any>,
     @Headers() headers: Record<string, string | string[] | undefined>,
+    @Req() request: { rawBody?: Buffer },
   ) {
-    return this.webhooksService.handle('flutterwave', payload, headers);
+    return this.webhooksService.handle(
+      'flutterwave',
+      payload,
+      headers,
+      request.rawBody,
+    );
   }
 
   @Post('smileid')
@@ -31,8 +38,14 @@ export class WebhooksController {
   smileId(
     @Body() payload: Record<string, any>,
     @Headers() headers: Record<string, string | string[] | undefined>,
+    @Req() request: { rawBody?: Buffer },
   ) {
-    return this.webhooksService.handle('smileid', payload, headers);
+    return this.webhooksService.handle(
+      'smileid',
+      payload,
+      headers,
+      request.rawBody,
+    );
   }
 
   @Post('leadbank')
@@ -40,8 +53,14 @@ export class WebhooksController {
   leadBank(
     @Body() payload: Record<string, any>,
     @Headers() headers: Record<string, string | string[] | undefined>,
+    @Req() request: { rawBody?: Buffer },
   ) {
-    return this.webhooksService.handle('leadbank', payload, headers);
+    return this.webhooksService.handle(
+      'leadbank',
+      payload,
+      headers,
+      request.rawBody,
+    );
   }
 
   @Post('verto')
@@ -49,8 +68,14 @@ export class WebhooksController {
   verto(
     @Body() payload: Record<string, any>,
     @Headers() headers: Record<string, string | string[] | undefined>,
+    @Req() request: { rawBody?: Buffer },
   ) {
-    return this.webhooksService.handle('verto', payload, headers);
+    return this.webhooksService.handle(
+      'verto',
+      payload,
+      headers,
+      request.rawBody,
+    );
   }
 
   @Post('zerohash')
@@ -58,8 +83,14 @@ export class WebhooksController {
   zeroHash(
     @Body() payload: Record<string, any>,
     @Headers() headers: Record<string, string | string[] | undefined>,
+    @Req() request: { rawBody?: Buffer },
   ) {
-    return this.webhooksService.handle('zerohash', payload, headers);
+    return this.webhooksService.handle(
+      'zerohash',
+      payload,
+      headers,
+      request.rawBody,
+    );
   }
 
   @Post('cowrywise')
@@ -67,8 +98,14 @@ export class WebhooksController {
   cowrywise(
     @Body() payload: Record<string, any>,
     @Headers() headers: Record<string, string | string[] | undefined>,
+    @Req() request: { rawBody?: Buffer },
   ) {
-    return this.webhooksService.handle('cowrywise', payload, headers);
+    return this.webhooksService.handle(
+      'cowrywise',
+      payload,
+      headers,
+      request.rawBody,
+    );
   }
 
   @Post('sardine')
@@ -76,7 +113,13 @@ export class WebhooksController {
   sardine(
     @Body() payload: Record<string, any>,
     @Headers() headers: Record<string, string | string[] | undefined>,
+    @Req() request: { rawBody?: Buffer },
   ) {
-    return this.webhooksService.handle('sardine', payload, headers);
+    return this.webhooksService.handle(
+      'sardine',
+      payload,
+      headers,
+      request.rawBody,
+    );
   }
 }

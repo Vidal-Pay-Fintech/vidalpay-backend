@@ -1,4 +1,4 @@
-import { Injectable, Logger } from '@nestjs/common';
+import { Injectable, Logger, NotImplementedException } from '@nestjs/common';
 import { CreateJournalDto } from './dto/create-journal.dto';
 import { UpdateJournalDto } from './dto/update-journal.dto';
 import { TransactionService } from 'src/transaction/transaction.service';
@@ -212,22 +212,32 @@ export class JournalService {
     }
   }
   create(createJournalDto: CreateJournalDto) {
-    return 'This action adds a new journal';
+    throw new NotImplementedException(
+      'Journal scaffold route is disabled. Journal writes are internal service operations only.',
+    );
   }
 
   findAll() {
-    return `This action returns all journal`;
+    throw new NotImplementedException(
+      'Journal scaffold route is disabled. Journal reads require admin reconciliation APIs.',
+    );
   }
 
   findOne(id: number) {
-    return `This action returns a #${id} journal`;
+    throw new NotImplementedException(
+      'Journal scaffold route is disabled. Journal reads require admin reconciliation APIs.',
+    );
   }
 
   update(id: number, updateJournalDto: UpdateJournalDto) {
-    return `This action updates a #${id} journal`;
+    throw new NotImplementedException(
+      'Journal scaffold route is disabled. Journal updates are not public product APIs.',
+    );
   }
 
   remove(id: number) {
-    return `This action removes a #${id} journal`;
+    throw new NotImplementedException(
+      'Journal scaffold route is disabled. Journal deletion is not a public product API.',
+    );
   }
 }

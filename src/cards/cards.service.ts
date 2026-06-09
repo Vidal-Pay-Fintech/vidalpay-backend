@@ -31,6 +31,7 @@ export class CardsService {
   ) {}
 
   async getCards(userId: string) {
+    this.featureFlags.assertDemoEnabled();
     this.featureFlags.assertEnabled('ENABLE_VIRTUAL_CARD_DEMO');
     await Promise.all([
       this.ensureCard(userId, Currency.NGN),
@@ -62,7 +63,8 @@ export class CardsService {
       Currency.NGN,
       {
         amount: conversion.quote.destinationAmount,
-        note: dto.note ?? `Fund NGN card from USD via ${conversion.quote.quoteId}`,
+        note:
+          dto.note ?? `Fund NGN card from USD via ${conversion.quote.quoteId}`,
       },
       conversion.quote.quoteId,
     );
@@ -83,7 +85,8 @@ export class CardsService {
       Currency.USD,
       {
         amount: conversion.quote.destinationAmount,
-        note: dto.note ?? `Fund USD card from NGN via ${conversion.quote.quoteId}`,
+        note:
+          dto.note ?? `Fund USD card from NGN via ${conversion.quote.quoteId}`,
       },
       conversion.quote.quoteId,
     );
@@ -98,6 +101,7 @@ export class CardsService {
     dto: FundCardDto,
     fxQuoteId?: string | null,
   ) {
+    this.featureFlags.assertDemoEnabled();
     this.featureFlags.assertEnabled('ENABLE_VIRTUAL_CARD_DEMO');
     const card = await this.ensureCard(userId, cardCurrency);
     const wallet = await this.walletRepository.findOne({
@@ -213,7 +217,10 @@ export class CardsService {
       status: CardStatus.ACTIVE,
       balance: 0,
       availableBalance: 0,
-      provider: currency === Currency.NGN ? KycProvider.FLUTTERWAVE : KycProvider.LEAD_BANK,
+      provider:
+        currency === Currency.NGN
+          ? KycProvider.FLUTTERWAVE
+          : KycProvider.LEAD_BANK,
       providerReference: `mock_card_${currency.toLowerCase()}_${userId}`,
       lastFour: currency === Currency.NGN ? '4242' : '1881',
       brand: 'VISA',

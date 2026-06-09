@@ -1,26 +1,36 @@
-import { Injectable } from '@nestjs/common';
+import { Injectable, NotImplementedException } from '@nestjs/common';
 import { CreateDatabaseDto } from './dto/create-database.dto';
 import { UpdateDatabaseDto } from './dto/update-database.dto';
 
 @Injectable()
 export class DatabaseService {
   create(createDatabaseDto: CreateDatabaseDto) {
-    return 'This action adds a new database';
+    throw new NotImplementedException(
+      'Database scaffold route is disabled and is not a public product API.',
+    );
   }
 
   findAll() {
-    return `This action returns all database`;
+    throw new NotImplementedException(
+      'Database scaffold route is disabled and is not a public product API.',
+    );
   }
 
   findOne(id: number) {
-    return `This action returns a #${id} database`;
+    throw new NotImplementedException(
+      'Database scaffold route is disabled and is not a public product API.',
+    );
   }
 
   update(id: number, updateDatabaseDto: UpdateDatabaseDto) {
-    return `This action updates a #${id} database`;
+    throw new NotImplementedException(
+      'Database scaffold route is disabled and is not a public product API.',
+    );
   }
 
   remove(id: number) {
-    return `This action removes a #${id} database`;
+    throw new NotImplementedException(
+      'Database scaffold route is disabled and is not a public product API.',
+    );
   }
 }

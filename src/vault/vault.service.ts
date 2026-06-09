@@ -1,4 +1,4 @@
-import { Injectable, Logger } from '@nestjs/common';
+import { Injectable, Logger, NotImplementedException } from '@nestjs/common';
 import { CreateVaultDto } from './dto/create-vault.dto';
 import { UpdateVaultDto } from './dto/update-vault.dto';
 import { VaultRepository } from 'src/database/repositories/vault.repository';
@@ -21,7 +21,9 @@ export class VaultService {
       where: { vaultType },
     });
     if (!res) {
-      this.logger.warn(`Vault type ${vaultType} was missing. Creating demo-safe vault.`);
+      this.logger.warn(
+        `Vault type ${vaultType} was missing. Creating demo-safe vault.`,
+      );
       return this.vaultRepository.create({
         vaultName: vaultType,
         vaultType,
@@ -84,22 +86,32 @@ export class VaultService {
   }
 
   create(createVaultDto: CreateVaultDto) {
-    return 'This action adds a new vault';
+    throw new NotImplementedException(
+      'Vault scaffold route is disabled. Vault writes are internal ledger operations only.',
+    );
   }
 
   findAll() {
-    return `This action returns all vault`;
+    throw new NotImplementedException(
+      'Vault scaffold route is disabled. Vault reads require admin reconciliation APIs.',
+    );
   }
 
   findOne(id: number) {
-    return `This action returns a #${id} vault`;
+    throw new NotImplementedException(
+      'Vault scaffold route is disabled. Vault reads require admin reconciliation APIs.',
+    );
   }
 
   update(id: number, updateVaultDto: UpdateVaultDto) {
-    return `This action updates a #${id} vault`;
+    throw new NotImplementedException(
+      'Vault scaffold route is disabled. Vault updates are not public product APIs.',
+    );
   }
 
   remove(id: number) {
-    return `This action removes a #${id} vault`;
+    throw new NotImplementedException(
+      'Vault scaffold route is disabled. Vault deletion is not a public product API.',
+    );
   }
 }

@@ -26,6 +26,7 @@ import { TransfersModule } from './transfers/transfers.module';
 import { CardsModule } from './cards/cards.module';
 import { KycDemoModule } from './kyc/kyc-demo.module';
 import { WebhooksModule } from './webhooks/webhooks.module';
+import { AdminModule } from './admin/admin.module';
 
 @Module({
   imports: [
@@ -57,6 +58,7 @@ import { WebhooksModule } from './webhooks/webhooks.module';
     CardsModule,
     KycDemoModule,
     WebhooksModule,
+    AdminModule,
   ],
   controllers: [AppController],
   providers: [AppService, ConfigService],

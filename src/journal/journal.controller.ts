@@ -1,8 +1,19 @@
-import { Controller, Get, Post, Body, Patch, Param, Delete } from '@nestjs/common';
+import {
+  Controller,
+  Get,
+  Post,
+  Body,
+  Patch,
+  Param,
+  Delete,
+} from '@nestjs/common';
+import { Role } from 'src/common/enum/role.enum';
+import { Roles } from 'src/iam/decorators/roles.decorator';
 import { JournalService } from './journal.service';
 import { CreateJournalDto } from './dto/create-journal.dto';
 import { UpdateJournalDto } from './dto/update-journal.dto';
 
+@Roles(Role.ADMIN, Role.SUPER_ADMIN, Role.SETTLEMENT)
 @Controller('journal')
 export class JournalController {
   constructor(private readonly journalService: JournalService) {}

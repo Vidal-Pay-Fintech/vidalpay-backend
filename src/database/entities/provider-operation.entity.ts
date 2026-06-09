@@ -46,6 +46,12 @@ export class ProviderOperation extends AbstractEntity {
   @Column({ type: 'varchar', nullable: true })
   externalReference: string | null;
 
+  @Column({ type: 'varchar', nullable: true })
+  internalReference: string | null;
+
+  @Column({ type: 'varchar', length: 36, nullable: true })
+  transactionId: string | null;
+
   @Column({
     type: 'enum',
     enum: Currency,
@@ -73,6 +79,12 @@ export class ProviderOperation extends AbstractEntity {
 
   @Column({ type: 'text', nullable: true })
   failureReason: string | null;
+
+  @Column({ type: 'varchar', nullable: true })
+  reconciliationStatus: string | null;
+
+  @Column({ type: 'varchar', length: 36, nullable: true })
+  lastWebhookEventId: string | null;
 
   @Column({ type: 'timestamp', nullable: true })
   reconciledAt: Date | null;

@@ -72,6 +72,7 @@ const schema: Record<string, EnvSchemaEntry> = {
   RENDER_GIT_COMMIT: { type: 'string', default: '' },
   BACKEND_PUBLIC_URL: { type: 'string', default: '' },
   API_BASE_URL: { type: 'string', default: '' },
+  CORS_ALLOWED_ORIGINS: { type: 'string', default: '' },
   RESEND_API_KEY: { type: 'string', default: '' },
   RESEND_FROM_EMAIL: { type: 'string', default: '' },
   RESEND_FROM_NAME: { type: 'string', default: '' },
@@ -83,20 +84,42 @@ const schema: Record<string, EnvSchemaEntry> = {
   FLW_SECRET_KEY: { type: 'string', default: '' },
   FLW_WEBHOOK_SECRET_HASH: { type: 'string', default: '' },
   LEAD_BANK_API_KEY: { type: 'string', default: '' },
+  LEAD_BANK_WEBHOOK_SECRET: { type: 'string', default: '' },
   SMILE_ID_API_KEY: { type: 'string', default: '' },
+  SMILE_ID_WEBHOOK_SECRET: { type: 'string', default: '' },
   VERTO_API_KEY: { type: 'string', default: '' },
+  VERTO_WEBHOOK_SECRET: { type: 'string', default: '' },
   ZERO_HASH_API_KEY: { type: 'string', default: '' },
+  ZERO_HASH_WEBHOOK_SECRET: { type: 'string', default: '' },
   COWRYWISE_API_KEY: { type: 'string', default: '' },
+  COWRYWISE_WEBHOOK_SECRET: { type: 'string', default: '' },
   APRIL_API_KEY: { type: 'string', default: '' },
+  APRIL_WEBHOOK_SECRET: { type: 'string', default: '' },
   COLUMN_API_KEY: { type: 'string', default: '' },
+  COLUMN_WEBHOOK_SECRET: { type: 'string', default: '' },
   ONESIGNAL_APP_ID: { type: 'string', default: '' },
+  ONESIGNAL_REST_API_KEY: { type: 'string', default: '' },
   SARDINE_API_KEY: { type: 'string', default: '' },
+  SARDINE_WEBHOOK_SECRET: { type: 'string', default: '' },
+  FLUTTERWAVE_LIVE_TEST_EVIDENCE: { type: 'string', default: '' },
+  LEAD_BANK_LIVE_TEST_EVIDENCE: { type: 'string', default: '' },
+  SMILE_ID_LIVE_TEST_EVIDENCE: { type: 'string', default: '' },
+  VERTO_LIVE_TEST_EVIDENCE: { type: 'string', default: '' },
+  ZERO_HASH_LIVE_TEST_EVIDENCE: { type: 'string', default: '' },
+  COWRYWISE_LIVE_TEST_EVIDENCE: { type: 'string', default: '' },
+  APRIL_LIVE_TEST_EVIDENCE: { type: 'string', default: '' },
+  COLUMN_LIVE_TEST_EVIDENCE: { type: 'string', default: '' },
+  ONESIGNAL_LIVE_TEST_EVIDENCE: { type: 'string', default: '' },
+  SARDINE_LIVE_TEST_EVIDENCE: { type: 'string', default: '' },
   FRONTEND_URL: { type: 'string', default: '' },
   SLACK_API_TOKEN: { type: 'string', default: '' },
   SLACK_API_CHANNEL: { type: 'string', default: '#api' },
   SLACK_BOT_NAME: { type: 'string', default: 'Vidal Pay API Error Tracker' },
   SLACK_BOT_ICON: { type: 'string', default: ':warning:' },
-  SLACK_API_URL: { type: 'string', default: 'https://slack.com/api/chat.postMessage' },
+  SLACK_API_URL: {
+    type: 'string',
+    default: 'https://slack.com/api/chat.postMessage',
+  },
 };
 
 for (const [key, values] of Object.entries(providerModes)) {
@@ -173,7 +196,10 @@ function validateType(
     errors.push(`${key} must be a number`);
   }
 
-  if (entry.type === 'boolean' && !['true', 'false'].includes(value.toLowerCase())) {
+  if (
+    entry.type === 'boolean' &&
+    !['true', 'false'].includes(value.toLowerCase())
+  ) {
     errors.push(`${key} must be true or false`);
   }
 

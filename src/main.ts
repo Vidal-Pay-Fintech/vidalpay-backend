@@ -9,7 +9,7 @@ import { AppModule } from './app.module';
 async function bootstrap() {
   const logger = new Logger('Bootstrap');
   const app = await NestFactory.create(AppModule, {
-    cors: true,
+    cors: false,
   });
   const swaggerEnabled =
     process.env.ENABLE_SWAGGER === 'true' ||
@@ -30,11 +30,18 @@ async function bootstrap() {
     prefix: 'api/v',
   });
 
-  app.use(bodyParser.json({ limit: '50mb' }));
+  app.use(
+    bodyParser.json({
+      limit: '50mb',
+      verify: (req: any, _res, buffer) => {
+        req.rawBody = Buffer.from(buffer);
+      },
+    }),
+  );
   app.use(bodyParser.urlencoded({ limit: '50mb', extended: true }));
 
   app.enableCors({
-    origin: true,
+    origin: buildCorsOriginMatcher(),
     methods: 'GET,HEAD,PUT,PATCH,POST,DELETE,OPTIONS',
     credentials: true,
   });
@@ -59,6 +66,42 @@ async function bootstrap() {
   await app.listen(port, '0.0.0.0');
 
   logger.log(`Application is running on: ${await app.getUrl()}`);
+}
+
+function buildCorsOriginMatcher() {
+  const allowedOrigins = [
+    ...(process.env.CORS_ALLOWED_ORIGINS ?? '')
+      .split(',')
+      .map((origin) => origin.trim())
+      .filter(Boolean),
+    process.env.FRONTEND_URL,
+    process.env.ADMIN_DASHBOARD_URL,
+    process.env.APP_URL,
+  ].filter(isRealOrigin);
+
+  if (process.env.NODE_ENV !== 'production') {
+    return true;
+  }
+
+  return (
+    origin: string | undefined,
+    callback: (error: Error | null, allow?: boolean) => void,
+  ) => {
+    if (!origin) {
+      callback(null, true);
+      return;
+    }
+
+    callback(null, allowedOrigins.includes(origin));
+  };
+}
+
+function isRealOrigin(value: string | undefined): value is string {
+  return Boolean(
+    value &&
+      /^https?:\/\//i.test(value) &&
+      value.trim().toLowerCase() !== 'value',
+  );
 }
 
 bootstrap();
