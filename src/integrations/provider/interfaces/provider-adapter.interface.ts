@@ -40,6 +40,7 @@ export interface ProviderWebhookVerification {
   signatureValid: boolean;
   eventId?: string | null;
   idempotencyKey?: string | null;
+  signatureHeader?: string | null;
   failureReason?: string | null;
 }
 

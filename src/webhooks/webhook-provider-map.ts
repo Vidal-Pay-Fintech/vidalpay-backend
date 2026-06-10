@@ -9,5 +9,7 @@ export const WEBHOOK_PROVIDER_MAP: Record<string, KycProvider> = {
   zerohash: KycProvider.ZERO_HASH,
   'zero-hash': KycProvider.ZERO_HASH,
   cowrywise: KycProvider.COWRYWISE,
+  april: KycProvider.APRIL,
+  column: KycProvider.COLUMN,
   sardine: KycProvider.SARDINE,
 };

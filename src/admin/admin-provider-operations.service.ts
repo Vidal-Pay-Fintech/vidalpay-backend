@@ -7,6 +7,7 @@ import { ProviderOperation } from 'src/database/entities/provider-operation.enti
 import { ProviderWebhookEvent } from 'src/database/entities/provider-webhook-event.entity';
 import { ProviderOperationRepository } from 'src/database/repositories/provider-operation.repository';
 import { ProviderWebhookEventRepository } from 'src/database/repositories/provider-webhook-event.repository';
+import { getLiveProviderAdapterByName } from 'src/integrations/provider/live/live-provider-adapters';
 
 type AdminActionContext = {
   actorId: string | null;
@@ -71,13 +72,65 @@ export class AdminProviderOperationsService {
       },
     );
 
-    return this.providerOperationRepository.findOneAndUpdate(operation.id, {
-      reconciliationStatus: 'RETRY_REQUESTED',
-      metadata: {
-        ...nextMetadata,
-        retryRequestedAt: new Date().toISOString(),
-      },
-    });
+    const adapter = getLiveProviderAdapterByName(operation.provider);
+    if (!adapter) {
+      return this.providerOperationRepository.findOneAndUpdate(operation.id, {
+        reconciliationStatus: 'RETRY_BLOCKED',
+        failureReason: 'PROVIDER_ADAPTER_MISSING',
+        metadata: {
+          ...nextMetadata,
+          retryRequestedAt: new Date().toISOString(),
+          retryBlockedReason: 'PROVIDER_ADAPTER_MISSING',
+        },
+      });
+    }
+
+    try {
+      const execution = await adapter.execute({
+        operationType: operation.operationType,
+        payload: operation.requestPayload ?? {},
+        idempotencyKey:
+          operation.internalReference ??
+          operation.reference ??
+          `retry_${operation.id}`,
+      });
+      const normalizedStatus = adapter.normalizeStatus(execution.status);
+
+      return this.providerOperationRepository.findOneAndUpdate(operation.id, {
+        status: normalizedStatus as ProviderOperationStatus,
+        externalReference:
+          execution.providerReference ?? operation.externalReference,
+        reconciliationStatus:
+          normalizedStatus === ProviderOperationStatus.COMPLETED
+            ? 'RETRY_COMPLETED'
+            : 'RETRY_ATTEMPTED',
+        responsePayload: {
+          ...(operation.responsePayload ?? {}),
+          retryExecution: execution.data,
+        },
+        metadata: {
+          ...nextMetadata,
+          retryRequestedAt: new Date().toISOString(),
+          retryProviderReference: execution.providerReference,
+        },
+        reconciledAt:
+          normalizedStatus === ProviderOperationStatus.COMPLETED
+            ? new Date()
+            : operation.reconciledAt,
+      });
+    } catch (error) {
+      const normalizedError = adapter.normalizeError(error);
+
+      return this.providerOperationRepository.findOneAndUpdate(operation.id, {
+        reconciliationStatus: 'RETRY_FAILED',
+        failureReason: normalizedError.message,
+        metadata: {
+          ...nextMetadata,
+          retryRequestedAt: new Date().toISOString(),
+          retryFailure: normalizedError,
+        },
+      });
+    }
   }
 
   async requestReversal(id: string, context: AdminActionContext) {

@@ -108,6 +108,51 @@ export class WebhooksController {
     );
   }
 
+  @Post('april')
+  @HttpCode(HttpStatus.OK)
+  april(
+    @Body() payload: Record<string, any>,
+    @Headers() headers: Record<string, string | string[] | undefined>,
+    @Req() request: { rawBody?: Buffer },
+  ) {
+    return this.webhooksService.handle(
+      'april',
+      payload,
+      headers,
+      request.rawBody,
+    );
+  }
+
+  @Post('column')
+  @HttpCode(HttpStatus.OK)
+  column(
+    @Body() payload: Record<string, any>,
+    @Headers() headers: Record<string, string | string[] | undefined>,
+    @Req() request: { rawBody?: Buffer },
+  ) {
+    return this.webhooksService.handle(
+      'column',
+      payload,
+      headers,
+      request.rawBody,
+    );
+  }
+
+  @Post('tax')
+  @HttpCode(HttpStatus.OK)
+  tax(
+    @Body() payload: Record<string, any>,
+    @Headers() headers: Record<string, string | string[] | undefined>,
+    @Req() request: { rawBody?: Buffer },
+  ) {
+    return this.webhooksService.handle(
+      'tax',
+      payload,
+      headers,
+      request.rawBody,
+    );
+  }
+
   @Post('sardine')
   @HttpCode(HttpStatus.OK)
   sardine(

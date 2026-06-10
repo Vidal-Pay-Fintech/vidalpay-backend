@@ -79,7 +79,11 @@ export class ProviderStatusService {
         enabledWhen: () =>
           this.featureFlags.isEnabled('ENABLE_USD_WALLET') ||
           this.featureFlags.isEnabled('ENABLE_USD_BANK_TRANSFER'),
-        requiredLiveEnv: ['LEAD_BANK_API_KEY', 'LEAD_BANK_WEBHOOK_SECRET'],
+        requiredLiveEnv: [
+          'LEAD_BANK_BASE_URL',
+          'LEAD_BANK_API_KEY',
+          'LEAD_BANK_WEBHOOK_SECRET',
+        ],
         capabilities: [
           'usd_account_provisioning',
           'ach_receive',
@@ -96,7 +100,12 @@ export class ProviderStatusService {
         modeKey: 'KYC_PROVIDER_MODE',
         liveMode: 'smileid',
         enabledWhen: () => this.featureFlags.isEnabled('ENABLE_DEMO_MODE'),
-        requiredLiveEnv: ['SMILE_ID_API_KEY', 'SMILE_ID_WEBHOOK_SECRET'],
+        requiredLiveEnv: [
+          'SMILE_ID_BASE_URL',
+          'SMILE_ID_PARTNER_ID',
+          'SMILE_ID_API_KEY',
+          'SMILE_ID_WEBHOOK_SECRET',
+        ],
         capabilities: [
           'identity_verification',
           'document_verification',
@@ -113,7 +122,11 @@ export class ProviderStatusService {
         liveMode: 'verto',
         enabledWhen: () =>
           this.featureFlags.isEnabled('ENABLE_FX_CONVERSION_DEMO'),
-        requiredLiveEnv: ['VERTO_API_KEY', 'VERTO_WEBHOOK_SECRET'],
+        requiredLiveEnv: [
+          'VERTO_BASE_URL',
+          'VERTO_API_KEY',
+          'VERTO_WEBHOOK_SECRET',
+        ],
         capabilities: [
           'fx_quote',
           'fx_conversion',
@@ -128,7 +141,11 @@ export class ProviderStatusService {
         modeKey: 'CRYPTO_PROVIDER_MODE',
         liveMode: 'zerohash',
         enabledWhen: () => this.featureFlags.isEnabled('ENABLE_CRYPTO_DEMO'),
-        requiredLiveEnv: ['ZERO_HASH_API_KEY', 'ZERO_HASH_WEBHOOK_SECRET'],
+        requiredLiveEnv: [
+          'ZERO_HASH_BASE_URL',
+          'ZERO_HASH_API_KEY',
+          'ZERO_HASH_WEBHOOK_SECRET',
+        ],
         capabilities: ['assets', 'quote', 'trade', 'transactions', 'webhooks'],
         testEvidenceKey: 'ZERO_HASH_LIVE_TEST_EVIDENCE',
         comingSoon: true,
@@ -140,7 +157,11 @@ export class ProviderStatusService {
         liveMode: 'cowrywise',
         enabledWhen: () =>
           this.featureFlags.isEnabled('ENABLE_INVESTMENT_DEMO'),
-        requiredLiveEnv: ['COWRYWISE_API_KEY', 'COWRYWISE_WEBHOOK_SECRET'],
+        requiredLiveEnv: [
+          'COWRYWISE_BASE_URL',
+          'COWRYWISE_API_KEY',
+          'COWRYWISE_WEBHOOK_SECRET',
+        ],
         capabilities: ['products', 'portfolio', 'orders', 'webhooks'],
         testEvidenceKey: 'COWRYWISE_LIVE_TEST_EVIDENCE',
         comingSoon: true,
@@ -151,7 +172,11 @@ export class ProviderStatusService {
         modeKey: 'TAX_PROVIDER_MODE',
         liveMode: 'april',
         enabledWhen: () => this.featureFlags.isEnabled('ENABLE_TAX_DEMO'),
-        requiredLiveEnv: ['APRIL_API_KEY', 'APRIL_WEBHOOK_SECRET'],
+        requiredLiveEnv: [
+          'APRIL_BASE_URL',
+          'APRIL_API_KEY',
+          'APRIL_WEBHOOK_SECRET',
+        ],
         capabilities: [
           'tax_status',
           'filing_start',
@@ -168,7 +193,11 @@ export class ProviderStatusService {
         modeKey: 'TAX_PROVIDER_MODE',
         liveMode: 'column',
         enabledWhen: () => this.featureFlags.isEnabled('ENABLE_TAX_DEMO'),
-        requiredLiveEnv: ['COLUMN_API_KEY', 'COLUMN_WEBHOOK_SECRET'],
+        requiredLiveEnv: [
+          'COLUMN_BASE_URL',
+          'COLUMN_API_KEY',
+          'COLUMN_WEBHOOK_SECRET',
+        ],
         capabilities: [
           'tax_status',
           'filing_start',
@@ -195,7 +224,11 @@ export class ProviderStatusService {
         modeKey: 'FRAUD_PROVIDER_MODE',
         liveMode: 'sardine',
         enabledWhen: () => this.featureFlags.isEnabled('ENABLE_DEMO_MODE'),
-        requiredLiveEnv: ['SARDINE_API_KEY', 'SARDINE_WEBHOOK_SECRET'],
+        requiredLiveEnv: [
+          'SARDINE_BASE_URL',
+          'SARDINE_API_KEY',
+          'SARDINE_WEBHOOK_SECRET',
+        ],
         capabilities: ['risk_evaluation', 'aml_screening', 'webhooks'],
         testEvidenceKey: 'SARDINE_LIVE_TEST_EVIDENCE',
         comingSoon: true,

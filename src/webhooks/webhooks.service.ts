@@ -1,5 +1,5 @@
 import { BadRequestException, Injectable } from '@nestjs/common';
-import { createHmac, createHash, timingSafeEqual } from 'crypto';
+import { createHash } from 'crypto';
 import { KycProvider } from 'src/common/enum/kyc-provider.enum';
 import {
   ProviderOperationStatus,
@@ -7,17 +7,8 @@ import {
 } from 'src/common/enum/provider-operation.enum';
 import { ProviderOperationRepository } from 'src/database/repositories/provider-operation.repository';
 import { ProviderWebhookEventRepository } from 'src/database/repositories/provider-webhook-event.repository';
+import { getLiveProviderAdapterBySlug } from 'src/integrations/provider/live/live-provider-adapters';
 import { WEBHOOK_PROVIDER_MAP } from './webhook-provider-map';
-
-const WEBHOOK_SECRET_ENV_BY_SLUG: Record<string, string> = {
-  flutterwave: 'FLW_WEBHOOK_SECRET_HASH',
-  smileid: 'SMILE_ID_WEBHOOK_SECRET',
-  leadbank: 'LEAD_BANK_WEBHOOK_SECRET',
-  verto: 'VERTO_WEBHOOK_SECRET',
-  zerohash: 'ZERO_HASH_WEBHOOK_SECRET',
-  cowrywise: 'COWRYWISE_WEBHOOK_SECRET',
-  sardine: 'SARDINE_WEBHOOK_SECRET',
-};
 
 @Injectable()
 export class WebhooksService {
@@ -32,7 +23,8 @@ export class WebhooksService {
     headers?: Record<string, string | string[] | undefined>,
     rawBody?: Buffer | string,
   ) {
-    const provider = this.resolveProvider(providerSlug);
+    const resolvedProviderSlug = this.resolveProviderSlug(providerSlug);
+    const provider = this.resolveProvider(resolvedProviderSlug);
     const eventReference = this.pickFirstString(
       payload.id,
       payload.event_id,
@@ -51,14 +43,19 @@ export class WebhooksService {
     );
     const eventType =
       this.pickFirstString(payload.event, payload.type, payload.data?.event) ??
-      `${providerSlug}.webhook`;
+      `${resolvedProviderSlug}.webhook`;
     const rawPayload = this.stringifyPayload(payload, rawBody);
     const rawPayloadHash = createHash('sha256')
       .update(rawPayload)
       .digest('hex');
-    const signature = this.verifySignature(providerSlug, rawPayload, headers);
+    const signature = this.verifySignature(
+      resolvedProviderSlug,
+      rawPayload,
+      headers,
+    );
     const idempotencyKey =
-      eventReference ?? `${providerSlug}_${eventType}_${rawPayloadHash}`;
+      eventReference ??
+      `${resolvedProviderSlug}_${eventType}_${rawPayloadHash}`;
     const operation = operationReference
       ? await this.providerOperationRepository.findByReference(
           operationReference,
@@ -84,7 +81,8 @@ export class WebhooksService {
             ? 'VERIFIED'
             : 'FAILED',
           signatureHeader: signature.signatureHeader,
-          providerSlug,
+          providerSlug: resolvedProviderSlug,
+          requestedProviderSlug: providerSlug,
         },
         processedAt: null,
         receivedAt: new Date(),
@@ -158,6 +156,19 @@ export class WebhooksService {
     };
   }
 
+  private resolveProviderSlug(slug: string) {
+    const normalized = slug.toLowerCase();
+    if (normalized === 'tax') {
+      const taxMode = String(process.env.TAX_PROVIDER_MODE ?? 'april')
+        .trim()
+        .toLowerCase();
+
+      return taxMode === 'column' ? 'column' : 'april';
+    }
+
+    return normalized;
+  }
+
   private resolveProvider(slug: string): KycProvider {
     const provider = WEBHOOK_PROVIDER_MAP[slug];
     if (!provider) {
@@ -204,93 +215,29 @@ export class WebhooksService {
     rawPayload: string,
     headers?: Record<string, string | string[] | undefined>,
   ) {
-    const secretEnvKey = WEBHOOK_SECRET_ENV_BY_SLUG[providerSlug];
-    const secret = secretEnvKey ? process.env[secretEnvKey] : null;
-    const headerValue = this.pickHeader(headers, [
-      'verif-hash',
-      'x-signature',
-      'x-webhook-signature',
-      'x-sardine-signature',
-    ]);
-
-    if (!secretEnvKey || !secret) {
+    const adapter = getLiveProviderAdapterBySlug(providerSlug);
+    if (!adapter) {
       return {
         signatureValid: false,
-        signatureHeader: headerValue.header,
-        failureReason: 'PROVIDER_WEBHOOK_SECRET_MISSING',
+        signatureHeader: null,
+        failureReason: 'PROVIDER_ADAPTER_MISSING',
       };
     }
 
-    if (!headerValue.value) {
+    const result = adapter.verifyWebhook(headers ?? {}, rawPayload);
+    if (result instanceof Promise) {
       return {
         signatureValid: false,
-        signatureHeader: headerValue.header,
-        failureReason: 'WEBHOOK_SIGNATURE_MISSING',
+        signatureHeader: null,
+        failureReason: 'ASYNC_WEBHOOK_VERIFICATION_NOT_SUPPORTED',
       };
     }
-
-    if (providerSlug === 'flutterwave') {
-      return {
-        signatureValid: this.safeCompare(headerValue.value, secret),
-        signatureHeader: headerValue.header,
-        failureReason: this.safeCompare(headerValue.value, secret)
-          ? null
-          : 'WEBHOOK_SIGNATURE_INVALID',
-      };
-    }
-
-    const expected = createHmac('sha256', secret)
-      .update(rawPayload)
-      .digest('hex');
-    const normalizedSignature = headerValue.value.replace(/^sha256=/i, '');
 
     return {
-      signatureValid: this.safeCompare(normalizedSignature, expected),
-      signatureHeader: headerValue.header,
-      failureReason: this.safeCompare(normalizedSignature, expected)
-        ? null
-        : 'WEBHOOK_SIGNATURE_INVALID',
+      signatureValid: result.signatureValid,
+      signatureHeader: result.signatureHeader ?? null,
+      failureReason: result.failureReason ?? null,
     };
-  }
-
-  private pickHeader(
-    headers: Record<string, string | string[] | undefined> | undefined,
-    names: string[],
-  ) {
-    if (!headers) {
-      return { header: null, value: null };
-    }
-
-    const normalizedHeaders = Object.entries(headers).reduce<
-      Record<string, string | string[] | undefined>
-    >((acc, [key, value]) => {
-      acc[key.toLowerCase()] = value;
-      return acc;
-    }, {});
-
-    for (const name of names) {
-      const value = normalizedHeaders[name.toLowerCase()];
-      const firstValue = Array.isArray(value) ? value[0] : value;
-      if (firstValue) {
-        return {
-          header: name,
-          value: firstValue,
-        };
-      }
-    }
-
-    return { header: null, value: null };
-  }
-
-  private safeCompare(left: string, right: string) {
-    const leftBuffer = Buffer.from(left);
-    const rightBuffer = Buffer.from(right);
-
-    if (leftBuffer.length !== rightBuffer.length) {
-      return false;
-    }
-
-    return timingSafeEqual(leftBuffer, rightBuffer);
   }
 
   private stringifyPayload(

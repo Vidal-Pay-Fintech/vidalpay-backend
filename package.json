@@ -21,7 +21,19 @@
     "test:watch": "jest --watch",
     "test:cov": "jest --coverage",
     "test:debug": "node --inspect-brk -r tsconfig-paths/register -r ts-node/register node_modules/.bin/jest --runInBand",
-    "test:e2e": "jest --config ./test/jest-e2e.json"
+    "test:e2e": "jest --config ./test/jest-e2e.json",
+    "provider:test": "node -r ts-node/register -r tsconfig-paths/register scripts/provider-certify.ts all",
+    "provider:test:flutterwave": "node -r ts-node/register -r tsconfig-paths/register scripts/provider-certify.ts flutterwave",
+    "provider:test:smileid": "node -r ts-node/register -r tsconfig-paths/register scripts/provider-certify.ts smileid",
+    "provider:test:verto": "node -r ts-node/register -r tsconfig-paths/register scripts/provider-certify.ts verto",
+    "provider:test:leadbank": "node -r ts-node/register -r tsconfig-paths/register scripts/provider-certify.ts leadbank",
+    "provider:test:onesignal": "node -r ts-node/register -r tsconfig-paths/register scripts/provider-certify.ts onesignal",
+    "provider:test:sardine": "node -r ts-node/register -r tsconfig-paths/register scripts/provider-certify.ts sardine",
+    "provider:test:zerohash": "node -r ts-node/register -r tsconfig-paths/register scripts/provider-certify.ts zerohash",
+    "provider:test:cowrywise": "node -r ts-node/register -r tsconfig-paths/register scripts/provider-certify.ts cowrywise",
+    "provider:test:tax": "node -r ts-node/register -r tsconfig-paths/register scripts/provider-certify.ts tax",
+    "provider:test:tax:april": "node -r ts-node/register -r tsconfig-paths/register scripts/provider-certify.ts april",
+    "provider:test:tax:column": "node -r ts-node/register -r tsconfig-paths/register scripts/provider-certify.ts column"
   },
   "dependencies": {
     "@nestjs/cli": "^11.0.0",
