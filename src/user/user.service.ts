@@ -116,15 +116,18 @@ export class UserService {
   ) {
     const user = await this.loadUserContext(userId);
     const newEmail =
-      this.userPolicy.normalizeOptionalString(requestEmailChangeDto.newEmail)?.toLowerCase() ??
-      null;
+      this.userPolicy
+        .normalizeOptionalString(requestEmailChangeDto.newEmail)
+        ?.toLowerCase() ?? null;
 
     if (!newEmail) {
       throw new BadRequestException('A valid email address is required.');
     }
 
     if (newEmail === user.email?.toLowerCase()) {
-      throw new BadRequestException('Enter a different email address to continue.');
+      throw new BadRequestException(
+        'Enter a different email address to continue.',
+      );
     }
 
     const existingUser = await this.userRepository.findUserByEmail(newEmail);
@@ -132,7 +135,10 @@ export class UserService {
       throw new BadRequestException(API_MESSAGES.EMAIL_ALREADY_EXISTS);
     }
 
-    await this.tokensService.deleteTokensByUserAndType(userId, TokenType.EMAIL_CHANGE);
+    await this.tokensService.deleteTokensByUserAndType(
+      userId,
+      TokenType.EMAIL_CHANGE,
+    );
 
     const verificationToken = this.generateSixDigitToken();
     const tokenExpiration = new Date();
@@ -223,15 +229,21 @@ export class UserService {
     }
 
     if (newPhoneNumber === user.phoneNumber) {
-      throw new BadRequestException('Enter a different phone number to continue.');
+      throw new BadRequestException(
+        'Enter a different phone number to continue.',
+      );
     }
 
-    const existingUser = await this.userRepository.findUserByPhone(newPhoneNumber);
+    const existingUser =
+      await this.userRepository.findUserByPhone(newPhoneNumber);
     if (existingUser) {
       throw new BadRequestException(API_MESSAGES.PHONE_ALREADY_EXISTS);
     }
 
-    await this.tokensService.deleteTokensByUserAndType(userId, TokenType.PHONE_CHANGE);
+    await this.tokensService.deleteTokensByUserAndType(
+      userId,
+      TokenType.PHONE_CHANGE,
+    );
 
     const verificationToken = this.generateSixDigitToken();
     const tokenExpiration = new Date();
@@ -289,7 +301,8 @@ export class UserService {
       throw new BadRequestException(API_MESSAGES.INVALID_TOKEN);
     }
 
-    const existingUser = await this.userRepository.findUserByPhone(newPhoneNumber);
+    const existingUser =
+      await this.userRepository.findUserByPhone(newPhoneNumber);
     if (existingUser && existingUser.id !== userId) {
       await this.tokensService.delete(validToken.id);
       throw new BadRequestException(API_MESSAGES.PHONE_ALREADY_EXISTS);
@@ -317,7 +330,11 @@ export class UserService {
     const walletRails = this.buildWalletRailDetails(user, capabilities);
     const accountRails = this.buildAccountRailSummary(walletRails);
     const fundingMethods = this.buildFundingMethods(capabilities, walletRails);
-    const pendingActions = this.buildPendingActions(user, capabilities, walletRails);
+    const pendingActions = this.buildPendingActions(
+      user,
+      capabilities,
+      walletRails,
+    );
     const serializedProfile = this.serializeProfile(
       user,
       capabilities,
@@ -358,7 +375,9 @@ export class UserService {
       quickActions: {
         internalTransfer: overview.capabilities.canInternalTransfer,
         externalTransfer: overview.capabilities.canExternalTransfer,
-        receive: overview.productAvailability.receive ?? overview.capabilities.canReceive,
+        receive:
+          overview.productAvailability.receive ??
+          overview.capabilities.canReceive,
         deposit: overview.productAvailability.deposit,
         cardTopUp: overview.productAvailability.cardTopUp,
         airtime: overview.productAvailability.airtime,
@@ -383,7 +402,9 @@ export class UserService {
 
     const regionResolution = this.userPolicy.resolveRegion({
       country:
-        (profilePatch.country as string | null | undefined) ?? user.country ?? null,
+        (profilePatch.country as string | null | undefined) ??
+        user.country ??
+        null,
       countryCode:
         (profilePatch.countryCode as string | null | undefined) ??
         user.countryCode ??
@@ -439,7 +460,9 @@ export class UserService {
     const userKyc = await this.ensureUserKyc(user);
     await this.userKycRepository.findOneAndUpdate(userKyc.id, {
       country:
-        (profilePatch.country as string | null | undefined) ?? userKyc.country ?? null,
+        (profilePatch.country as string | null | undefined) ??
+        userKyc.country ??
+        null,
       countryCode:
         (profilePatch.countryCode as string | null | undefined) ??
         userKyc.countryCode ??
@@ -462,12 +485,18 @@ export class UserService {
     return this.getMe(userId);
   }
 
-  async saveKycIdentity(userId: string, upsertKycIdentityDto: UpsertKycIdentityDto) {
+  async saveKycIdentity(
+    userId: string,
+    upsertKycIdentityDto: UpsertKycIdentityDto,
+  ) {
     const user = await this.loadUserContext(userId);
     const userKyc = await this.ensureUserKyc(user);
     const region = this.resolveSupportedRegionOrThrow(user, userKyc);
 
-    this.userPolicy.validateIdentityPayloadForRegion(region, upsertKycIdentityDto);
+    this.userPolicy.validateIdentityPayloadForRegion(
+      region,
+      upsertKycIdentityDto,
+    );
 
     const identityData: KycIdentitySnapshot = {
       nin:
@@ -515,7 +544,10 @@ export class UserService {
     return this.getKyc(userId);
   }
 
-  async saveKycAddress(userId: string, upsertKycAddressDto: UpsertKycAddressDto) {
+  async saveKycAddress(
+    userId: string,
+    upsertKycAddressDto: UpsertKycAddressDto,
+  ) {
     const user = await this.loadUserContext(userId);
     const userKyc = await this.ensureUserKyc(user);
     const normalizedCountryCode =
@@ -525,8 +557,7 @@ export class UserService {
     const normalizedStateOrRegion =
       this.userPolicy.normalizeOptionalString(
         upsertKycAddressDto.stateOrRegion,
-      ) ??
-      this.userPolicy.normalizeOptionalString(upsertKycAddressDto.state);
+      ) ?? this.userPolicy.normalizeOptionalString(upsertKycAddressDto.state);
     const region = this.resolveSupportedRegionOrThrow(user, userKyc, {
       country: upsertKycAddressDto.country,
       countryCode: normalizedCountryCode,
@@ -607,7 +638,9 @@ export class UserService {
 
     const livenessData: KycLivenessSnapshot = {
       sessionId:
-        this.userPolicy.normalizeOptionalString(upsertKycLivenessDto.sessionId) ??
+        this.userPolicy.normalizeOptionalString(
+          upsertKycLivenessDto.sessionId,
+        ) ??
         userKyc.livenessData?.sessionId ??
         null,
       providerReference:
@@ -634,19 +667,18 @@ export class UserService {
             ),
         ) ||
           (userKyc.livenessData?.completed ?? false)),
-      metadata:
-        {
-          ...(userKyc.livenessData?.metadata ?? {}),
-          ...(upsertKycLivenessDto.metadata ?? {}),
-          selfieDocumentId:
-            this.userPolicy.normalizeOptionalString(
-              upsertKycLivenessDto.selfieDocumentId,
-            ) ?? null,
-          selfieDocumentUrl:
-            this.userPolicy.normalizeOptionalString(
-              upsertKycLivenessDto.selfieDocumentUrl,
-            ) ?? null,
-        },
+      metadata: {
+        ...(userKyc.livenessData?.metadata ?? {}),
+        ...(upsertKycLivenessDto.metadata ?? {}),
+        selfieDocumentId:
+          this.userPolicy.normalizeOptionalString(
+            upsertKycLivenessDto.selfieDocumentId,
+          ) ?? null,
+        selfieDocumentUrl:
+          this.userPolicy.normalizeOptionalString(
+            upsertKycLivenessDto.selfieDocumentUrl,
+          ) ?? null,
+      },
     };
 
     if (
@@ -684,57 +716,61 @@ export class UserService {
       throw new BadRequestException(API_MESSAGES.KYC_DOCUMENT_REQUIRED);
     }
 
-    const { stage, documentType, category } =
-      this.resolveDocumentStageAndType(uploadKycDocumentsDto);
+    const { stage, documentType, category } = this.resolveDocumentStageAndType(
+      uploadKycDocumentsDto,
+    );
     const createdDocuments: KycDocument[] = [];
 
     for (const file of files ?? []) {
       createdDocuments.push(
         await this.kycDocumentRepository.create({
-        userId,
-        kycId: userKyc.id,
-        stage,
-        documentType,
-        originalFileName: file.originalname ?? null,
-        storedFileName: file.filename ?? null,
-        mimeType: file.mimetype ?? null,
-        sizeBytes: file.size ?? null,
-        storage: KycDocumentStorage.LOCAL,
-        localPath: file.path ?? null,
-        fileUrl: this.buildLocalFileUrl(file.path),
-        uploadedViaBackend: true,
-        metadata: {
-          ...(metadata ?? {}),
-          category,
-        },
-      }),
+          userId,
+          kycId: userKyc.id,
+          stage,
+          documentType,
+          originalFileName: file.originalname ?? null,
+          storedFileName: file.filename ?? null,
+          mimeType: file.mimetype ?? null,
+          sizeBytes: file.size ?? null,
+          storage: KycDocumentStorage.LOCAL,
+          localPath: file.path ?? null,
+          fileUrl: this.buildLocalFileUrl(file.path),
+          uploadedViaBackend: true,
+          metadata: {
+            ...(metadata ?? {}),
+            category,
+          },
+        }),
       );
     }
 
     for (const fileUrl of fileUrls) {
       createdDocuments.push(
         await this.kycDocumentRepository.create({
-        userId,
-        kycId: userKyc.id,
-        stage,
-        documentType,
-        originalFileName: null,
-        storedFileName: null,
-        mimeType: null,
-        sizeBytes: null,
-        storage: KycDocumentStorage.REMOTE,
-        localPath: null,
-        fileUrl,
-        uploadedViaBackend: false,
-        metadata: {
-          ...(metadata ?? {}),
-          category,
-        },
-      }),
+          userId,
+          kycId: userKyc.id,
+          stage,
+          documentType,
+          originalFileName: null,
+          storedFileName: null,
+          mimeType: null,
+          sizeBytes: null,
+          storage: KycDocumentStorage.REMOTE,
+          localPath: null,
+          fileUrl,
+          uploadedViaBackend: false,
+          metadata: {
+            ...(metadata ?? {}),
+            category,
+          },
+        }),
       );
     }
 
-    const regionResolution = this.userPolicy.resolveRegionForUser(user, userKyc);
+    const regionResolution = this.userPolicy.resolveRegionForUser(
+      user,
+      userKyc,
+    );
     const nextStatus =
       regionResolution.state === 'UNSUPPORTED'
         ? KycStatus.UNSUPPORTED
@@ -793,7 +829,8 @@ export class UserService {
     const submissionKyc = {
       ...userKyc,
       addressData: effectiveAddress,
-      country: effectiveAddress.country ?? userKyc.country ?? user.country ?? null,
+      country:
+        effectiveAddress.country ?? userKyc.country ?? user.country ?? null,
       countryCode:
         effectiveAddress.countryCode ??
         userKyc.countryCode ??
@@ -874,7 +911,8 @@ export class UserService {
     const stagedKyc = {
       ...userKyc,
       addressData: effectiveAddress,
-      country: effectiveAddress.country ?? userKyc.country ?? user.country ?? null,
+      country:
+        effectiveAddress.country ?? userKyc.country ?? user.country ?? null,
       countryCode:
         effectiveAddress.countryCode ??
         userKyc.countryCode ??
@@ -934,13 +972,36 @@ export class UserService {
   }
 
   async ensureCanTransfer(userId: string) {
+    return this.ensureCanBankTransfer(userId);
+  }
+
+  async ensureCanTagTransfer(userId: string) {
     const user = await this.loadUserContext(userId);
     const capabilities = this.userPolicy.computeCapabilities(user);
 
-    if (!capabilities.canTransfer) {
+    if (!capabilities.canTagTransfer) {
       await this.syncWalletRouting(userId, user, capabilities);
       throw new PreconditionFailedException(
-        capabilities.blockedReason ?? API_MESSAGES.TRANSFER_BLOCKED_PENDING_KYC,
+        capabilities.tagTransferBlockedReason ??
+          capabilities.blockedReason ??
+          API_MESSAGES.TAG_TRANSFER_UNAVAILABLE,
+      );
+    }
+
+    await this.syncWalletRouting(userId, user, capabilities);
+    return capabilities;
+  }
+
+  async ensureCanBankTransfer(userId: string) {
+    const user = await this.loadUserContext(userId);
+    const capabilities = this.userPolicy.computeCapabilities(user);
+
+    if (!capabilities.canBankTransfer) {
+      await this.syncWalletRouting(userId, user, capabilities);
+      throw new PreconditionFailedException(
+        capabilities.bankTransferBlockedReason ??
+          capabilities.blockedReason ??
+          API_MESSAGES.TRANSFER_BLOCKED_PENDING_KYC,
       );
     }
 
@@ -1078,8 +1139,9 @@ export class UserService {
 
     if (updateProfileDto.profilePicture !== undefined) {
       profilePatch.profilePicture =
-        this.userPolicy.normalizeOptionalString(updateProfileDto.profilePicture) ??
-        undefined;
+        this.userPolicy.normalizeOptionalString(
+          updateProfileDto.profilePicture,
+        ) ?? undefined;
     }
 
     if (updateProfileDto.country !== undefined) {
@@ -1101,8 +1163,9 @@ export class UserService {
 
     if (updateProfileDto.stateOrRegion !== undefined) {
       profilePatch.stateOrRegion =
-        this.userPolicy.normalizeOptionalString(updateProfileDto.stateOrRegion) ??
-        undefined;
+        this.userPolicy.normalizeOptionalString(
+          updateProfileDto.stateOrRegion,
+        ) ?? undefined;
     }
 
     if (updateProfileDto.city !== undefined) {
@@ -1113,14 +1176,16 @@ export class UserService {
 
     if (updateProfileDto.addressLine1 !== undefined) {
       profilePatch.addressLine1 =
-        this.userPolicy.normalizeOptionalString(updateProfileDto.addressLine1) ??
-        undefined;
+        this.userPolicy.normalizeOptionalString(
+          updateProfileDto.addressLine1,
+        ) ?? undefined;
     }
 
     if (updateProfileDto.addressLine2 !== undefined) {
       profilePatch.addressLine2 =
-        this.userPolicy.normalizeOptionalString(updateProfileDto.addressLine2) ??
-        undefined;
+        this.userPolicy.normalizeOptionalString(
+          updateProfileDto.addressLine2,
+        ) ?? undefined;
     }
 
     if (updateProfileDto.postalCode !== undefined) {
@@ -1167,7 +1232,9 @@ export class UserService {
           user.addressLine2 ??
           null,
         city:
-          (profilePatch?.city as string | null | undefined) ?? user.city ?? null,
+          (profilePatch?.city as string | null | undefined) ??
+          user.city ??
+          null,
         stateOrRegion:
           (profilePatch?.stateOrRegion as string | null | undefined) ??
           user.stateOrRegion ??
@@ -1204,7 +1271,10 @@ export class UserService {
 
   private buildKycResponse(user: User, capabilities: UserCapabilities) {
     const userKyc = user.kyc;
-    const regionResolution = this.userPolicy.resolveRegionForUser(user, userKyc);
+    const regionResolution = this.userPolicy.resolveRegionForUser(
+      user,
+      userKyc,
+    );
     const address = this.userPolicy.buildAddressSnapshotFromSources(
       userKyc?.addressData ?? undefined,
       this.getUserAddressSnapshot(user),
@@ -1337,13 +1407,18 @@ export class UserService {
       provider: effectiveCapabilities.provider,
       kycStatus: normalizedKycStatus,
       rawKycStatus: user.kyc?.status ?? user.kycStatus,
-      kycProvider: effectiveCapabilities.provider ?? user.kyc?.provider ?? user.kycProvider,
+      kycProvider:
+        effectiveCapabilities.provider ??
+        user.kyc?.provider ??
+        user.kycProvider,
       kycSubmittedAt: user.kyc?.submittedAt ?? user.kycSubmittedAt,
       kycReviewedAt: user.kyc?.reviewedAt ?? user.kycReviewedAt,
       security: {
         hasTransactionPin: effectiveCapabilities.hasTransactionPin,
         requiresTransactionPinSetup: !effectiveCapabilities.hasTransactionPin,
         canUsePinProtectedTransfers: effectiveCapabilities.canTransfer,
+        canUseTagTransfers: effectiveCapabilities.canTagTransfer,
+        canUseBankTransfers: effectiveCapabilities.canBankTransfer,
         canUseInternalTransfers: effectiveCapabilities.canInternalTransfer,
         canUseExternalTransfers: effectiveCapabilities.canExternalTransfer,
         canReceiveExternal: effectiveCapabilities.canExternalReceive,
@@ -1377,7 +1452,9 @@ export class UserService {
       walletRails.find((wallet) => wallet.externalReceiveEnabled) ??
       walletRails[0] ??
       null;
-    const hasBankTransferRail = Boolean(bankTransferWallet?.externalReceiveEnabled);
+    const hasBankTransferRail = Boolean(
+      bankTransferWallet?.externalReceiveEnabled,
+    );
     const bankTransferBlockedReason =
       bankTransferWallet?.blockedReason ??
       (capabilities.region === SupportedRegion.NG
@@ -1393,12 +1470,11 @@ export class UserService {
         description: 'Fund your wallet through your assigned receive rails.',
         enabled: hasBankTransferRail,
         provider: capabilities.provider,
-        blockedReason:
-          hasBankTransferRail
-            ? null
-            : capabilities.region
-              ? bankTransferBlockedReason
-              : API_MESSAGES.KYC_REGION_REQUIRED,
+        blockedReason: hasBankTransferRail
+          ? null
+          : capabilities.region
+            ? bankTransferBlockedReason
+            : API_MESSAGES.KYC_REGION_REQUIRED,
         currencies: hasBankTransferRail
           ? walletRails
               .filter((wallet) => wallet.externalReceiveEnabled)
@@ -1462,7 +1538,10 @@ export class UserService {
       return null;
     }
 
-    const relativePath = relative(process.cwd(), normalized).replace(/\\/g, '/');
+    const relativePath = relative(process.cwd(), normalized).replace(
+      /\\/g,
+      '/',
+    );
     return `/${relativePath}`;
   }
 
@@ -1474,7 +1553,9 @@ export class UserService {
   private normalizeProvisioningStatus(
     value: unknown,
   ): WalletRailDetails['provisioningStatus'] | null {
-    const normalized = String(value ?? '').trim().toUpperCase();
+    const normalized = String(value ?? '')
+      .trim()
+      .toUpperCase();
     if (
       normalized === 'READY' ||
       normalized === 'PENDING' ||
@@ -1498,7 +1579,7 @@ export class UserService {
   ) {
     await this.walletRepository.syncRoutingForUser(userId, {
       receiveEnabled: capabilities.canReceive,
-      transferEnabled: capabilities.canTransfer,
+      transferEnabled: capabilities.canBankTransfer,
       routingRegionCode: capabilities.region,
       routingProvider: capabilities.provider,
     });
@@ -1523,22 +1604,22 @@ export class UserService {
         null;
       const provider = wallet.routingProvider ?? capabilities.provider ?? null;
       const railType =
-        region === SupportedRegion.US &&
-        provider === KycProvider.LEAD_BANK
+        region === SupportedRegion.US && provider === KycProvider.LEAD_BANK
           ? 'INTERNAL_ONLY'
           : wallet.accountNumber && wallet.routingNumber
-          ? 'ACH'
-          : wallet.accountNumber
-            ? 'VIRTUAL_ACCOUNT'
-            : 'INTERNAL_ONLY';
+            ? 'ACH'
+            : wallet.accountNumber
+              ? 'VIRTUAL_ACCOUNT'
+              : 'INTERNAL_ONLY';
       const providerMetadata = wallet.providerMetadata ?? null;
       const supportsExternalRails =
         (region === SupportedRegion.NG && wallet.currency === Currency.NGN) ||
         (region === SupportedRegion.US && wallet.currency === Currency.USD);
       const leadBankUnavailable =
         region === SupportedRegion.US && provider === KycProvider.LEAD_BANK;
-      const explicitProvisioningStatus =
-        this.normalizeProvisioningStatus(providerMetadata?.provisioningState);
+      const explicitProvisioningStatus = this.normalizeProvisioningStatus(
+        providerMetadata?.provisioningState,
+      );
       const externalReceiveEnabled = Boolean(
         supportsExternalRails &&
           wallet.accountNumber &&
@@ -1551,27 +1632,25 @@ export class UserService {
           capabilities.canExternalTransfer &&
           !leadBankUnavailable,
       );
-      const provisioningStatus =
-        externalReceiveEnabled
-          ? 'READY'
-          : explicitProvisioningStatus ??
-            (providerMetadata?.provisioningDeferred
-              ? 'DEFERRED'
-              : leadBankUnavailable
-                ? 'UNAVAILABLE'
-                : supportsExternalRails
-                  ? 'PENDING'
-                  : 'UNAVAILABLE');
-      const blockedReason =
-        externalReceiveEnabled
-          ? null
-          : providerMetadata?.blockedReason ??
-            providerMetadata?.provisioningError ??
-            (leadBankUnavailable
-              ? 'Lead Bank receive rails are not connected yet in staging.'
-              : capabilities.region
-                ? capabilities.blockedReason
-                : API_MESSAGES.KYC_REGION_REQUIRED);
+      const provisioningStatus = externalReceiveEnabled
+        ? 'READY'
+        : (explicitProvisioningStatus ??
+          (providerMetadata?.provisioningDeferred
+            ? 'DEFERRED'
+            : leadBankUnavailable
+              ? 'UNAVAILABLE'
+              : supportsExternalRails
+                ? 'PENDING'
+                : 'UNAVAILABLE'));
+      const blockedReason = externalReceiveEnabled
+        ? null
+        : (providerMetadata?.blockedReason ??
+          providerMetadata?.provisioningError ??
+          (leadBankUnavailable
+            ? 'Lead Bank receive rails are not connected yet in staging.'
+            : capabilities.region
+              ? capabilities.blockedReason
+              : API_MESSAGES.KYC_REGION_REQUIRED));
       const supportedOperations: Array<'RECEIVE' | 'TRANSFER' | 'TOP_UP'> = [];
 
       if (externalReceiveEnabled) {
@@ -1664,7 +1743,8 @@ export class UserService {
       pendingActions.push({
         code: 'VERIFY_EMAIL',
         title: 'Verify your email',
-        description: 'Email verification is required before login can complete normally.',
+        description:
+          'Email verification is required before login can complete normally.',
         blocking: true,
       });
     }
@@ -1744,7 +1824,8 @@ export class UserService {
       {
         code: 'REFER_AND_EARN',
         title: 'Invite friends to VidalPay',
-        description: 'Share your referral code and complete more funded accounts.',
+        description:
+          'Share your referral code and complete more funded accounts.',
         cta: 'Share referral code',
         value: user.referralCode ?? null,
       },
@@ -1760,7 +1841,8 @@ export class UserService {
       bvn: userKyc?.identityData?.bvn ?? null,
       ssn: userKyc?.identityData?.ssn ?? null,
       approvedIdentityType: userKyc?.identityData?.approvedIdentityType ?? null,
-      approvedIdentityValue: userKyc?.identityData?.approvedIdentityValue ?? null,
+      approvedIdentityValue:
+        userKyc?.identityData?.approvedIdentityValue ?? null,
       addressLine1: address.addressLine1,
       addressLine2: address.addressLine2,
       city: address.city,
@@ -1819,7 +1901,9 @@ export class UserService {
               : document.createdAt,
         };
       })
-      .filter((document): document is NonNullable<typeof document> => Boolean(document));
+      .filter((document): document is NonNullable<typeof document> =>
+        Boolean(document),
+      );
   }
 
   private getDocumentCategory(document: any) {
@@ -1857,16 +1941,20 @@ export class UserService {
     );
 
     if (region === SupportedRegion.NG) {
-      return Boolean(userKyc?.identityData?.nin && userKyc?.identityData?.bvn) &&
-        hasIdentityDocument;
+      return (
+        Boolean(userKyc?.identityData?.nin && userKyc?.identityData?.bvn) &&
+        hasIdentityDocument
+      );
     }
 
     if (region === SupportedRegion.US) {
-      return Boolean(
-        userKyc?.identityData?.ssn ||
-          (userKyc?.identityData?.approvedIdentityType &&
-            userKyc?.identityData?.approvedIdentityValue),
-      ) && hasIdentityDocument;
+      return (
+        Boolean(
+          userKyc?.identityData?.ssn ||
+            (userKyc?.identityData?.approvedIdentityType &&
+              userKyc?.identityData?.approvedIdentityValue),
+        ) && hasIdentityDocument
+      );
     }
 
     return false;
@@ -1908,7 +1996,9 @@ export class UserService {
   private getKycRejectionReason(user: User, userKyc?: UserKyc | null) {
     const providerResponse = userKyc?.providerResponse ?? {};
     const rejectionReason =
-      this.userPolicy.normalizeOptionalString(providerResponse?.rejectionReason) ??
+      this.userPolicy.normalizeOptionalString(
+        providerResponse?.rejectionReason,
+      ) ??
       this.userPolicy.normalizeOptionalString(providerResponse?.reason) ??
       null;
 
@@ -1924,7 +2014,9 @@ export class UserService {
     return null;
   }
 
-  private resolveDocumentStageAndType(uploadKycDocumentsDto: UploadKycDocumentsDto) {
+  private resolveDocumentStageAndType(
+    uploadKycDocumentsDto: UploadKycDocumentsDto,
+  ) {
     const category = this.userPolicy
       .normalizeOptionalString(uploadKycDocumentsDto.category)
       ?.toUpperCase();

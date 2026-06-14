@@ -49,7 +49,8 @@ export class UserPolicyService {
     kyc?: Partial<UserKyc> | null,
   ): RegionResolution {
     return this.resolveRegion({
-      country: this.normalizeOptionalString(user.country) ?? kyc?.country ?? null,
+      country:
+        this.normalizeOptionalString(user.country) ?? kyc?.country ?? null,
       countryCode:
         this.normalizeOptionalString(user.countryCode) ??
         kyc?.countryCode ??
@@ -140,33 +141,41 @@ export class UserPolicyService {
       : null;
     const hasTransactionPin = Boolean(this.normalizeOptionalString(user.pin));
     const isKycVerified = kycStatus === KycStatus.VERIFIED;
+    const internalTransferEnabled = this.featureFlags.isEnabled(
+      'ENABLE_INTERNAL_TRANSFER',
+    );
+    const externalTransferFeatureEnabled =
+      this.isExternalTransferFeatureEnabled(resolution.region);
 
     const canReceive = true;
-    const canTransfer =
-      resolution.state === 'RESOLVED' && isKycVerified && hasTransactionPin;
-
-    let blockedReason: string | null = null;
-    if (!canTransfer) {
-      if (resolution.state === 'UNSUPPORTED') {
-        blockedReason =
-          resolution.blockedReason ?? API_MESSAGES.KYC_UNSUPPORTED_REGION;
-      } else if (resolution.state === 'CONFLICT') {
-        blockedReason =
-          resolution.blockedReason ?? API_MESSAGES.KYC_REGION_CONFLICT;
-      } else if (resolution.state === 'UNRESOLVED') {
-        blockedReason =
-          resolution.blockedReason ?? API_MESSAGES.KYC_REGION_REQUIRED;
-      } else if (!isKycVerified) {
-        blockedReason =
-          kyc?.blockedReason ?? this.mapKycStatusToBlockedReason(kycStatus);
-      } else {
-        blockedReason = API_MESSAGES.TRANSFER_PIN_REQUIRED;
-      }
-    }
+    const canTagTransfer = internalTransferEnabled && hasTransactionPin;
+    const canBankTransfer =
+      resolution.state === 'RESOLVED' &&
+      isKycVerified &&
+      hasTransactionPin &&
+      externalTransferFeatureEnabled;
+    const canTransfer = canTagTransfer || canBankTransfer;
+    const tagTransferBlockedReason = this.resolveTagTransferBlockedReason({
+      internalTransferEnabled,
+      hasTransactionPin,
+    });
+    const bankTransferBlockedReason = this.resolveBankTransferBlockedReason({
+      resolution,
+      kycStatus,
+      kycBlockedReason: kyc?.blockedReason ?? null,
+      isKycVerified,
+      hasTransactionPin,
+      externalTransferFeatureEnabled,
+    });
+    const blockedReason = canTransfer
+      ? null
+      : (tagTransferBlockedReason ?? bankTransferBlockedReason);
 
     const productAvailability = this.buildProductAvailability(
       resolution,
       canTransfer,
+      canTagTransfer,
+      canBankTransfer,
     );
 
     return {
@@ -175,15 +184,31 @@ export class UserPolicyService {
       hasTransactionPin,
       canReceive,
       canTransfer,
-      canInternalTransfer: canTransfer,
-      canExternalTransfer: canTransfer && productAvailability.externalTransfer !== false,
+      canTagTransfer,
+      canBankTransfer,
+      canInternalTransfer: canTagTransfer,
+      canExternalTransfer: canBankTransfer,
       canExternalReceive: productAvailability.deposit,
       blockedReason,
+      tagTransferBlockedReason,
+      bankTransferBlockedReason,
+      transferCapabilities: {
+        tag: {
+          enabled: canTagTransfer,
+          blockedReason: tagTransferBlockedReason,
+        },
+        bank: {
+          enabled: canBankTransfer,
+          blockedReason: bankTransferBlockedReason,
+        },
+      },
       limits: this.buildDynamicLimits(
         resolution,
         isKycVerified,
         hasTransactionPin,
         canTransfer,
+        canTagTransfer,
+        canBankTransfer,
         productAvailability,
       ),
       productAvailability,
@@ -256,7 +281,13 @@ export class UserPolicyService {
           oneOf: [],
         },
         address: {
-          allOf: ['addressLine1', 'city', 'stateOrRegion', 'country', 'countryCode'],
+          allOf: [
+            'addressLine1',
+            'city',
+            'stateOrRegion',
+            'country',
+            'countryCode',
+          ],
         },
         liveness: {
           required: true,
@@ -276,7 +307,13 @@ export class UserPolicyService {
           oneOf: [['ssn'], ['approvedIdentityType', 'approvedIdentityValue']],
         },
         address: {
-          allOf: ['addressLine1', 'city', 'stateOrRegion', 'country', 'countryCode'],
+          allOf: [
+            'addressLine1',
+            'city',
+            'stateOrRegion',
+            'country',
+            'countryCode',
+          ],
         },
         liveness: {
           required: true,
@@ -292,7 +329,13 @@ export class UserPolicyService {
       provider: null,
       identity: null,
       address: {
-        allOf: ['addressLine1', 'city', 'stateOrRegion', 'country', 'countryCode'],
+        allOf: [
+          'addressLine1',
+          'city',
+          'stateOrRegion',
+          'country',
+          'countryCode',
+        ],
       },
       liveness: {
         required: true,
@@ -530,6 +573,8 @@ export class UserPolicyService {
     isKycVerified: boolean,
     hasTransactionPin: boolean,
     canTransfer: boolean,
+    canTagTransfer: boolean,
+    canBankTransfer: boolean,
     productAvailability: ProductAvailability,
   ): DynamicLimitProfile {
     const tier =
@@ -573,6 +618,18 @@ export class UserPolicyService {
         monthlyAmount: canTransfer ? null : 0,
         managedBy: transferManagedBy,
       },
+      tagTransfer: {
+        dailyAmount: canTagTransfer ? null : 0,
+        monthlyAmount: canTagTransfer ? null : 0,
+        managedBy: canTagTransfer
+          ? 'INTERNAL_TRANSFER_POLICY'
+          : 'PIN_OR_FEATURE_GATE',
+      },
+      bankTransfer: {
+        dailyAmount: canBankTransfer ? null : 0,
+        monthlyAmount: canBankTransfer ? null : 0,
+        managedBy: transferManagedBy,
+      },
       progressiveIncreases: {
         enabled: canTransfer,
         basis: 'ACCOUNT_ACTIVITY',
@@ -607,14 +664,18 @@ export class UserPolicyService {
   private buildProductAvailability(
     resolution: RegionResolution,
     canTransfer: boolean,
+    canTagTransfer: boolean,
+    canBankTransfer: boolean,
   ): ProductAvailability {
     const baseAvailability: ProductAvailability = {
       wallet:
         this.featureFlags.isEnabled('ENABLE_NGN_WALLET') ||
         this.featureFlags.isEnabled('ENABLE_USD_WALLET'),
-      transfer: false,
-      internalTransfer: false,
-      externalTransfer: false,
+      transfer: canTransfer,
+      tagTransfer: canTagTransfer,
+      bankTransfer: canBankTransfer,
+      internalTransfer: canTagTransfer,
+      externalTransfer: canBankTransfer,
       receive: true,
       deposit: false,
       cardTopUp: false,
@@ -639,10 +700,10 @@ export class UserPolicyService {
         cardTopUp: this.featureFlags.isEnabled('ENABLE_VIRTUAL_CARD_DEMO'),
         conversion: this.featureFlags.isEnabled('ENABLE_FX_CONVERSION_DEMO'),
         transfer: canTransfer,
-        internalTransfer:
-          canTransfer && this.featureFlags.isEnabled('ENABLE_INTERNAL_TRANSFER'),
-        externalTransfer:
-          canTransfer && this.featureFlags.isEnabled('ENABLE_NGN_BANK_TRANSFER'),
+        tagTransfer: canTagTransfer,
+        bankTransfer: canBankTransfer,
+        internalTransfer: canTagTransfer,
+        externalTransfer: canBankTransfer,
         airtime: true,
         data: true,
         utilities: true,
@@ -655,10 +716,10 @@ export class UserPolicyService {
         receive: true,
         conversion: this.featureFlags.isEnabled('ENABLE_FX_CONVERSION_DEMO'),
         transfer: canTransfer,
-        internalTransfer:
-          canTransfer && this.featureFlags.isEnabled('ENABLE_INTERNAL_TRANSFER'),
-        externalTransfer:
-          canTransfer && this.featureFlags.isEnabled('ENABLE_USD_BANK_TRANSFER'),
+        tagTransfer: canTagTransfer,
+        bankTransfer: canBankTransfer,
+        internalTransfer: canTagTransfer,
+        externalTransfer: canBankTransfer,
         deposit: false,
         cardTopUp: this.featureFlags.isEnabled('ENABLE_VIRTUAL_CARD_DEMO'),
         loan: false,
@@ -667,6 +728,73 @@ export class UserPolicyService {
     }
 
     return baseAvailability;
+  }
+
+  private isExternalTransferFeatureEnabled(region: SupportedRegion | null) {
+    if (region === SupportedRegion.NG) {
+      return this.featureFlags.isEnabled('ENABLE_NGN_BANK_TRANSFER');
+    }
+
+    if (region === SupportedRegion.US) {
+      return this.featureFlags.isEnabled('ENABLE_USD_BANK_TRANSFER');
+    }
+
+    return false;
+  }
+
+  private resolveTagTransferBlockedReason(input: {
+    internalTransferEnabled: boolean;
+    hasTransactionPin: boolean;
+  }) {
+    if (!input.internalTransferEnabled) {
+      return API_MESSAGES.TAG_TRANSFER_UNAVAILABLE;
+    }
+
+    if (!input.hasTransactionPin) {
+      return API_MESSAGES.TAG_TRANSFER_PIN_REQUIRED;
+    }
+
+    return null;
+  }
+
+  private resolveBankTransferBlockedReason(input: {
+    resolution: RegionResolution;
+    kycStatus: KycStatus;
+    kycBlockedReason: string | null;
+    isKycVerified: boolean;
+    hasTransactionPin: boolean;
+    externalTransferFeatureEnabled: boolean;
+  }) {
+    if (input.resolution.state === 'UNSUPPORTED') {
+      return (
+        input.resolution.blockedReason ?? API_MESSAGES.KYC_UNSUPPORTED_REGION
+      );
+    }
+
+    if (input.resolution.state === 'CONFLICT') {
+      return input.resolution.blockedReason ?? API_MESSAGES.KYC_REGION_CONFLICT;
+    }
+
+    if (input.resolution.state === 'UNRESOLVED') {
+      return input.resolution.blockedReason ?? API_MESSAGES.KYC_REGION_REQUIRED;
+    }
+
+    if (!input.isKycVerified) {
+      return (
+        input.kycBlockedReason ??
+        this.mapKycStatusToBlockedReason(input.kycStatus)
+      );
+    }
+
+    if (!input.hasTransactionPin) {
+      return API_MESSAGES.TRANSFER_PIN_REQUIRED;
+    }
+
+    if (!input.externalTransferFeatureEnabled) {
+      return API_MESSAGES.BANK_TRANSFER_UNAVAILABLE;
+    }
+
+    return null;
   }
 
   private createSectionProgress(

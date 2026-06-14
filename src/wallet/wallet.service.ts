@@ -143,7 +143,7 @@ export class WalletService {
     userId: string,
   ) {
     this.featureFlags.assertEnabled('ENABLE_INTERNAL_TRANSFER');
-    await this.userService.ensureCanTransfer(userId);
+    await this.userService.ensureCanTagTransfer(userId);
 
     const { amount, recipientTag, currency, pin, note } = internalTransferDTO;
     this.assertWalletCurrencyEnabled(currency);
@@ -437,7 +437,7 @@ export class WalletService {
     if (externalTransferDto.currency === Currency.USD) {
       this.featureFlags.assertEnabled('ENABLE_USD_BANK_TRANSFER');
     }
-    const capabilities = await this.userService.ensureCanTransfer(userId);
+    const capabilities = await this.userService.ensureCanBankTransfer(userId);
     await this.assertTransactionPinAuthorized(userId, externalTransferDto.pin);
 
     if (!capabilities.region) {

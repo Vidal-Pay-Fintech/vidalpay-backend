@@ -7,6 +7,8 @@ import { Currency } from 'src/utils/enums/wallet.enum';
 export interface ProductAvailability {
   wallet: boolean;
   transfer: boolean;
+  tagTransfer?: boolean;
+  bankTransfer?: boolean;
   internalTransfer?: boolean;
   externalTransfer?: boolean;
   receive?: boolean;
@@ -39,6 +41,16 @@ export interface DynamicLimitProfile {
     managedBy: string;
   };
   transfer: {
+    dailyAmount: number | null;
+    monthlyAmount: number | null;
+    managedBy: string;
+  };
+  tagTransfer?: {
+    dailyAmount: number | null;
+    monthlyAmount: number | null;
+    managedBy: string;
+  };
+  bankTransfer?: {
     dailyAmount: number | null;
     monthlyAmount: number | null;
     managedBy: string;
@@ -81,11 +93,7 @@ export interface WalletRailDetails {
   providerVirtualAccountId: string | null;
   providerReference: string | null;
   providerMetadata: Record<string, any> | null;
-  provisioningStatus?:
-    | 'READY'
-    | 'PENDING'
-    | 'DEFERRED'
-    | 'UNAVAILABLE';
+  provisioningStatus?: 'READY' | 'PENDING' | 'DEFERRED' | 'UNAVAILABLE';
   blockedReason?: string | null;
   supportedOperations?: Array<'RECEIVE' | 'TRANSFER' | 'TOP_UP'>;
 }

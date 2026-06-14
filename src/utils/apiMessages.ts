@@ -39,6 +39,12 @@ class ApiMessages {
     "You currently haven't set your transaction Pin. Please set Transaction Pin to continue";
   public TRANSFER_PIN_REQUIRED =
     'Set your transaction PIN to activate transfers and outgoing payments.';
+  public TAG_TRANSFER_PIN_REQUIRED =
+    'Set your transaction PIN to activate Vidal Tag transfers.';
+  public TAG_TRANSFER_UNAVAILABLE =
+    'Vidal Tag transfers are currently unavailable.';
+  public BANK_TRANSFER_UNAVAILABLE =
+    'Bank transfers are currently unavailable for your region or provider.';
 
   public BANK_DELETED_SUCCESSFULLY = 'Bank Deleted Successfully';
   public PHONE_VERIFIED_SUCCESSFULLY = 'Phone verified successfully';
@@ -166,16 +172,14 @@ class ApiMessages {
     'Your country information is conflicting. Please update your profile with a single supported region.';
   public KYC_IDENTITY_INCOMPLETE =
     'Identity information is incomplete for KYC submission.';
-  public KYC_IDENTITY_INCOMPLETE_NG =
-    'Nigeria KYC requires both NIN and BVN.';
+  public KYC_IDENTITY_INCOMPLETE_NG = 'Nigeria KYC requires both NIN and BVN.';
   public KYC_IDENTITY_INCOMPLETE_US =
     'US KYC requires an SSN or an approved equivalent identity value.';
   public KYC_ADDRESS_INCOMPLETE =
     'Address information is incomplete for KYC submission.';
   public KYC_LIVENESS_INCOMPLETE =
     'Liveness information is incomplete for KYC submission.';
-  public KYC_DOCUMENT_REQUIRED =
-    'At least one KYC document file is required.';
+  public KYC_DOCUMENT_REQUIRED = 'At least one KYC document file is required.';
   public KYC_PENDING_REVIEW =
     'Your KYC is pending review. Transfers remain disabled until it is verified.';
   public KYC_REQUIRES_ACTION =
@@ -206,11 +210,11 @@ class ApiMessages {
     'Live utility validation is unavailable for this service right now. You can continue to review the payment details before submitting.';
   public STAGING_KYC_OVERRIDE_DISABLED =
     'Staging KYC verification override is disabled.';
-  public STAGING_KYC_VERIFIED =
-    'KYC marked as VERIFIED for staging QA.';
+  public STAGING_KYC_VERIFIED = 'KYC marked as VERIFIED for staging QA.';
   public EMAIL_CHANGE_CODE_SENT =
     'A verification code has been sent to your new email address.';
-  public EMAIL_CHANGE_SUCCESSFUL = 'Your email address has been updated successfully.';
+  public EMAIL_CHANGE_SUCCESSFUL =
+    'Your email address has been updated successfully.';
   public PHONE_CHANGE_CODE_SENT =
     'A verification code has been sent to your email address to confirm your phone number change.';
   public PHONE_CHANGE_SUCCESSFUL =
@@ -219,8 +223,7 @@ class ApiMessages {
     'We could not deliver the verification code for this change request. Please try again later.';
   public SUPPORT_TICKET_CREATED =
     'Your support request has been submitted successfully.';
-  public CRYPTO_COMING_SOON =
-    'Crypto features are not enabled yet in staging.';
+  public CRYPTO_COMING_SOON = 'Crypto features are not enabled yet in staging.';
 }
 
 export const API_MESSAGES = new ApiMessages();
