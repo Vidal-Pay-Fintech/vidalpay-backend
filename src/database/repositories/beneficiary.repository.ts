@@ -4,7 +4,10 @@ import { PageDto } from 'src/common/pagination/page.dto';
 import { PageMetaDto } from 'src/common/pagination/meta.dto';
 import { PageOptionsDto } from 'src/common/pagination/pageOptionsDto.dto';
 import { AbstractRepository } from 'src/database/abstract.repository';
-import { Beneficiary, BeneficiaryType } from 'src/database/entities/beneficiary.entity';
+import {
+  Beneficiary,
+  BeneficiaryType,
+} from 'src/database/entities/beneficiary.entity';
 import { User } from 'src/database/entities/user.entity';
 import { Currency } from 'src/utils/enums/wallet.enum';
 import { Brackets, Repository } from 'typeorm';
@@ -118,13 +121,33 @@ export class BeneficiaryRepository extends AbstractRepository<Beneficiary> {
         type: BeneficiaryType.BANK_ACCOUNT,
       })
       .andWhere('beneficiary.currency = :currency', { currency })
-      .andWhere('beneficiary.accountNumber = :accountNumber', { accountNumber });
+      .andWhere('beneficiary.accountNumber = :accountNumber', {
+        accountNumber,
+      });
 
     if (bankCode) {
       query.andWhere('beneficiary.bankCode = :bankCode', { bankCode });
     }
 
     return query.getOne();
+  }
+
+  async findUserBeneficiaryById(
+    senderId: string,
+    beneficiaryId: string,
+  ): Promise<Beneficiary | null> {
+    return this.beneficiaryEntityRepository
+      .createQueryBuilder('beneficiary')
+      .leftJoinAndMapOne(
+        'beneficiary.recipient',
+        User,
+        'recipient',
+        'beneficiary.beneficiaryId = recipient.id',
+      )
+      .where('beneficiary.senderId = :senderId', { senderId })
+      .andWhere('beneficiary.id = :beneficiaryId', { beneficiaryId })
+      .andWhere('beneficiary.deletedAt IS NULL')
+      .getOne();
   }
 
   async upsertInternalRecipient(input: {
@@ -147,7 +170,9 @@ export class BeneficiaryRepository extends AbstractRepository<Beneficiary> {
         lastUsedAt: new Date(),
       });
 
-      return (await this.findOne({ where: { id: existing.id } })) as Beneficiary;
+      return (await this.findOne({
+        where: { id: existing.id },
+      })) as Beneficiary;
     }
 
     return this.create({
@@ -196,7 +221,9 @@ export class BeneficiaryRepository extends AbstractRepository<Beneficiary> {
 
     if (existing) {
       await this.findOneAndUpdate(existing.id, patch);
-      return (await this.findOne({ where: { id: existing.id } })) as Beneficiary;
+      return (await this.findOne({
+        where: { id: existing.id },
+      })) as Beneficiary;
     }
 
     return this.create({
@@ -206,7 +233,10 @@ export class BeneficiaryRepository extends AbstractRepository<Beneficiary> {
     });
   }
 
-  async deleteBeneficiary(beneficiaryId: string, senderId: string): Promise<void> {
+  async deleteBeneficiary(
+    beneficiaryId: string,
+    senderId: string,
+  ): Promise<void> {
     const beneficiary = await this.beneficiaryEntityRepository.findOne({
       where: {
         id: beneficiaryId,

@@ -1,4 +1,12 @@
-import { Body, Controller, Delete, Get, Param, Post, Query } from '@nestjs/common';
+import {
+  Body,
+  Controller,
+  Delete,
+  Get,
+  Param,
+  Post,
+  Query,
+} from '@nestjs/common';
 import { PageOptionsDto } from 'src/common/pagination/pageOptionsDto.dto';
 import { ActiveUser } from 'src/iam/decorators/active-user.decorator';
 import { ActiveUserData } from 'src/iam/interfaces/active-user-data-interfaces';
@@ -26,6 +34,14 @@ export class BeneficiaryController {
     @ActiveUser() user: ActiveUserData,
   ) {
     return this.beneficiaryService.create(createBeneficiaryDto, user.sub);
+  }
+
+  @Get(':id')
+  getBeneficiaryDetail(
+    @Param('id') id: string,
+    @ActiveUser() user: ActiveUserData,
+  ) {
+    return this.beneficiaryService.getBeneficiaryDetail(id, user.sub);
   }
 
   @Delete(':id')

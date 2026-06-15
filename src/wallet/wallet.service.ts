@@ -245,6 +245,9 @@ export class WalletService {
       internalTransferDTO,
       userId,
     );
+    const recipient = await this.userRepository.findUserByTag(
+      internalTransferDTO.recipientTag,
+    );
     const receipt = transaction?.id
       ? await this.transactionService.getUserTransactionReceipt(
           userId,
@@ -263,9 +266,28 @@ export class WalletService {
     const beneficiaryList = Array.isArray(recipients)
       ? recipients
       : recipients.beneficiaries;
+    const enrichedReceipt = receipt
+      ? {
+          ...receipt,
+          fee: 0,
+          sourceWallet: {
+            currency: internalTransferDTO.currency,
+            ledger: `wallet_${internalTransferDTO.currency.toLowerCase()}`,
+          },
+          recipientName: [recipient.firstName, recipient.lastName]
+            .filter(Boolean)
+            .join(' ')
+            .trim(),
+          recipientTagId: recipient.tagId ?? internalTransferDTO.recipientTag,
+          timestamp: receipt.createdAt ?? new Date().toISOString(),
+          status: receipt.status ?? 'COMPLETED',
+        }
+      : null;
 
     return {
       status: 'SUCCESS',
+      state: 'success',
+      transferStatus: 'COMPLETED',
       message: 'Internal tag transfer completed',
       transferType: 'INTERNAL_TAG',
       id: transaction?.id ?? null,
@@ -273,7 +295,7 @@ export class WalletService {
       amount: transaction?.amount ?? internalTransferDTO.amount,
       currency: transaction?.currency ?? internalTransferDTO.currency,
       transfer: transaction,
-      receipt,
+      receipt: enrichedReceipt,
       recentRecipients: beneficiaryList,
       savedBeneficiaries: beneficiaryList,
       audit: {
