@@ -4,6 +4,10 @@ import { ProviderStatusService } from 'src/providers/provider-status.service';
 import { UserService } from 'src/user/user.service';
 import { API_MESSAGES } from 'src/utils/apiMessages';
 
+const CRYPTO_PREVIEW_MESSAGE =
+  'Crypto is available as a preview while live trading access is being staged.';
+const CRYPTO_LIVE_MESSAGE = 'Crypto trading is live.';
+
 const CRYPTO_ASSETS = [
   {
     symbol: 'BTC',
@@ -47,14 +51,42 @@ export class CryptoService {
     );
     const enabled = productCryptoAvailable && liveEnabled;
     const staged = productCryptoAvailable && !liveEnabled;
+    const state = enabled
+      ? 'TRADE_LIVE'
+      : staged
+        ? 'PREVIEW_STAGED'
+        : 'UNAVAILABLE';
+    const screen = enabled
+      ? 'CRYPTO_TRADE'
+      : staged
+        ? 'CRYPTO_PREVIEW'
+        : 'CRYPTO_COMING_SOON';
+    const message = enabled
+      ? CRYPTO_LIVE_MESSAGE
+      : staged
+        ? CRYPTO_PREVIEW_MESSAGE
+        : API_MESSAGES.CRYPTO_COMING_SOON;
 
     return {
       enabled,
+      state,
+      screen,
+      tradeEnabled: enabled,
+      previewEnabled: staged,
+      productAvailable: productCryptoAvailable,
       cryptoOverview: {
         enabled,
+        state,
+        screen,
+        tradeEnabled: enabled,
+        previewEnabled: staged,
+        productAvailable: productCryptoAvailable,
         status: enabled ? 'LIVE' : staged ? 'PREVIEW' : 'DISABLED',
         stage: enabled ? 'LIVE' : staged ? 'STAGED' : 'UNAVAILABLE',
         blockedByKyc: false,
+        message,
+        previewMessage: staged ? CRYPTO_PREVIEW_MESSAGE : null,
+        comingSoonCopy: enabled ? null : API_MESSAGES.CRYPTO_COMING_SOON,
         provider: zeroHashStatus?.provider ?? 'Zero Hash',
         providerMode: zeroHashStatus?.mode ?? 'mock',
         providerStatus: zeroHashStatus?.status ?? null,
@@ -67,11 +99,7 @@ export class CryptoService {
       },
       comingSoon: !enabled,
       preview: staged,
-      message: enabled
-        ? 'Crypto is live.'
-        : staged
-          ? 'Crypto is available as a preview while live provider access is staged.'
-          : API_MESSAGES.CRYPTO_COMING_SOON,
+      message,
       region: accountOverview.region,
       provider: accountOverview.provider,
       productAvailability: {
@@ -90,6 +118,10 @@ export class CryptoService {
           title: 'Crypto Wallet',
           enabled,
           status: enabled ? 'LIVE' : staged ? 'PREVIEW' : 'DISABLED',
+          state,
+          screen,
+          previewEnabled: staged,
+          tradeEnabled: enabled,
         },
         {
           code: 'STAKING',
