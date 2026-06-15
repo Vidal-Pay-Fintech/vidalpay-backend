@@ -19,6 +19,7 @@ describe('WalletService', () => {
       {} as any,
       {} as any,
       {} as any,
+      {} as any,
     );
   });
 

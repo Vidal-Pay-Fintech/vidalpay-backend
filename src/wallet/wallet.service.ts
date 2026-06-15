@@ -30,6 +30,7 @@ import { ExternalTransferDto } from './dto/external-transfer.dto';
 import { AirtimePurchaseDto } from './dto/airtime-purchase.dto';
 import { DataPurchaseDto } from './dto/data-purchase.dto';
 import { UtilityPaymentDto } from './dto/utility-payment.dto';
+import { BeneficiaryService } from 'src/beneficiary/beneficiary.service';
 import {
   ProviderOperationStatus,
   ProviderOperationType,
@@ -45,6 +46,7 @@ import { TransactionService } from 'src/transaction/transaction.service';
 import { NotificationService } from 'src/notifications/notification.service';
 import { DemoFundWalletDto } from './dto/demo-fund-wallet.dto';
 import { CardsService } from 'src/cards/cards.service';
+import { PageOptionsDto } from 'src/common/pagination/pageOptionsDto.dto';
 
 @Injectable()
 export class WalletService {
@@ -65,6 +67,7 @@ export class WalletService {
     private readonly featureFlags: FeatureFlagService,
     private readonly notificationService: NotificationService,
     private readonly cardsService: CardsService,
+    private readonly beneficiaryService: BeneficiaryService,
   ) {}
   create(createWalletDto: CreateWalletDto) {
     throw new NotImplementedException(
@@ -232,6 +235,53 @@ export class WalletService {
       }
       throw err;
     }
+  }
+
+  async createInternalTransfer(
+    internalTransferDTO: InternalTransferDto,
+    userId: string,
+  ) {
+    const transaction = await this.internalTransfer(
+      internalTransferDTO,
+      userId,
+    );
+    const receipt = transaction?.id
+      ? await this.transactionService.getUserTransactionReceipt(
+          userId,
+          transaction.id,
+        )
+      : null;
+    const recipients =
+      await this.beneficiaryService.getBeneficiaryForSingleUser(
+        {
+          page: 1,
+          limit: 10,
+          isExport: '',
+        } as PageOptionsDto,
+        userId,
+      );
+    const beneficiaryList = Array.isArray(recipients)
+      ? recipients
+      : recipients.beneficiaries;
+
+    return {
+      status: 'SUCCESS',
+      message: 'Internal tag transfer completed',
+      transferType: 'INTERNAL_TAG',
+      id: transaction?.id ?? null,
+      reference: transaction?.reference ?? null,
+      amount: transaction?.amount ?? internalTransferDTO.amount,
+      currency: transaction?.currency ?? internalTransferDTO.currency,
+      transfer: transaction,
+      receipt,
+      recentRecipients: beneficiaryList,
+      savedBeneficiaries: beneficiaryList,
+      audit: {
+        event: 'INTERNAL_TRANSFER_COMPLETED',
+        reference: transaction?.reference ?? null,
+        timestamp: new Date().toISOString(),
+      },
+    };
   }
 
   // async internalTransfer(

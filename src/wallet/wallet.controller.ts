@@ -34,7 +34,10 @@ export class WalletController {
     @Body() internalTransferDTO: InternalTransferDto,
     @ActiveUser() user: ActiveUserData,
   ) {
-    return this.walletService.internalTransfer(internalTransferDTO, user.sub);
+    return this.walletService.createInternalTransfer(
+      internalTransferDTO,
+      user.sub,
+    );
   }
 
   @Post('external-transfer')
