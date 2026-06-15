@@ -256,6 +256,8 @@ export class BeneficiaryService {
       bankName: beneficiary.bankName,
       routingNumber: beneficiary.routingNumber,
       bankCode: beneficiary.bankCode,
+      canTagTransfer: Boolean(capabilities.canTagTransfer),
+      canBankTransfer: Boolean(capabilities.canBankTransfer),
       canTransfer,
       blockedReason,
       routeEligibility: {
