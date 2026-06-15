@@ -1,0 +1,17 @@
+* text=auto
+
+*.ts text eol=lf
+*.tsx text eol=lf
+*.js text eol=lf
+*.mjs text eol=lf
+*.cjs text eol=lf
+*.map text eol=lf
+*.json text eol=lf
+*.md text eol=lf
+*.yml text eol=lf
+*.yaml text eol=lf
+*.env.example text eol=lf
+yarn.lock text eol=lf
+.gitignore text eol=lf
+.prettierrc text eol=lf
+.gitattributes text eol=lf
