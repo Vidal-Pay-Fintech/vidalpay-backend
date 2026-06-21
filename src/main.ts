@@ -11,6 +11,11 @@ async function bootstrap() {
   const app = await NestFactory.create(AppModule, {
     cors: false,
   });
+  const trustProxyHops = Math.max(
+    0,
+    Number(process.env.TRUST_PROXY_HOPS ?? '1'),
+  );
+  app.getHttpAdapter().getInstance().set('trust proxy', trustProxyHops);
   const swaggerEnabled =
     process.env.ENABLE_SWAGGER === 'true' ||
     process.env.NODE_ENV !== 'production';
@@ -99,8 +104,8 @@ function buildCorsOriginMatcher() {
 function isRealOrigin(value: string | undefined): value is string {
   return Boolean(
     value &&
-      /^https?:\/\//i.test(value) &&
-      value.trim().toLowerCase() !== 'value',
+    /^https?:\/\//i.test(value) &&
+    value.trim().toLowerCase() !== 'value',
   );
 }
 

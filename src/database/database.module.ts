@@ -36,6 +36,36 @@ import { ProviderStatus } from './entities/provider-status.entity';
 import { RewardAccount } from './entities/reward-account.entity';
 import { RewardBalance } from './entities/reward-balance.entity';
 import { RewardTransaction } from './entities/reward-transaction.entity';
+import { RefreshSession } from './entities/refresh-session.entity';
+import { CryptoAccount } from './entities/crypto-account.entity';
+import { CryptoBalance } from './entities/crypto-balance.entity';
+import { CryptoOrder } from './entities/crypto-order.entity';
+import { CryptoTransfer } from './entities/crypto-transfer.entity';
+import { CryptoStakingPosition } from './entities/crypto-staking-position.entity';
+import { CryptoDepositAddress } from './entities/crypto-deposit-address.entity';
+import { InvestmentAccount } from './entities/investment-account.entity';
+import { InvestmentProduct } from './entities/investment-product.entity';
+import { InvestmentPosition } from './entities/investment-position.entity';
+import { InvestmentOrder } from './entities/investment-order.entity';
+import { InvestmentFunding } from './entities/investment-funding.entity';
+import { TaxAccount } from './entities/tax-account.entity';
+import { TaxFiling } from './entities/tax-filing.entity';
+import { TaxDocument } from './entities/tax-document.entity';
+import { TaxFilingEvent } from './entities/tax-filing-event.entity';
+import { LoanEligibility } from './entities/loan-eligibility.entity';
+import { LoanApplication } from './entities/loan-application.entity';
+import { LoanOffer } from './entities/loan-offer.entity';
+import { LoanAccount } from './entities/loan-account.entity';
+import { LoanInstallment } from './entities/loan-installment.entity';
+import { LoanRepayment } from './entities/loan-repayment.entity';
+import { DisputeCase } from './entities/dispute-case.entity';
+import { DisputeEvidence } from './entities/dispute-evidence.entity';
+import { DisputeEvent } from './entities/dispute-event.entity';
+import { RefundRequest } from './entities/refund-request.entity';
+import { PaymentSchedule } from './entities/payment-schedule.entity';
+import { ScheduledPaymentExecution } from './entities/scheduled-payment-execution.entity';
+import { AdminUserAction } from './entities/admin-user-action.entity';
+import { PushDelivery } from './entities/push-delivery.entity';
 
 //REPOSITORIES
 import { UserRepository } from './repositories/user.repository';
@@ -59,6 +89,14 @@ import { NotificationRepository } from './repositories/notification.repository';
 import { RewardAccountRepository } from './repositories/reward-account.repository';
 import { RewardBalanceRepository } from './repositories/reward-balance.repository';
 import { RewardTransactionRepository } from './repositories/reward-transaction.repository';
+import { RefreshSessionRepository } from './repositories/refresh-session.repository';
+import { CryptoRepository } from './repositories/crypto.repository';
+import { InvestmentRepository } from './repositories/investment.repository';
+import { TaxRepository } from './repositories/tax.repository';
+import { LoanRepository } from './repositories/loan.repository';
+import { DisputeRepository } from './repositories/dispute.repository';
+import { PaymentScheduleRepository } from './repositories/payment-schedule.repository';
+import { PushNotificationRepository } from './repositories/push-notification.repository';
 
 interface DatabaseConfig {
   MYSQL_HOST: string;
@@ -142,6 +180,36 @@ let transactionalContextInitialized = false;
       RewardAccount,
       RewardBalance,
       RewardTransaction,
+      RefreshSession,
+      CryptoAccount,
+      CryptoBalance,
+      CryptoOrder,
+      CryptoTransfer,
+      CryptoStakingPosition,
+      CryptoDepositAddress,
+      InvestmentAccount,
+      InvestmentProduct,
+      InvestmentPosition,
+      InvestmentOrder,
+      InvestmentFunding,
+      TaxAccount,
+      TaxFiling,
+      TaxDocument,
+      TaxFilingEvent,
+      LoanEligibility,
+      LoanApplication,
+      LoanOffer,
+      LoanAccount,
+      LoanInstallment,
+      LoanRepayment,
+      DisputeCase,
+      DisputeEvidence,
+      DisputeEvent,
+      RefundRequest,
+      PaymentSchedule,
+      ScheduledPaymentExecution,
+      AdminUserAction,
+      PushDelivery,
     ]),
   ],
   providers: [
@@ -166,6 +234,14 @@ let transactionalContextInitialized = false;
     RewardAccountRepository,
     RewardBalanceRepository,
     RewardTransactionRepository,
+    RefreshSessionRepository,
+    CryptoRepository,
+    InvestmentRepository,
+    TaxRepository,
+    LoanRepository,
+    DisputeRepository,
+    PaymentScheduleRepository,
+    PushNotificationRepository,
   ],
   exports: [
     TypeOrmModule,
@@ -189,6 +265,14 @@ let transactionalContextInitialized = false;
     RewardAccountRepository,
     RewardBalanceRepository,
     RewardTransactionRepository,
+    RefreshSessionRepository,
+    CryptoRepository,
+    InvestmentRepository,
+    TaxRepository,
+    LoanRepository,
+    DisputeRepository,
+    PaymentScheduleRepository,
+    PushNotificationRepository,
   ],
 })
 export class DatabaseModule {}

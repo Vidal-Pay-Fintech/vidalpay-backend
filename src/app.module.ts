@@ -27,6 +27,11 @@ import { CardsModule } from './cards/cards.module';
 import { KycDemoModule } from './kyc/kyc-demo.module';
 import { WebhooksModule } from './webhooks/webhooks.module';
 import { AdminModule } from './admin/admin.module';
+import { InvestmentModule } from './investments/investment.module';
+import { TaxModule } from './tax/tax.module';
+import { LoanModule } from './loans/loan.module';
+import { DisputeModule } from './disputes/dispute.module';
+import { ScheduledPaymentModule } from './scheduled-payments/scheduled-payment.module';
 
 @Module({
   imports: [
@@ -59,6 +64,11 @@ import { AdminModule } from './admin/admin.module';
     KycDemoModule,
     WebhooksModule,
     AdminModule,
+    InvestmentModule,
+    TaxModule,
+    LoanModule,
+    DisputeModule,
+    ScheduledPaymentModule,
   ],
   controllers: [AppController],
   providers: [AppService, ConfigService],

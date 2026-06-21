@@ -31,7 +31,7 @@ export class WalletRepository extends AbstractRepository<Wallet> {
     const repository = this.getWalletRepository(manager);
     return repository.find({
       where: { userId, deletedAt: IsNull() as any },
-      order: { createdAt: 'ASC' },
+      order: { isDefault: 'DESC', createdAt: 'ASC' },
     });
   }
 
@@ -42,6 +42,16 @@ export class WalletRepository extends AbstractRepository<Wallet> {
     const repository = this.getWalletRepository(manager);
     const wallet = repository.create(walletInfo);
     return await repository.save(wallet);
+  }
+
+  async setDefaultWallet(
+    userId: string,
+    currency: Wallet['currency'],
+    manager?: EntityManager,
+  ): Promise<void> {
+    const repository = this.getWalletRepository(manager);
+    await repository.update({ userId }, { isDefault: false });
+    await repository.update({ userId, currency }, { isDefault: true });
   }
 
   async syncRoutingForUser(

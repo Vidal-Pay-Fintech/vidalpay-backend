@@ -15,6 +15,8 @@ export const FEATURE_FLAGS = [
 
 export type FeatureFlagKey = (typeof FEATURE_FLAGS)[number];
 
+export const DEMO_FEATURE_KEY = 'demoFeature';
+
 export const FEATURE_FLAG_DESCRIPTIONS: Record<FeatureFlagKey, string> = {
   ENABLE_DEMO_MODE: 'Enables sandbox-only demo APIs and mock provider flows.',
   ENABLE_NGN_WALLET: 'Enables NGN wallet ledgers and actions.',

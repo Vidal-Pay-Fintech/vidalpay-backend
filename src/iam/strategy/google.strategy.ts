@@ -5,6 +5,7 @@ import { AuthenticationService } from '../authentication/authentication.service'
 import { UserRepository } from 'src/database/repositories/user.repository';
 import { AuthType } from 'src/database/entities/user.entity';
 import { UTILITIES } from 'src/utils/helperFuncs';
+import { toSafeUser } from 'src/user/user-response.mapper';
 
 @Injectable()
 export class GoogleStrategy extends PassportStrategy(Strategy, 'google') {
@@ -34,7 +35,7 @@ export class GoogleStrategy extends PassportStrategy(Strategy, 'google') {
       const tokens = await this.authService.generateToken(checkUserExists);
       return {
         ...tokens,
-        user: checkUserExists,
+        user: toSafeUser(checkUserExists),
       };
     }
 
@@ -56,7 +57,7 @@ export class GoogleStrategy extends PassportStrategy(Strategy, 'google') {
 
     return {
       ...tokens,
-      user,
+      user: toSafeUser(user),
     };
   }
 }

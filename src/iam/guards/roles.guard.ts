@@ -2,14 +2,12 @@ import { Injectable, CanActivate, ExecutionContext } from '@nestjs/common';
 import { Reflector } from '@nestjs/core';
 import { Role } from 'src/common/enum/role.enum';
 import { ROLES_KEY } from '../decorators/roles.decorator';
-import { AuthenticationService } from '../authentication/authentication.service';
+import { REQUEST_USER_KEY } from '../iam.constants';
+import { AccessTokenPayload } from '../interfaces/jwt-token.interface';
 
 @Injectable()
 export class RolesGuard implements CanActivate {
-  constructor(
-    private reflector: Reflector,
-    private readonly authService: AuthenticationService,
-  ) {}
+  constructor(private reflector: Reflector) {}
 
   async canActivate(context: ExecutionContext): Promise<boolean> {
     const requiredRoles = this.reflector.getAllAndOverride<Role[]>(ROLES_KEY, [
@@ -22,21 +20,13 @@ export class RolesGuard implements CanActivate {
     }
 
     const request = context.switchToHttp().getRequest();
-    const [type, token] = request?.headers?.authorization?.split(' ');
-    if (!token) {
-      return false;
-    }
-    const decodedToken = await this.authService.verifyToken(token);
-    if (!decodedToken) {
+    const activeUser = request[REQUEST_USER_KEY] as
+      | AccessTokenPayload
+      | undefined;
+    if (!activeUser) {
       return false;
     }
 
-    if (requiredRoles.includes(decodedToken.role)) {
-      return true;
-    }
-    // if (decodedToken.role === requiredRoles[0]) {
-    //   return true;
-    // }
-    return false;
+    return requiredRoles.some((role) => role === (activeUser.role as string));
   }
 }

@@ -1,4 +1,4 @@
-import { Injectable } from '@nestjs/common';
+import { Injectable, ServiceUnavailableException } from '@nestjs/common';
 import { KycProvider } from 'src/common/enum/kyc-provider.enum';
 import { SupportedRegion } from 'src/common/enum/supported-region.enum';
 import { FlutterwaveBankingProviderService } from './providers/flutterwave-banking.provider';
@@ -35,6 +35,7 @@ export class ProviderRouterService {
   getProviderByRegion(region: SupportedRegion | null): RegionalProviderAdapter | null {
     if (region === SupportedRegion.NG) {
       if (this.getMode('PAYMENT_PROVIDER_MODE') === 'mock') {
+        this.assertMockProviderAllowed('PAYMENT_PROVIDER_MODE');
         return this.mockFlutterwaveProvider;
       }
 
@@ -43,6 +44,7 @@ export class ProviderRouterService {
 
     if (region === SupportedRegion.US) {
       if (this.getMode('USD_PROVIDER_MODE') === 'mock') {
+        this.assertMockProviderAllowed('USD_PROVIDER_MODE');
         return this.mockLeadBankProvider;
       }
 
@@ -57,6 +59,7 @@ export class ProviderRouterService {
   ): RegionalProviderAdapter | null {
     if (provider === KycProvider.FLUTTERWAVE) {
       if (this.getMode('PAYMENT_PROVIDER_MODE') === 'mock') {
+        this.assertMockProviderAllowed('PAYMENT_PROVIDER_MODE');
         return this.mockFlutterwaveProvider;
       }
 
@@ -65,6 +68,7 @@ export class ProviderRouterService {
 
     if (provider === KycProvider.LEAD_BANK) {
       if (this.getMode('USD_PROVIDER_MODE') === 'mock') {
+        this.assertMockProviderAllowed('USD_PROVIDER_MODE');
         return this.mockLeadBankProvider;
       }
 
@@ -78,5 +82,17 @@ export class ProviderRouterService {
     return String(this.configService.get<string>(key) ?? process.env[key] ?? 'mock')
       .trim()
       .toLowerCase();
+  }
+
+  private assertMockProviderAllowed(modeKey: string) {
+    const environment = String(
+      this.configService.get<string>('NODE_ENV') ?? process.env.NODE_ENV ?? '',
+    ).toLowerCase();
+
+    if (environment === 'production') {
+      throw new ServiceUnavailableException(
+        `${modeKey} has no certified production provider.`,
+      );
+    }
   }
 }

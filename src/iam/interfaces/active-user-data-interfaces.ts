@@ -1,4 +1,5 @@
 import { UserRole } from 'src/utils/enums/user.enum';
+import { JwtTokenType } from './jwt-token.interface';
 
 export interface ActiveUserData {
   /**
@@ -12,7 +13,13 @@ export interface ActiveUserData {
    */
   email: string;
 
-  phone: string;
+  phone?: string;
 
   role: UserRole;
+
+  tokenType: JwtTokenType.ACCESS;
+
+  sid: string;
+
+  familyId: string;
 }

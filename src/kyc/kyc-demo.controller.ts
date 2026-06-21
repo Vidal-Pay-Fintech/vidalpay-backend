@@ -4,9 +4,11 @@ import { ActiveUser } from 'src/iam/decorators/active-user.decorator';
 import { ActiveUserData } from 'src/iam/interfaces/active-user-data-interfaces';
 import { DemoKycSubmitDto } from './dto/demo-kyc-submit.dto';
 import { KycDemoService } from './kyc-demo.service';
+import { DemoOnly } from 'src/feature-flags/demo-only.decorator';
 
 @ApiTags('KYC')
 @Controller('kyc')
+@DemoOnly()
 export class KycDemoController {
   constructor(private readonly kycDemoService: KycDemoService) {}
 

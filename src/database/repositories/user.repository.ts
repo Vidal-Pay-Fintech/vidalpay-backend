@@ -320,6 +320,45 @@ export class UserRepository extends AbstractRepository<User> {
 
     return userByPhone;
   }
+
+  async findUserForAuthentication(value: string): Promise<User | null> {
+    this.logger.log('Fetching user for authentication');
+
+    const normalizedPhone = value.startsWith('0')
+      ? value.replace(/^0/, '+234')
+      : value;
+
+    return this.userEntityRepository
+      .createQueryBuilder('user')
+      .addSelect(['user.password', 'user.pin'])
+      .where(
+        new Brackets((query) => {
+          query
+            .where('user.email = :value', { value })
+            .orWhere('user.phoneNumber = :normalizedPhone', {
+              normalizedPhone,
+            });
+        }),
+      )
+      .andWhere('user.deletedAt IS NULL')
+      .getOne();
+  }
+
+  async findUserByIdWithSensitiveFields(id: string): Promise<User> {
+    this.logger.log(`Fetching user credentials for id: ${id}`);
+    const user = await this.userEntityRepository
+      .createQueryBuilder('user')
+      .addSelect(['user.password', 'user.pin'])
+      .where('user.id = :id', { id })
+      .andWhere('user.deletedAt IS NULL')
+      .getOne();
+
+    if (!user) {
+      throw new BadRequestException(API_MESSAGES.USER_NOT_FOUND);
+    }
+
+    return user;
+  }
   async findUserById(id: string): Promise<User> {
     this.logger.log(`Fetching user with id: ${id}`);
     const queryBuilder = this.userEntityRepository
@@ -353,7 +392,22 @@ export class UserRepository extends AbstractRepository<User> {
   }
 
   async getUserProfileContext(id: string): Promise<User> {
-    return this.getUserById(id);
+    const user = await this.userEntityRepository
+      .createQueryBuilder('user')
+      .addSelect('user.pin')
+      .leftJoinAndSelect('user.wallet', 'wallet')
+      .leftJoinAndSelect('user.kyc', 'kyc')
+      .leftJoinAndSelect('kyc.documents', 'kycDocuments')
+      .leftJoinAndSelect('user.kycDocuments', 'userKycDocuments')
+      .where('user.id = :id', { id })
+      .andWhere('user.deletedAt IS NULL')
+      .getOne();
+
+    if (!user) {
+      throw new BadRequestException(API_MESSAGES.USER_NOT_FOUND);
+    }
+
+    return user;
   }
   async findUserByTag(tag: string): Promise<User> {
     this.logger.log(`Fetching user with tag: ${tag}`);

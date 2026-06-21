@@ -1,10 +1,11 @@
-import { Injectable, NotFoundException } from '@nestjs/common';
+import { Injectable, Logger, NotFoundException } from '@nestjs/common';
 import {
   NotificationChannel,
   NotificationStatus,
 } from 'src/database/entities/notification.entity';
 import { NotificationRepository } from 'src/database/repositories/notification.repository';
 import { MarkNotificationsReadDto } from './dto/mark-notifications-read.dto';
+import { PushNotificationService } from './push-notification.service';
 
 interface CreateNotificationInput {
   userId: string;
@@ -17,10 +18,15 @@ interface CreateNotificationInput {
 
 @Injectable()
 export class NotificationService {
-  constructor(private readonly notificationRepository: NotificationRepository) {}
+  private readonly logger = new Logger(NotificationService.name);
+
+  constructor(
+    private readonly notificationRepository: NotificationRepository,
+    private readonly pushNotificationService: PushNotificationService,
+  ) {}
 
   async create(input: CreateNotificationInput) {
-    return this.notificationRepository.create({
+    const notification = await this.notificationRepository.create({
       userId: input.userId,
       title: input.title,
       body: input.body,
@@ -30,6 +36,14 @@ export class NotificationService {
       metadata: input.metadata ?? null,
       deliveredAt: new Date(),
     });
+    try {
+      await this.pushNotificationService.queueForNotification(notification);
+    } catch (error) {
+      this.logger.error(
+        `Failed to queue push for notification ${notification.id}: ${error instanceof Error ? error.message : 'unknown error'}`,
+      );
+    }
+    return notification;
   }
 
   getUserNotifications(userId: string) {

@@ -1,0 +1,42 @@
+export enum TaxAccountStatus {
+  PENDING_KYC = 'PENDING_KYC',
+  PENDING_PROVIDER = 'PENDING_PROVIDER',
+  ACTIVE = 'ACTIVE',
+  RESTRICTED = 'RESTRICTED',
+  CLOSED = 'CLOSED',
+}
+
+export enum TaxFilingStatus {
+  DRAFT = 'DRAFT',
+  PREPARING = 'PREPARING',
+  NEEDS_ACTION = 'NEEDS_ACTION',
+  READY_TO_SUBMIT = 'READY_TO_SUBMIT',
+  SUBMITTED = 'SUBMITTED',
+  ACCEPTED = 'ACCEPTED',
+  REJECTED = 'REJECTED',
+  AMENDED = 'AMENDED',
+  CLOSED = 'CLOSED',
+}
+
+export enum TaxDocumentType {
+  W2 = 'W2',
+  FORM_1099 = 'FORM_1099',
+  FORM_1098 = 'FORM_1098',
+  IDENTITY = 'IDENTITY',
+  PRIOR_RETURN = 'PRIOR_RETURN',
+  OTHER = 'OTHER',
+}
+
+export enum TaxDocumentStatus {
+  REGISTERED = 'REGISTERED',
+  UPLOADED = 'UPLOADED',
+  VERIFIED = 'VERIFIED',
+  REJECTED = 'REJECTED',
+}
+
+export enum TaxEventSource {
+  USER = 'USER',
+  PROVIDER = 'PROVIDER',
+  ADMIN = 'ADMIN',
+  SYSTEM = 'SYSTEM',
+}

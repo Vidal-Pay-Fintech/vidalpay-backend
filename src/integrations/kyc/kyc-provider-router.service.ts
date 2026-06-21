@@ -1,4 +1,5 @@
-import { Injectable } from '@nestjs/common';
+import { Injectable, ServiceUnavailableException } from '@nestjs/common';
+import { ConfigService } from '@nestjs/config';
 import { KycProvider } from 'src/common/enum/kyc-provider.enum';
 import { SupportedRegion } from 'src/common/enum/supported-region.enum';
 import { FlutterwaveKycProviderService } from './providers/flutterwave-kyc.provider';
@@ -14,6 +15,7 @@ export class KycProviderRouterService {
   constructor(
     private readonly flutterwaveProvider: FlutterwaveKycProviderService,
     private readonly leadBankProvider: LeadBankKycProviderService,
+    private readonly configService: ConfigService,
   ) {}
 
   mapRegionToProvider(region: SupportedRegion | null): KycProvider | null {
@@ -44,11 +46,24 @@ export class KycProviderRouterService {
     region: SupportedRegion | null,
     payload: KycSubmissionPayload,
   ): Promise<KycSubmissionResult | null> {
+    this.assertCertifiedProviderAvailable();
     const provider = this.getProviderForRegion(region);
     if (!provider) {
       return null;
     }
 
     return provider.submitKyc(payload);
+  }
+
+  private assertCertifiedProviderAvailable() {
+    const environment = String(
+      this.configService.get<string>('NODE_ENV') ?? process.env.NODE_ENV ?? '',
+    ).toLowerCase();
+
+    if (environment === 'production') {
+      throw new ServiceUnavailableException(
+        'No certified production KYC provider is available.',
+      );
+    }
   }
 }

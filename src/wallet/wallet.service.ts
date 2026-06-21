@@ -77,6 +77,7 @@ export class WalletService {
 
   async createCustomerWallets(
     userId: string,
+    defaultCurrency: Currency,
     manager?: EntityManager,
   ): Promise<Wallet[]> {
     this.logger.log(`[AUTH] wallet creation start for user ${userId}`);
@@ -127,6 +128,12 @@ export class WalletService {
         );
       }
 
+      await this.walletRepository.setDefaultWallet(
+        userId,
+        defaultCurrency,
+        manager,
+      );
+
       this.logger.log(
         `[AUTH] wallet creation completed for user ${userId}. created=${createdCurrencies.join(',') || 'none'} total=${finalWallets.length}`,
       );
@@ -144,6 +151,7 @@ export class WalletService {
   async internalTransfer(
     internalTransferDTO: InternalTransferDto,
     userId: string,
+    scheduledAuthorization?: { scheduleId: string; authorizedAt: Date },
   ) {
     this.featureFlags.assertEnabled('ENABLE_INTERNAL_TRANSFER');
     await this.userService.ensureCanTagTransfer(userId);
@@ -163,7 +171,9 @@ export class WalletService {
       .filter(Boolean)
       .join(' | ');
     try {
-      await this.assertTransactionPinAuthorized(userId, pin);
+      if (!scheduledAuthorization) {
+        await this.assertTransactionPinAuthorized(userId, pin);
+      }
 
       userDebitRes = await this.journalService.processWalletDebitJournal({
         userId,
@@ -502,6 +512,7 @@ export class WalletService {
   async externalTransfer(
     externalTransferDto: ExternalTransferDto,
     userId: string,
+    scheduledAuthorization?: { scheduleId: string; authorizedAt: Date },
   ) {
     if (externalTransferDto.currency === Currency.NGN) {
       this.featureFlags.assertEnabled('ENABLE_NGN_BANK_TRANSFER');
@@ -510,7 +521,12 @@ export class WalletService {
       this.featureFlags.assertEnabled('ENABLE_USD_BANK_TRANSFER');
     }
     const capabilities = await this.userService.ensureCanBankTransfer(userId);
-    await this.assertTransactionPinAuthorized(userId, externalTransferDto.pin);
+    if (!scheduledAuthorization) {
+      await this.assertTransactionPinAuthorized(
+        userId,
+        externalTransferDto.pin,
+      );
+    }
 
     if (!capabilities.region) {
       throw new PreconditionFailedException(
@@ -1010,6 +1026,7 @@ export class WalletService {
       providerReference: wallet.providerReference,
       receiveEnabled: wallet.receiveEnabled,
       transferEnabled: wallet.transferEnabled,
+      isDefault: wallet.isDefault,
       rails: {
         accountNumber: wallet.accountNumber,
         routingNumber: wallet.routingNumber,
@@ -1194,7 +1211,8 @@ export class WalletService {
   }
 
   private async assertTransactionPinAuthorized(userId: string, pin: string) {
-    const user = await this.userRepository.findUserById(userId);
+    const user =
+      await this.userRepository.findUserByIdWithSensitiveFields(userId);
     const storedPin = user.pin?.trim();
 
     if (!storedPin) {

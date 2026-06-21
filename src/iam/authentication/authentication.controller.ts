@@ -35,6 +35,8 @@ import { RequestPasswordResetDto } from './dto/request-password-reset.dto';
 import { VerifyPasswordResetOtpDto } from './dto/verify-password-resetotp.dto';
 import { ResetPasswordAfterOtpDto } from './dto/reset-password-afterotp-verification.dto';
 import { PageOptionsDto } from 'src/common/pagination/pageOptionsDto.dto';
+import { Role } from 'src/common/enum/role.enum';
+import { Roles } from 'src/iam/decorators/roles.decorator';
 
 @ApiTags('Authentication')
 @Auth(AuthType.None) // route with no auth guard
@@ -43,8 +45,24 @@ export class AuthenticationController {
   constructor(private readonly authService: AuthenticationService) {}
 
   @Post('sign-up')
-  signUp(@Body() signUpDto: SignUpDto) {
-    return this.authService.signUp(signUpDto);
+  signUp(@Body() signUpDto: SignUpDto, @Req() request: Request) {
+    return this.authService.signUp(signUpDto, {
+      ipCountryCode: this.getTrustedIpCountryCode(request),
+      session: this.getSessionContext(request),
+    });
+  }
+
+  private getTrustedIpCountryCode(request: Request): string | null {
+    const headerName =
+      process.env.TRUSTED_IP_COUNTRY_HEADER?.trim().toLowerCase();
+    if (!headerName) {
+      return null;
+    }
+
+    const headerValue = request.headers[headerName];
+    return Array.isArray(headerValue)
+      ? (headerValue[0] ?? null)
+      : (headerValue ?? null);
   }
 
   @HttpCode(HttpStatus.OK)
@@ -93,8 +111,12 @@ export class AuthenticationController {
   async signIn(
     @Res({ passthrough: true }) response: Response,
     @Body() signInDto: SignInDto,
+    @Req() request: Request,
   ) {
-    const res = this.authService.signIn(signInDto);
+    const res = this.authService.signIn(
+      signInDto,
+      this.getSessionContext(request),
+    );
     response.cookie('token', (await res).accessToken, {
       expires: new Date(new Date().getTime() + 30 * 1000),
       httpOnly: true,
@@ -115,8 +137,12 @@ export class AuthenticationController {
   async adminSignIn(
     @Res({ passthrough: true }) response: Response,
     @Body() signInDto: SignInDto,
+    @Req() request: Request,
   ) {
-    const res = this.authService.adminSignIn(signInDto);
+    const res = this.authService.adminSignIn(
+      signInDto,
+      this.getSessionContext(request),
+    );
     response.cookie('token', (await res).accessToken, {
       expires: new Date(new Date().getTime() + 30 * 1000),
       httpOnly: true,
@@ -127,8 +153,48 @@ export class AuthenticationController {
 
   @HttpCode(HttpStatus.OK)
   @Post('refresh-token')
-  async refreshToken(@Body() refreshTokenDto: RefreshTokenDto) {
-    return await this.authService.refreshToken(refreshTokenDto);
+  async refreshToken(
+    @Body() refreshTokenDto: RefreshTokenDto,
+    @Req() request: Request,
+  ) {
+    return await this.authService.refreshToken(
+      refreshTokenDto,
+      this.getSessionContext(request),
+    );
+  }
+
+  @HttpCode(HttpStatus.OK)
+  @Post('logout')
+  async logout(@Body() refreshTokenDto: RefreshTokenDto) {
+    return this.authService.logout(refreshTokenDto);
+  }
+
+  @Auth(AuthType.Bearer)
+  @HttpCode(HttpStatus.OK)
+  @Post('logout-all')
+  async logoutAll(@ActiveUser() user: ActiveUserData) {
+    return this.authService.logoutAll(user.sub);
+  }
+
+  @Auth(AuthType.Bearer)
+  @Get('sessions')
+  listSessions(@ActiveUser() user: ActiveUserData) {
+    return this.authService.listSessions(user.sub, user.familyId);
+  }
+
+  @Auth(AuthType.Bearer)
+  @Post('sessions/:familyId/revoke')
+  revokeSession(
+    @ActiveUser() user: ActiveUserData,
+    @Param('familyId') familyId: string,
+  ) {
+    return this.authService.revokeSession(user.sub, familyId);
+  }
+
+  @Auth(AuthType.Bearer)
+  @Post('sessions/revoke-others')
+  revokeOtherSessions(@ActiveUser() user: ActiveUserData) {
+    return this.authService.revokeOtherSessions(user.sub, user.familyId);
   }
 
   @HttpCode(HttpStatus.OK)
@@ -229,9 +295,23 @@ export class AuthenticationController {
   }
 
   @Auth(AuthType.Bearer)
+  @Roles(Role.ADMIN, Role.SUPER_ADMIN, Role.CUSTOMER_SUPPORT)
   @HttpCode(HttpStatus.OK)
   @Get('get-users-by-query')
   async getUsersByQuery(@Query() pageOptionsDto: PageOptionsDto) {
     return await this.authService.findAllUsers(pageOptionsDto);
+  }
+
+  private getSessionContext(request: Request) {
+    const header = (name: string) => {
+      const value = request.headers[name];
+      return Array.isArray(value) ? value[0] : value;
+    };
+    return {
+      deviceId: header('x-device-id')?.slice(0, 100) ?? null,
+      deviceName: header('x-device-name')?.slice(0, 100) ?? null,
+      userAgent: header('user-agent')?.slice(0, 500) ?? null,
+      ipAddress: request.ip?.slice(0, 64) ?? null,
+    };
   }
 }

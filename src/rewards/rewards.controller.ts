@@ -4,9 +4,11 @@ import { ActiveUser } from 'src/iam/decorators/active-user.decorator';
 import { ActiveUserData } from 'src/iam/interfaces/active-user-data-interfaces';
 import { RedeemRewardDto } from './dto/redeem-reward.dto';
 import { RewardsService } from './rewards.service';
+import { DemoOnly } from 'src/feature-flags/demo-only.decorator';
 
 @ApiTags('Rewards')
 @Controller('rewards')
+@DemoOnly()
 export class RewardsController {
   constructor(private readonly rewardsService: RewardsService) {}
 

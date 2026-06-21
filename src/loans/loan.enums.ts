@@ -1,0 +1,56 @@
+export enum LoanPurpose {
+  PERSONAL = 'PERSONAL',
+  BUSINESS = 'BUSINESS',
+  EDUCATION = 'EDUCATION',
+  MEDICAL = 'MEDICAL',
+  EMERGENCY = 'EMERGENCY',
+  OTHER = 'OTHER',
+}
+
+export enum LoanEligibilityStatus {
+  PENDING_PROVIDER = 'PENDING_PROVIDER',
+  ELIGIBLE = 'ELIGIBLE',
+  INELIGIBLE = 'INELIGIBLE',
+  EXPIRED = 'EXPIRED',
+}
+
+export enum LoanApplicationStatus {
+  PENDING_PROVIDER = 'PENDING_PROVIDER',
+  UNDER_REVIEW = 'UNDER_REVIEW',
+  OFFERED = 'OFFERED',
+  REJECTED = 'REJECTED',
+  WITHDRAWN = 'WITHDRAWN',
+  EXPIRED = 'EXPIRED',
+}
+
+export enum LoanOfferStatus {
+  PENDING = 'PENDING',
+  ACCEPTED = 'ACCEPTED',
+  DECLINED = 'DECLINED',
+  EXPIRED = 'EXPIRED',
+  SUPERSEDED = 'SUPERSEDED',
+}
+
+export enum LoanAccountStatus {
+  PENDING_DISBURSEMENT = 'PENDING_DISBURSEMENT',
+  ACTIVE = 'ACTIVE',
+  DELINQUENT = 'DELINQUENT',
+  PAID = 'PAID',
+  DEFAULTED = 'DEFAULTED',
+  CLOSED = 'CLOSED',
+}
+
+export enum LoanInstallmentStatus {
+  DUE = 'DUE',
+  PARTIAL = 'PARTIAL',
+  PAID = 'PAID',
+  OVERDUE = 'OVERDUE',
+  WAIVED = 'WAIVED',
+}
+
+export enum LoanRepaymentStatus {
+  PENDING = 'PENDING',
+  COMPLETED = 'COMPLETED',
+  FAILED = 'FAILED',
+  REVERSED = 'REVERSED',
+}

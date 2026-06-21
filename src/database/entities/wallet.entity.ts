@@ -36,6 +36,9 @@ export class Wallet extends AbstractEntity {
   @Column({ type: 'boolean', default: false })
   transferEnabled: boolean;
 
+  @Column({ type: 'boolean', default: false })
+  isDefault: boolean;
+
   @Column({
     type: 'enum',
     enum: Currency,

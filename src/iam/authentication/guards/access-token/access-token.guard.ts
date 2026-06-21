@@ -10,6 +10,11 @@ import { JwtService } from '@nestjs/jwt';
 import { Request } from 'express';
 import jwtConfig from 'src/iam/config/jwt.config';
 import { REQUEST_USER_KEY } from 'src/iam/iam.constants';
+import {
+  AccessTokenPayload,
+  JwtTokenType,
+} from 'src/iam/interfaces/jwt-token.interface';
+import { RefreshSessionRepository } from 'src/database/repositories/refresh-session.repository';
 
 @Injectable()
 export class AccessTokenGuard implements CanActivate {
@@ -17,6 +22,7 @@ export class AccessTokenGuard implements CanActivate {
     private readonly jwtService: JwtService,
     @Inject(jwtConfig.KEY)
     private readonly jwtConfiguration: ConfigType<typeof jwtConfig>,
+    private readonly refreshSessionRepository: RefreshSessionRepository,
   ) {}
 
   async canActivate(context: ExecutionContext): Promise<boolean> {
@@ -26,10 +32,29 @@ export class AccessTokenGuard implements CanActivate {
       throw new UnauthorizedException();
     }
     try {
-      const payload = await this.jwtService.verifyAsync(
+      const payload = await this.jwtService.verifyAsync<AccessTokenPayload>(
         token,
-        this.jwtConfiguration,
+        {
+          secret: this.jwtConfiguration.secret,
+          audience: this.jwtConfiguration.audience,
+          issuer: this.jwtConfiguration.issuer,
+        },
       );
+      if (
+        payload.tokenType !== JwtTokenType.ACCESS ||
+        !payload.sub ||
+        !payload.email ||
+        !payload.role ||
+        !payload.sid ||
+        !payload.familyId
+      ) {
+        throw new UnauthorizedException();
+      }
+      const active = await this.refreshSessionRepository.isSessionActive(
+        payload.sid,
+        payload.sub,
+      );
+      if (!active) throw new UnauthorizedException();
       request[REQUEST_USER_KEY] = payload;
     } catch {
       throw new UnauthorizedException();
@@ -38,8 +63,8 @@ export class AccessTokenGuard implements CanActivate {
   }
 
   private extractTokenFromHeader(request: Request): string | undefined {
-    const [_, token] = request.headers.authorization?.split(' ') ?? [];
+    const [scheme, token] = request.headers.authorization?.split(' ') ?? [];
 
-    return token;
+    return scheme?.toLowerCase() === 'bearer' ? token : undefined;
   }
 }

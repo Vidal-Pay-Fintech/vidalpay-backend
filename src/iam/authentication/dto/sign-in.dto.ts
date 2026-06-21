@@ -4,6 +4,7 @@ import {
   IsNotEmpty,
   IsOptional,
   IsString,
+  MaxLength,
   MinLength,
   ValidateIf,
 } from 'class-validator';
@@ -35,4 +36,14 @@ export class SignInDto {
   @ValidateIf((o) => !o.email && !o.phoneNumber)
   @IsNotEmpty({ message: 'Either email or phone number must be provided' })
   emailOrPhone?: string;
+
+  @IsOptional()
+  @IsString()
+  @MaxLength(100)
+  deviceId?: string;
+
+  @IsOptional()
+  @IsString()
+  @MaxLength(100)
+  deviceName?: string;
 }

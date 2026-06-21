@@ -24,6 +24,8 @@ import { KycStatus } from 'src/common/enum/kyc-status.enum';
 import { KycProvider } from 'src/common/enum/kyc-provider.enum';
 import { UserKyc } from './user-kyc.entity';
 import { KycDocument } from './kyc-document.entity';
+import { SupportedRegion } from 'src/common/enum/supported-region.enum';
+import { Currency } from 'src/utils/enums/wallet.enum';
 
 export enum AccountStatus {
   ACTIVE = 'ACTIVE',
@@ -44,7 +46,7 @@ export class User extends AbstractEntity {
   @Column({ unique: true, nullable: false })
   email: string;
 
-  @Column({ nullable: false })
+  @Column({ nullable: false, select: false })
   password: string;
 
   @Column({ nullable: true })
@@ -65,7 +67,7 @@ export class User extends AbstractEntity {
   @Column({ nullable: true })
   phoneNumber: string;
 
-  @Column({ nullable: true })
+  @Column({ nullable: true, select: false })
   pin: string;
 
   @Column({ nullable: true })
@@ -85,6 +87,18 @@ export class User extends AbstractEntity {
 
   @Column({ type: 'varchar', nullable: true })
   residency: string;
+
+  @Column({ type: 'enum', enum: SupportedRegion, nullable: true })
+  signupRegion: SupportedRegion | null;
+
+  @Column({ type: 'enum', enum: Currency, nullable: true })
+  defaultWalletCurrency: Currency | null;
+
+  @Column({ type: 'varchar', length: 32, nullable: true })
+  signupRegionSource: string | null;
+
+  @Column({ type: 'simple-json', nullable: true, select: false })
+  signupRegionEvidence: Record<string, unknown> | null;
 
   @Column({ type: 'varchar', nullable: true })
   stateOrRegion: string;
@@ -184,10 +198,10 @@ export class User extends AbstractEntity {
   // @OneToMany(() => PromoRedeem, (promoRedeem) => promoRedeem.user)
   // promoRedeems: PromoRedeem[];
 
-  @Column({ nullable: true })
+  @Column({ nullable: true, select: false })
   resetToken?: string;
 
-  @Column({ nullable: true })
+  @Column({ nullable: true, select: false })
   resetTokenExpiry?: Date;
 
   @Column({

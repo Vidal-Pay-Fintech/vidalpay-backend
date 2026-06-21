@@ -47,6 +47,7 @@ const schema: Record<string, EnvSchemaEntry> = {
   MYSQL_USERNAME: { type: 'string', required: true },
   MYSQL_PASSWORD: { type: 'string', required: true },
   JWT_SECRET: { type: 'string', required: true },
+  JWT_REFRESH_SECRET: { type: 'string', default: '' },
   JWT_TOKEN_AUDIENCE: { type: 'string', required: true },
   JWT_TOKEN_ISSUER: { type: 'string', required: true },
   JWT_ACCESS_TOKEN_TTL: { type: 'string', default: '3600s' },
@@ -73,6 +74,18 @@ const schema: Record<string, EnvSchemaEntry> = {
   BACKEND_PUBLIC_URL: { type: 'string', default: '' },
   API_BASE_URL: { type: 'string', default: '' },
   CORS_ALLOWED_ORIGINS: { type: 'string', default: '' },
+  TRUSTED_IP_COUNTRY_HEADER: { type: 'string', default: '' },
+  TRUST_PROXY_HOPS: { type: 'number', default: '1' },
+  SCHEDULED_PAYMENT_WORKER_ENABLED: { type: 'boolean', default: 'false' },
+  SCHEDULED_PAYMENT_WORKER_INTERVAL_MS: {
+    type: 'number',
+    default: '60000',
+  },
+  PUSH_NOTIFICATION_WORKER_ENABLED: { type: 'boolean', default: 'false' },
+  PUSH_NOTIFICATION_WORKER_INTERVAL_MS: {
+    type: 'number',
+    default: '30000',
+  },
   RESEND_API_KEY: { type: 'string', default: '' },
   RESEND_FROM_EMAIL: { type: 'string', default: '' },
   RESEND_FROM_NAME: { type: 'string', default: '' },
@@ -145,13 +158,13 @@ for (const [key, values] of Object.entries(providerModes)) {
 for (const flag of featureFlags) {
   schema[flag] = {
     type: 'boolean',
-    default:
-      flag === 'ENABLE_PROVIDER_PENDING_STATES' ||
-      flag === 'ENABLE_CRYPTO_DEMO' ||
-      flag === 'ENABLE_INVESTMENT_DEMO' ||
-      flag === 'ENABLE_TAX_DEMO'
-        ? 'false'
-        : 'true',
+    default: [
+      'ENABLE_NGN_WALLET',
+      'ENABLE_USD_WALLET',
+      'ENABLE_INTERNAL_TRANSFER',
+    ].includes(flag)
+      ? 'true'
+      : 'false',
   };
 }
 
@@ -179,6 +192,8 @@ export function validateEnvironment(config: Record<string, unknown>) {
     process.env[key] = rawValue;
   }
 
+  validateProductionSafety(validated, errors);
+
   if (errors.length) {
     throw new Error(`Environment validation failed: ${errors.join('; ')}`);
   }
@@ -187,6 +202,66 @@ export function validateEnvironment(config: Record<string, unknown>) {
     ...config,
     ...validated,
   };
+}
+
+function validateProductionSafety(
+  validated: Record<string, string>,
+  errors: string[],
+) {
+  if (validated.NODE_ENV !== 'production') {
+    return;
+  }
+
+  const forbiddenDemoFlags = [
+    'ENABLE_DEMO_MODE',
+    'ENABLE_FX_CONVERSION_DEMO',
+    'ENABLE_VIRTUAL_CARD_DEMO',
+    'ENABLE_CRYPTO_DEMO',
+    'ENABLE_INVESTMENT_DEMO',
+    'ENABLE_TAX_DEMO',
+    'ENABLE_PROVIDER_PENDING_STATES',
+  ];
+
+  for (const flag of forbiddenDemoFlags) {
+    if (validated[flag] === 'true') {
+      errors.push(`${flag} cannot be enabled in production`);
+    }
+  }
+
+  const providerRequirements = [
+    {
+      feature: 'ENABLE_NGN_BANK_TRANSFER',
+      mode: 'PAYMENT_PROVIDER_MODE',
+    },
+    {
+      feature: 'ENABLE_USD_BANK_TRANSFER',
+      mode: 'USD_PROVIDER_MODE',
+    },
+  ];
+
+  for (const requirement of providerRequirements) {
+    if (
+      validated[requirement.feature] === 'true' &&
+      validated[requirement.mode] === 'mock'
+    ) {
+      errors.push(
+        `${requirement.feature} requires a live ${requirement.mode} in production`,
+      );
+    }
+  }
+
+  if (validated.PUSH_NOTIFICATION_WORKER_ENABLED === 'true') {
+    if (validated.NOTIFICATION_PROVIDER_MODE !== 'onesignal') {
+      errors.push(
+        'PUSH_NOTIFICATION_WORKER_ENABLED requires NOTIFICATION_PROVIDER_MODE=onesignal in production',
+      );
+    }
+    for (const key of ['ONESIGNAL_APP_ID', 'ONESIGNAL_REST_API_KEY']) {
+      if (!validated[key]) {
+        errors.push(`PUSH_NOTIFICATION_WORKER_ENABLED requires ${key}`);
+      }
+    }
+  }
 }
 
 function normalizeValue(value: unknown): string | null {

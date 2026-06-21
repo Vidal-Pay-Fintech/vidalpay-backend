@@ -5,6 +5,7 @@ import { ActiveUserData } from 'src/iam/interfaces/active-user-data-interfaces';
 import { Currency } from 'src/utils/enums/wallet.enum';
 import { DemoFundWalletDto } from './dto/demo-fund-wallet.dto';
 import { WalletService } from './wallet.service';
+import { DemoOnly } from 'src/feature-flags/demo-only.decorator';
 
 @ApiTags('Wallets')
 @Controller('wallets')
@@ -27,6 +28,7 @@ export class WalletsController {
   }
 
   @Post('fund/demo')
+  @DemoOnly()
   fundDemoWallet(
     @ActiveUser() user: ActiveUserData,
     @Body() demoFundWalletDto: DemoFundWalletDto,

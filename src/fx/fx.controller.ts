@@ -5,9 +5,11 @@ import { ActiveUserData } from 'src/iam/interfaces/active-user-data-interfaces';
 import { FxConvertDto } from './dto/fx-convert.dto';
 import { FxQuoteDto } from './dto/fx-quote.dto';
 import { FxService } from './fx.service';
+import { DemoOnly } from 'src/feature-flags/demo-only.decorator';
 
 @ApiTags('FX')
 @Controller('fx')
+@DemoOnly('ENABLE_FX_CONVERSION_DEMO')
 export class FxController {
   constructor(private readonly fxService: FxService) {}
 

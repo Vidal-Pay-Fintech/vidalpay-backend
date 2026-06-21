@@ -24,6 +24,7 @@ import { ValidateUtilityCustomerDto } from './dto/validate-utility-customer.dto'
 import { ResolveExternalAccountDto } from './dto/resolve-external-account.dto';
 import { Role } from 'src/common/enum/role.enum';
 import { Roles } from 'src/iam/decorators/roles.decorator';
+import { DemoOnly } from 'src/feature-flags/demo-only.decorator';
 
 @Controller('wallet')
 export class WalletController {
@@ -65,6 +66,7 @@ export class WalletController {
   }
 
   @Post('internal-exchange')
+  @DemoOnly('ENABLE_FX_CONVERSION_DEMO')
   internalExchange(
     @Body() internalExchangeDTO: ExchangeDto,
     @ActiveUser() user: ActiveUserData,
@@ -73,6 +75,7 @@ export class WalletController {
   }
 
   @Post('exchange-rate')
+  @DemoOnly('ENABLE_FX_CONVERSION_DEMO')
   myExchangeRate(
     @Body() exchangeRateDTO: ExchangeRangeDto,
     @ActiveUser() user: ActiveUserData,

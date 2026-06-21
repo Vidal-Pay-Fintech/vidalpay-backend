@@ -49,8 +49,8 @@ export class SignUpDto {
   })
   pin: string;
 
-  @Matches(/^\+?[1-9]\d{1,14}$/, {
-    message: 'Invalid phone format',
+  @Matches(/^\+[1-9]\d{1,14}$/, {
+    message: 'phoneNumber must use E.164 format, for example +2348012345678',
   })
   phoneNumber: string;
 
@@ -60,6 +60,9 @@ export class SignUpDto {
 
   @IsOptional()
   @IsString()
+  @Matches(/^(NG|US)$/i, {
+    message: 'countryCode must be NG or US',
+  })
   countryCode?: string;
 
   @IsOptional()

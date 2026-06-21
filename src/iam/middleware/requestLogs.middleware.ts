@@ -11,28 +11,11 @@ export class RequestLogsMiddleware implements NestMiddleware {
   constructor(private readonly requestLogRepository: RequestLogRepository) {}
   async use(req: Request, res: Response, next: NextFunction) {
     if (req.originalUrl.startsWith('/api/v1/auth')) {
-      const excludedKeys = [
-        'password',
-        'pin',
-        'new_password',
-        'new_pin',
-        'old_password',
-        'old_pin',
-        'confirm_password',
-        'confirm_pin',
-        'transaction_pin',
-        'transaction_password',
-      ];
-
       if (req.method === APIType.GET) {
         req.body = {};
       }
 
-      const sanitizedBody = Object.fromEntries(
-        Object.entries(req.body).map(([key, value]) =>
-          excludedKeys.includes(key) ? [key, '*********'] : [key, value],
-        ),
-      );
+      const sanitizedBody = this.sanitizeForLogging(req.body);
       this.requestLogRepository.create({
         requestPath: req.originalUrl,
         requestBody: JSON.stringify(sanitizedBody),
@@ -61,7 +44,7 @@ export class RequestLogsMiddleware implements NestMiddleware {
         if (requestUserInfo) {
           this.requestLogRepository.create({
             requestPath: req.originalUrl,
-            requestBody: JSON.stringify(req.body),
+            requestBody: JSON.stringify(this.sanitizeForLogging(req.body)),
             requestParam: JSON.stringify(req.params),
             requestQuery: JSON.stringify(req.query),
             ipAddress: req?.ip,
@@ -81,5 +64,47 @@ export class RequestLogsMiddleware implements NestMiddleware {
     }
 
     next();
+  }
+
+  private sanitizeForLogging(value: unknown): unknown {
+    if (Array.isArray(value)) {
+      return value.map((item) => this.sanitizeForLogging(item));
+    }
+
+    if (!value || typeof value !== 'object') {
+      return value;
+    }
+
+    return Object.fromEntries(
+      Object.entries(value).map(([key, nestedValue]) => {
+        const normalizedKey = key.toLowerCase().replace(/[^a-z0-9]/g, '');
+        if (this.isSensitiveKey(normalizedKey)) {
+          return [key, '*********'];
+        }
+
+        return [key, this.sanitizeForLogging(nestedValue)];
+      }),
+    );
+  }
+
+  private isSensitiveKey(key: string): boolean {
+    return [
+      'password',
+      'newpassword',
+      'oldpassword',
+      'confirmpassword',
+      'transactionpassword',
+      'pin',
+      'newpin',
+      'oldpin',
+      'confirmpin',
+      'transactionpin',
+      'token',
+      'refreshtoken',
+      'accesstoken',
+      'otp',
+      'secret',
+      'apikey',
+    ].includes(key);
   }
 }

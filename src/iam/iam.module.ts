@@ -17,11 +17,13 @@ import { TokensService } from 'src/tokens/tokens.service';
 import { Token } from 'src/database/entities/token.entity';
 // import { Ticket } from 'src/database/entities/ticket.entity';
 import { GoogleStrategy } from './strategy/google.strategy';
+import { RefreshSession } from 'src/database/entities/refresh-session.entity';
+import { SignupRegionService } from './location/signup-region.service';
 
 @Global()
 @Module({
   imports: [
-    TypeOrmModule.forFeature([User, Token]),
+    TypeOrmModule.forFeature([User, Token, RefreshSession]),
     JwtModule.registerAsync(jwtConfig.asProvider()),
     ConfigModule.forFeature(jwtConfig),
   ],
@@ -33,6 +35,7 @@ import { GoogleStrategy } from './strategy/google.strategy';
     AccessTokenGuard,
     AuthenticationService,
     TokensService,
+    SignupRegionService,
     // MailService,
     GoogleStrategy,
   ],

@@ -22,11 +22,11 @@ export abstract class AbstractRepository<T extends AbstractEntity> {
 
   async create(entity: DeepPartial<T>): Promise<T> {
     try {
-      this.logger.log(`Creating entity with data: ${JSON.stringify(entity)}`);
+      this.logger.log(`Creating ${this.repository.metadata.name} entity`);
       const createdEntity = this.repository.create(entity);
       const savedEntity = await this.repository.save(createdEntity);
       this.logger.log(
-        `Entity created successfully: ${JSON.stringify(savedEntity)}`,
+        `${this.repository.metadata.name} entity created successfully with id ${savedEntity.id}`,
       );
       return savedEntity;
     } catch (error) {
@@ -46,9 +46,7 @@ export abstract class AbstractRepository<T extends AbstractEntity> {
   async checkIsExisit(options: FindOneOptions<T>): Promise<T> {
     const entity = await this.findOne(options); // Utilize findOne with soft delete exclusion
     if (!entity) {
-      this.logger.warn(
-        `Entity not found with options: ${JSON.stringify(options)}`,
-      );
+      this.logger.warn(`${this.repository.metadata.name} entity not found`);
       throw new NotFoundException('The entity was not found');
     }
     return entity;

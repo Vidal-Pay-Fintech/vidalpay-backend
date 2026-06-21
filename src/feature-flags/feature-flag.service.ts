@@ -1,6 +1,6 @@
 import {
-  ForbiddenException,
   Injectable,
+  NotFoundException,
   ServiceUnavailableException,
 } from '@nestjs/common';
 import { ConfigService } from '@nestjs/config';
@@ -27,12 +27,22 @@ export class FeatureFlagService {
     }
   }
 
-  assertDemoEnabled() {
-    if (!this.isEnabled('ENABLE_DEMO_MODE')) {
-      throw new ForbiddenException(
-        'Demo operation disabled in this environment.',
-      );
+  assertDemoEnabled(flag?: FeatureFlagKey) {
+    if (this.isProduction()) {
+      // Hide non-production capabilities instead of advertising them publicly.
+      throw new NotFoundException('Resource not found.');
     }
+
+    this.assertEnabled('ENABLE_DEMO_MODE');
+    if (flag && flag !== 'ENABLE_DEMO_MODE') {
+      this.assertEnabled(flag);
+    }
+  }
+
+  isProduction(): boolean {
+    const environment =
+      this.configService.get<string>('NODE_ENV') ?? process.env.NODE_ENV;
+    return String(environment ?? '').toLowerCase() === 'production';
   }
 
   getAll() {

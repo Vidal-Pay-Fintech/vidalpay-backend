@@ -4,9 +4,11 @@ import { ActiveUser } from 'src/iam/decorators/active-user.decorator';
 import { ActiveUserData } from 'src/iam/interfaces/active-user-data-interfaces';
 import { CardsService } from './cards.service';
 import { FundCardDto } from './dto/fund-card.dto';
+import { DemoOnly } from 'src/feature-flags/demo-only.decorator';
 
 @ApiTags('Cards')
 @Controller('cards')
+@DemoOnly('ENABLE_VIRTUAL_CARD_DEMO')
 export class CardsController {
   constructor(private readonly cardsService: CardsService) {}
 
