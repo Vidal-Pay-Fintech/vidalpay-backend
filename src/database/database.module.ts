@@ -29,27 +29,15 @@ import { UserRepository } from './repositories/user.repository';
 import { TokenRepository } from './repositories/token.repository';
 import { Token } from './entities/token.entity';
 import { WalletRepository } from './repositories/wallet.repository';
-
-interface DatabaseConfig {
-  MYSQL_HOST: string;
-  MYSQL_PORT: number;
-  MYSQL_DATABASE: string;
-  MYSQL_USERNAME: string;
-  MYSQL_PASSWORD: string;
-}
+import { buildMysqlDataSourceOptions } from './database.config';
 
 @Global()
 @Module({
   imports: [
     // SeedersModule,
     TypeOrmModule.forRootAsync({
-      useFactory: (configService: ConfigService<DatabaseConfig>) => ({
-        type: 'mysql',
-        host: configService.getOrThrow('MYSQL_HOST'),
-        port: configService.getOrThrow('MYSQL_PORT'),
-        database: configService.getOrThrow('MYSQL_DATABASE'),
-        username: configService.getOrThrow('MYSQL_USERNAME'),
-        password: configService.getOrThrow('MYSQL_PASSWORD'),
+      useFactory: () => ({
+        ...buildMysqlDataSourceOptions(),
         autoLoadEntities: true,
         synchronize: true,
       }),
