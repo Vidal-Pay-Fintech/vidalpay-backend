@@ -41,14 +41,17 @@ export class AuthenticationController {
   constructor(private readonly authService: AuthenticationService) {}
 
   @Post('sign-up')
-  signUp(@Body() signUpDto: SignUpDto) {
-    return this.authService.signUp(signUpDto);
+  signUp(@Body() signUpDto: SignUpDto, @Req() request: Request) {
+    return this.authService.signUp(signUpDto, request);
   }
 
   @HttpCode(HttpStatus.OK)
   @Post('verify-email')
-  async verifyUserEmail(@Body() verifyUserDto: VerifyUserDto) {
-    return await this.authService.verifyUserEmail(verifyUserDto.token);
+  async verifyUserEmail(
+    @Body() verifyUserDto: VerifyUserDto,
+    @Req() request: Request,
+  ) {
+    return await this.authService.verifyUserEmail(verifyUserDto.token, request);
   }
 
   @HttpCode(HttpStatus.OK)
@@ -76,6 +79,44 @@ export class AuthenticationController {
     );
   }
 
+  @Auth(AuthType.Bearer)
+  @HttpCode(HttpStatus.OK)
+  @Post('transaction-pin/request')
+  async requestTransactionPinCode(@ActiveUser() user: ActiveUserData) {
+    return this.authService.requestTransactionPinReset(user.sub);
+  }
+
+  @Auth(AuthType.Bearer)
+  @HttpCode(HttpStatus.OK)
+  @Post('transaction-pin/verify')
+  async verifyTransactionPinCode(
+    @Body('code') code: string,
+    @ActiveUser() user: ActiveUserData,
+  ) {
+    return this.authService.verifyTransactionPinResetCode(user.sub, code);
+  }
+
+  @Auth(AuthType.Bearer)
+  @HttpCode(HttpStatus.OK)
+  @Post('transaction-pin/set')
+  async setTransactionPin(
+    @Body() body: Record<string, string>,
+    @ActiveUser() user: ActiveUserData,
+  ) {
+    return this.authService.setTransactionPinWithCode(user.sub, body);
+  }
+
+  @Auth(AuthType.Bearer)
+  @HttpCode(HttpStatus.OK)
+  @Post('transaction-pin/validate')
+  async validateTransactionPin(
+    @Body('pin') pin: string,
+    @ActiveUser() user: ActiveUserData,
+  ) {
+    await this.authService.validateTransactionPin(user.sub, pin);
+    return { valid: true };
+  }
+
   @HttpCode(HttpStatus.OK)
   @Post('resend-otp-phone')
   async resendPhoneVerificationOtp(
@@ -91,8 +132,9 @@ export class AuthenticationController {
   async signIn(
     @Res({ passthrough: true }) response: Response,
     @Body() signInDto: SignInDto,
+    @Req() request: Request,
   ) {
-    const res = this.authService.signIn(signInDto);
+    const res = this.authService.signIn(signInDto, request);
     response.cookie('token', (await res).accessToken, {
       expires: new Date(new Date().getTime() + 30 * 1000),
       httpOnly: true,
@@ -106,8 +148,9 @@ export class AuthenticationController {
   async adminSignIn(
     @Res({ passthrough: true }) response: Response,
     @Body() signInDto: SignInDto,
+    @Req() request: Request,
   ) {
-    const res = this.authService.adminSignIn(signInDto);
+    const res = this.authService.adminSignIn(signInDto, request);
     response.cookie('token', (await res).accessToken, {
       expires: new Date(new Date().getTime() + 30 * 1000),
       httpOnly: true,
@@ -120,6 +163,55 @@ export class AuthenticationController {
   @Post('refresh-token')
   async refreshToken(@Body() refreshTokenDto: RefreshTokenDto) {
     return await this.authService.refreshToken(refreshTokenDto);
+  }
+
+  @HttpCode(HttpStatus.OK)
+  @Post('logout')
+  async logout(@Body() body: Record<string, string>) {
+    return this.authService.logout(body?.refreshToken);
+  }
+
+  @Auth(AuthType.Bearer)
+  @HttpCode(HttpStatus.OK)
+  @Post('logout-all')
+  async logoutAll(@ActiveUser() user: ActiveUserData) {
+    return this.authService.logoutAll(user.sub);
+  }
+
+  @Auth(AuthType.Bearer)
+  @Get('me')
+  async me(@ActiveUser() user: ActiveUserData) {
+    return this.authService.getAuthenticatedUser(user.sub);
+  }
+
+  @Auth(AuthType.Bearer)
+  @Post('reauth')
+  async reauth(
+    @ActiveUser() user: ActiveUserData,
+    @Body() body: Record<string, string>,
+  ) {
+    return this.authService.reauth(user.sub, body);
+  }
+
+  @Auth(AuthType.Bearer)
+  @Get('sessions')
+  async sessions(@ActiveUser() user: ActiveUserData) {
+    return this.authService.getSessions(user.sub);
+  }
+
+  @Auth(AuthType.Bearer)
+  @Post('sessions/:familyId/revoke')
+  async revokeSession(
+    @ActiveUser() user: ActiveUserData,
+    @Param('familyId') familyId: string,
+  ) {
+    return this.authService.revokeSession(user.sub, familyId);
+  }
+
+  @Auth(AuthType.Bearer)
+  @Post('sessions/revoke-others')
+  async revokeOtherSessions(@ActiveUser() user: ActiveUserData) {
+    return this.authService.revokeOtherSessions(user.sub, user.sessionId);
   }
 
   @HttpCode(HttpStatus.OK)

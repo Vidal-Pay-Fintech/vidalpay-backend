@@ -15,4 +15,8 @@ export interface ActiveUserData {
   phone: string;
 
   role: UserRole;
+
+  sessionId?: string;
+
+  familyId?: string;
 }

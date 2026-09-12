@@ -12,14 +12,34 @@ export class WalletService {
   }
 
   async createCustomerWallets(userId: string) {
-    await this.walletRepository.create({
-      userId,
-      currency: Currency.NGN,
-    });
-    await this.walletRepository.create({
-      userId,
-      currency: Currency.USD,
-    });
+    const existingWallets = await this.walletRepository.find({ where: { userId } });
+    const existingCurrencies = new Set(
+      existingWallets.map((wallet) => wallet.currency),
+    );
+
+    if (!existingCurrencies.has(Currency.NGN)) {
+      await this.walletRepository.create({
+        userId,
+        currency: Currency.NGN,
+        balance: 0,
+        availableBalance: 0,
+        ledgerBalance: 0,
+        provider: 'PayVessel',
+        providerStatus: 'MISSING_CREDENTIALS',
+      });
+    }
+
+    if (!existingCurrencies.has(Currency.USD)) {
+      await this.walletRepository.create({
+        userId,
+        currency: Currency.USD,
+        balance: 0,
+        availableBalance: 0,
+        ledgerBalance: 0,
+        provider: 'Unit.co',
+        providerStatus: 'MISSING_CREDENTIALS',
+      });
+    }
 
     return `Customer Wallet Created Succesfully`;
   }

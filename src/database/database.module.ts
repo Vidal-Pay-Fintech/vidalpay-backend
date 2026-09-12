@@ -12,6 +12,17 @@ import {
 //ENTITIES
 import { User } from './entities/user.entity';
 import { Wallet } from './entities/wallet.entity';
+import { AuthSession } from './entities/auth-session.entity';
+import { Beneficiary } from './entities/beneficiary.entity';
+import { Card } from './entities/card.entity';
+import { Dispute } from './entities/dispute.entity';
+import { FinancialTransaction } from './entities/financial-transaction.entity';
+import { KycProfile } from './entities/kyc-profile.entity';
+import { Notification } from './entities/notification.entity';
+import { NotificationDevice } from './entities/notification-device.entity';
+import { NotificationPreference } from './entities/notification-preference.entity';
+import { ProviderOperation } from './entities/provider-operation.entity';
+import { SupportTicket } from './entities/support-ticket.entity';
 
 //REPOSITORIES
 import { UserRepository } from './repositories/user.repository';
@@ -56,7 +67,22 @@ interface DatabaseConfig {
       inject: [ConfigService],
     }),
 
-    TypeOrmModule.forFeature([User, Token, Wallet]),
+    TypeOrmModule.forFeature([
+      User,
+      Token,
+      Wallet,
+      AuthSession,
+      Beneficiary,
+      Card,
+      Dispute,
+      FinancialTransaction,
+      KycProfile,
+      Notification,
+      NotificationDevice,
+      NotificationPreference,
+      ProviderOperation,
+      SupportTicket,
+    ]),
   ],
   providers: [UserRepository, ConfigService, TokenRepository, WalletRepository],
   exports: [TypeOrmModule, UserRepository, TokenRepository, WalletRepository],

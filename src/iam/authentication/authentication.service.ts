@@ -28,6 +28,7 @@ import { API_MESSAGES } from 'src/utils/apiMessages';
 import { UpdatePasswordDto } from 'src/user/dto/update-password.dto';
 // import { Role } from 'src/common/enum/role.enum';
 import { randomBytes } from 'crypto';
+import { randomUUID } from 'crypto';
 import { CONFIG_VARIABLES } from 'src/utils/config';
 import { ILike, MoreThan } from 'typeorm';
 import { WalletRepository } from 'src/database/repositories/wallet.repository';
@@ -51,6 +52,9 @@ import { UserRole } from 'src/utils/enums/user.enum';
 import { TagIdGenerator } from 'src/utils/tagIdGenerator';
 import { VerifyPasswordResetOtpDto } from './dto/verify-password-resetotp.dto';
 import { ResetPasswordAfterOtpDto } from './dto/reset-password-afterotp-verification.dto';
+import { Request } from 'express';
+import { AuthSession } from 'src/database/entities/auth-session.entity';
+import { Repository, IsNull } from 'typeorm';
 
 @Injectable()
 export class AuthenticationService {
@@ -63,6 +67,8 @@ export class AuthenticationService {
     private readonly walletService: WalletService,
     private readonly mailService: MailService,
     private readonly userRepository: UserRepository,
+    @InjectRepository(AuthSession)
+    private readonly authSessionRepository: Repository<AuthSession>,
     // private readonly walletRepository: WalletRepository,
     private readonly phoneService: PhoneService,
     // private readonly notificationService: NotificationService,
@@ -75,7 +81,7 @@ export class AuthenticationService {
   ) {}
 
   @Transactional()
-  async signUp(signUpDto: SignUpDto) {
+  async signUp(signUpDto: SignUpDto, request?: Request) {
     const { firstName, lastName, password, phoneNumber, email } = signUpDto;
 
     await this.userRepository.checkUserExistByEmail(email);
@@ -94,6 +100,10 @@ export class AuthenticationService {
       tagId,
       email,
       phoneNumber,
+      countryCode: signUpDto.countryCode,
+      country: signUpDto.country,
+      residency: signUpDto.residency,
+      region: this.inferRegion(signUpDto.countryCode, signUpDto.country, phoneNumber),
     });
 
     // CREATE THE CUSTOMER WALLET
@@ -129,8 +139,8 @@ export class AuthenticationService {
     //   NotificationType.ADMIN,
     // );
     // delete newUser.password;
-    const tokens = await this.generateToken(newUser);
-    return { ...tokens, newUser };
+    const tokens = await this.generateToken(newUser, request);
+    return { ...tokens, user: this.sanitizeUser(newUser), newUser: this.sanitizeUser(newUser) };
   }
 
   async createTransactionPin(pin: string, userId: string) {
@@ -141,16 +151,21 @@ export class AuthenticationService {
     return API_MESSAGES.PIN_SET_SUCCESSFUL;
   }
 
-  async verifyUserEmail(token: string): Promise<string> {
+  async verifyUserEmail(token: string, request?: Request) {
     const tokenEntity = await this.tokenService.findOneByToken(token);
     if (!tokenEntity || tokenEntity.expiration < new Date()) {
       throw new UnauthorizedException('Token is invalid or expired');
     }
-    await this.userRepository.findOneAndUpdate(tokenEntity.user.id, {
+    const user = await this.userRepository.findOneAndUpdate(tokenEntity.user.id, {
       isVerified: true,
     });
     await this.tokenService.delete(tokenEntity.id);
-    return API_MESSAGES.EMAIL_VERIFIED;
+    const tokens = await this.generateToken(user, request);
+    return {
+      message: API_MESSAGES.EMAIL_VERIFIED,
+      ...tokens,
+      user: this.sanitizeUser(user),
+    };
   }
 
   async verifyPhone(token: string): Promise<string> {
@@ -197,10 +212,13 @@ export class AuthenticationService {
     return API_MESSAGES.OTP_SENT;
   }
 
-  async signIn(signInDto: SignInDto) {
+  async signIn(signInDto: SignInDto, request?: Request) {
     const { email, phoneNumber, password } = signInDto;
-    console.log(email, 'hehehe');
-    const user = await this.userRepository.findUserByEmail(email);
+    const user = email
+      ? await this.userRepository.findUserByEmail(email)
+      : phoneNumber
+        ? await this.userRepository.findUserByPhone(phoneNumber)
+        : null;
     if (!user) {
       throw new BadRequestException(API_MESSAGES.INVALID_LOGIN_CREDENTIALS);
     }
@@ -214,8 +232,7 @@ export class AuthenticationService {
     }
 
     await this.validateUserValidity(user);
-    const tokens = await this.generateToken(user);
-    console.log(tokens);
+    const tokens = await this.generateToken(user, request);
     // await this.notificationService.sendNotificationToUser(
     //   user.id,
     //   NOTIFICATION_MESSAGES.ACCOUNT_LOGIN,
@@ -230,7 +247,7 @@ export class AuthenticationService {
     // delete user.password;
     return {
       ...tokens,
-      user: user,
+      user: this.sanitizeUser(user),
     };
   }
 
@@ -248,14 +265,14 @@ export class AuthenticationService {
     return API_MESSAGES.PASSWORD_RESET_SUCCESSFUL;
   }
 
-  async adminSignIn(signInDto: SignInDto) {
+  async adminSignIn(signInDto: SignInDto, request?: Request) {
     const { email, password } = signInDto;
     const admin = await this.userRepository.findUserByEmail(email);
     if (!admin) {
       throw new BadRequestException(API_MESSAGES.USER_NOT_FOUND);
     }
 
-    if (admin.role == UserRole.ADMIN) {
+    if (admin.role !== UserRole.ADMIN) {
       throw new UnauthorizedException(API_MESSAGES.UNAUTHORIZED_ACCESS);
     }
 
@@ -265,12 +282,11 @@ export class AuthenticationService {
       throw new UnauthorizedException(API_MESSAGES.INVALID_PASSWORD);
     }
 
-    const tokens = await this.generateToken(admin);
-    console.log(tokens);
+    const tokens = await this.generateToken(admin, request);
     // delete admin.password;
     return {
       ...tokens,
-      admin: admin,
+      admin: this.sanitizeUser(admin),
     };
   }
 
@@ -311,17 +327,35 @@ export class AuthenticationService {
     return API_MESSAGES.PASSWORD_CHANGED;
   }
 
-  async generateToken(user: User) {
+  async generateToken(user: User, request?: Request, existingSession?: AuthSession) {
+    const session =
+      existingSession ?? (await this.createAuthSession(user, request));
     const [accessToken, refreashToken] = await Promise.all([
       this.signToken<Partial<ActiveUserData>>(
         user.id,
         this.jwtConfiguration.accessTokenTtl,
-        { email: user.email, role: user.role },
+        {
+          email: user.email,
+          role: user.role,
+          sessionId: session.id,
+          familyId: session.familyId,
+        },
       ),
-      this.signToken(user.id, this.jwtConfiguration.refreshAccessTokenTtl),
+      this.signToken(user.id, this.jwtConfiguration.refreshAccessTokenTtl, {
+        tokenType: 'refresh',
+        sessionId: session.id,
+        familyId: session.familyId,
+      }),
     ]);
 
-    return { accessToken, refreashToken };
+    session.refreshTokenHash = await this.hashingService.hash(refreashToken);
+    session.expiresAt = new Date(
+      Date.now() + this.jwtConfiguration.refreshAccessTokenTtl * 1000,
+    );
+    session.lastUsedAt = new Date();
+    await this.authSessionRepository.save(session);
+
+    return { accessToken, refreshToken: refreashToken, refreashToken };
   }
 
   private async sendEmailVerificationOtp(user: User) {
@@ -352,27 +386,157 @@ export class AuthenticationService {
         audience: this.jwtConfiguration.audience,
         issuer: this.jwtConfiguration.issuer,
         secret: this.jwtConfiguration.secret,
-        expiresIn: this.jwtConfiguration.accessTokenTtl,
+        expiresIn,
       },
     );
   }
 
   async refreshToken(refreshTokenDto: RefreshTokenDto) {
     try {
-      const { sub } = await this.jwtService.verifyAsync<
-        Pick<ActiveUserData, 'sub'>
+      const payload = await this.jwtService.verifyAsync<
+        Pick<ActiveUserData, 'sub' | 'sessionId' | 'familyId'> & {
+          tokenType?: string;
+        }
       >(refreshTokenDto.refreshToken, {
         secret: this.jwtConfiguration.secret,
         audience: this.jwtConfiguration.audience,
         issuer: this.jwtConfiguration.issuer,
       });
+      const { sub, sessionId } = payload;
+      if (!sessionId || payload.tokenType !== 'refresh') {
+        throw new UnauthorizedException();
+      }
       const user = await this.userRepository.findOne({
         where: { id: sub },
       });
-      return this.generateToken(user as User);
+      const session = await this.authSessionRepository.findOne({
+        where: { id: sessionId, userId: sub, revokedAt: IsNull() },
+      });
+      if (!user || !session || !session.refreshTokenHash) {
+        throw new UnauthorizedException();
+      }
+      if (session.expiresAt && session.expiresAt < new Date()) {
+        throw new UnauthorizedException();
+      }
+      const validRefreshToken = await this.hashingService.compare(
+        refreshTokenDto.refreshToken,
+        session.refreshTokenHash,
+      );
+      if (!validRefreshToken) {
+        throw new UnauthorizedException();
+      }
+      return this.generateToken(user as User, undefined, session);
     } catch (error) {
       throw new UnauthorizedException();
     }
+  }
+
+  async logout(refreshToken?: string) {
+    if (!refreshToken) {
+      return { loggedOut: true };
+    }
+    try {
+      const payload = await this.jwtService.verifyAsync<
+        Pick<ActiveUserData, 'sub' | 'sessionId'>
+      >(refreshToken, {
+        secret: this.jwtConfiguration.secret,
+        audience: this.jwtConfiguration.audience,
+        issuer: this.jwtConfiguration.issuer,
+      });
+      if (payload.sessionId) {
+        await this.authSessionRepository.update(
+          { id: payload.sessionId, userId: payload.sub },
+          { revokedAt: new Date() },
+        );
+      }
+    } catch {
+      return { loggedOut: true };
+    }
+    return { loggedOut: true };
+  }
+
+  async logoutAll(userId: string) {
+    await this.authSessionRepository.update(
+      { userId, revokedAt: IsNull() },
+      { revokedAt: new Date() },
+    );
+    return { loggedOut: true };
+  }
+
+  async getAuthenticatedUser(userId: string) {
+    const user = await this.userRepository.findOne({
+      where: { id: userId },
+      relations: ['wallet'],
+    });
+    if (!user) {
+      throw new UnauthorizedException();
+    }
+    return {
+      authenticated: true,
+      user: this.sanitizeUser(user),
+    };
+  }
+
+  async reauth(userId: string, body: Record<string, string>) {
+    const user = await this.userRepository.findUserById(userId);
+    if (body.password) {
+      const validPassword = await this.hashingService.compare(
+        body.password,
+        user.password,
+      );
+      if (!validPassword) {
+        throw new UnauthorizedException(API_MESSAGES.INVALID_PASSWORD);
+      }
+      return { authenticated: true };
+    }
+    if (body.pin) {
+      await this.validateTransactionPin(userId, body.pin);
+      return { authenticated: true };
+    }
+    throw new BadRequestException('password or pin is required');
+  }
+
+  async getSessions(userId: string) {
+    const sessions = await this.authSessionRepository.find({
+      where: { userId, revokedAt: IsNull() },
+      order: { lastUsedAt: 'DESC' },
+    });
+    return {
+      sessions: sessions.map((session) => ({
+        id: session.id,
+        familyId: session.familyId,
+        deviceId: session.deviceId,
+        deviceName: session.deviceName,
+        platform: session.platform,
+        ipAddress: session.ipAddress,
+        userAgent: session.userAgent,
+        lastUsedAt: session.lastUsedAt,
+        expiresAt: session.expiresAt,
+        createdAt: session.createdAt,
+      })),
+    };
+  }
+
+  async revokeSession(userId: string, familyId: string) {
+    await this.authSessionRepository.update(
+      { userId, familyId },
+      { revokedAt: new Date() },
+    );
+    return { revoked: true, familyId };
+  }
+
+  async revokeOtherSessions(userId: string, sessionId?: string) {
+    const query = this.authSessionRepository
+      .createQueryBuilder()
+      .update(AuthSession)
+      .set({ revokedAt: new Date() })
+      .where('userId = :userId', { userId })
+      .andWhere('revokedAt IS NULL');
+    if (sessionId) {
+      query.andWhere('id != :sessionId', { sessionId });
+    }
+    await query.execute();
+    return { revokedOthers: true };
   }
 
   public generateFourDigitToken(): string {
@@ -387,6 +551,9 @@ export class AuthenticationService {
   public async validateTransactionPin(userId: string, pin: string) {
     const user = await this.userRepository.findUserById(userId);
 
+    if (!pin || !user.pin) {
+      throw new PreconditionFailedException(`Invalid transaction pin`);
+    }
     const isPinValid = await this.hashingService.compare(pin, user.pin);
 
     if (!isPinValid) {
@@ -546,6 +713,45 @@ export class AuthenticationService {
     return API_MESSAGES.PIN_RESET_SUCCESSFUL;
   }
 
+  public async verifyTransactionPinResetCode(userId: string, code: string) {
+    const token = await this.tokenService.findOneByTokenAndValidate(
+      code,
+      TokenType.TRANSACTION_PIN_RESET,
+      userId,
+    );
+    if (!token) {
+      throw new UnauthorizedException(API_MESSAGES.INVALID_PIN);
+    }
+    return {
+      message: API_MESSAGES.OTP_VERIFIED,
+      verificationId: token.id,
+    };
+  }
+
+  public async setTransactionPinWithCode(
+    userId: string,
+    body: Record<string, string>,
+  ) {
+    const code = body.code;
+    const pin = body.newPin ?? body.pin;
+    if (!code || !pin) {
+      throw new BadRequestException('code and newPin are required');
+    }
+    const token = await this.tokenService.findOneByTokenAndValidate(
+      code,
+      TokenType.TRANSACTION_PIN_RESET,
+      userId,
+    );
+    if (!token) {
+      throw new UnauthorizedException(API_MESSAGES.INVALID_PIN);
+    }
+    await this.userRepository.findOneAndUpdate(userId, {
+      pin: await this.hashingService.hash(pin),
+    });
+    await this.tokenService.delete(token.id);
+    return API_MESSAGES.PIN_SET_SUCCESSFUL;
+  }
+
   // STEP 1: User enters email - Request password reset (sends OTP to email)
   public async requestPasswordReset(email: string) {
     const user = await this.userRepository.findUserByEmail(email);
@@ -690,5 +896,83 @@ export class AuthenticationService {
     }
 
     return user;
+  }
+
+  private async createAuthSession(user: User, request?: Request) {
+    const metadata = this.getRequestMetadata(request);
+    return this.authSessionRepository.save(
+      this.authSessionRepository.create({
+        userId: user.id,
+        familyId: randomUUID(),
+        refreshTokenHash: null,
+        deviceId: metadata.deviceId,
+        deviceName: metadata.deviceName,
+        platform: metadata.platform,
+        ipAddress: metadata.ipAddress,
+        userAgent: metadata.userAgent,
+        lastUsedAt: new Date(),
+        expiresAt: new Date(
+          Date.now() + this.jwtConfiguration.refreshAccessTokenTtl * 1000,
+        ),
+      }),
+    );
+  }
+
+  private getRequestMetadata(request?: Request) {
+    return {
+      deviceId: this.readHeader(request, 'x-device-id'),
+      deviceName: this.readHeader(request, 'x-device-name'),
+      platform: this.readHeader(request, 'x-platform'),
+      ipAddress:
+        this.readHeader(request, 'x-forwarded-for') ??
+        request?.ip ??
+        request?.socket?.remoteAddress ??
+        null,
+      userAgent: request?.headers?.['user-agent']?.toString() ?? null,
+    };
+  }
+
+  private readHeader(request: Request | undefined, name: string) {
+    const value = request?.headers?.[name];
+    if (Array.isArray(value)) {
+      return value[0] ?? null;
+    }
+    return typeof value === 'string' && value.trim().length > 0
+      ? value.trim()
+      : null;
+  }
+
+  private sanitizeUser(user: User) {
+    const { password, pin, resetToken, resetTokenExpiry, ...safeUser } = user;
+    return safeUser;
+  }
+
+  private inferRegion(
+    countryCode?: string,
+    country?: string,
+    phone?: string,
+  ): string | undefined {
+    const candidates = [countryCode, country]
+      .filter(Boolean)
+      .map((value) => String(value).trim().toLowerCase());
+    if (
+      candidates.some((value) =>
+        ['ng', 'nigeria', '+234', '234'].includes(value),
+      ) ||
+      phone?.startsWith('+234')
+    ) {
+      return 'NG';
+    }
+    if (
+      candidates.some((value) =>
+        ['us', 'usa', 'united states', 'united_states', '+1', '1'].includes(
+          value,
+        ),
+      ) ||
+      phone?.startsWith('+1')
+    ) {
+      return 'US';
+    }
+    return undefined;
   }
 }

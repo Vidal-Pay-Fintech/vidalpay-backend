@@ -24,7 +24,7 @@ export class TokenRepository extends AbstractRepository<Token> {
   protected readonly logger = new Logger(TokenRepository.name);
 
   constructor(
-    @InjectRepository(User)
+    @InjectRepository(Token)
     protected readonly tokenEntityRepository: Repository<Token>,
   ) {
     super(tokenEntityRepository);

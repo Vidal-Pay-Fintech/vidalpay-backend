@@ -25,6 +25,12 @@
 
 [Nest](https://github.com/nestjs/nest) framework TypeScript starter repository.
 
+## VidalPay mobile backend contract
+
+The mobile API audit, provider-readiness matrix, unavailable-response contract,
+required environment variables, webhook URLs, request/response examples, and
+test results are documented in [API_CONTRACT.md](./API_CONTRACT.md).
+
 ## Project setup
 
 ```bash

@@ -8,6 +8,17 @@ import { Token } from 'src/database/entities/token.entity';
 import { Column, Entity, ManyToOne, OneToMany, OneToOne } from 'typeorm';
 import { AbstractEntity } from '../abstract.entity';
 import { Wallet } from './wallet.entity';
+import { AuthSession } from './auth-session.entity';
+import { Beneficiary } from './beneficiary.entity';
+import { Card } from './card.entity';
+import { Dispute } from './dispute.entity';
+import { FinancialTransaction } from './financial-transaction.entity';
+import { KycProfile } from './kyc-profile.entity';
+import { Notification } from './notification.entity';
+import { NotificationDevice } from './notification-device.entity';
+import { NotificationPreference } from './notification-preference.entity';
+import { ProviderOperation } from './provider-operation.entity';
+import { SupportTicket } from './support-ticket.entity';
 // import { Winner } from './winner.entity';
 // import { Transaction } from './transaction.entity';
 // import { Support } from './support';
@@ -61,6 +72,24 @@ export class User extends AbstractEntity {
   phoneNumber: string;
 
   @Column({ nullable: true })
+  country: string;
+
+  @Column({ nullable: true })
+  countryCode: string;
+
+  @Column({ nullable: true })
+  residency: string;
+
+  @Column({ nullable: true })
+  region: string;
+
+  @Column({ nullable: true })
+  pendingEmail: string;
+
+  @Column({ nullable: true })
+  pendingPhoneNumber: string;
+
+  @Column({ nullable: true })
   pin: string;
 
   @Column({ nullable: true })
@@ -81,6 +110,45 @@ export class User extends AbstractEntity {
   @OneToMany(() => Wallet, (wallet) => wallet.user)
   wallet: Wallet[];
 
+  @OneToMany(() => AuthSession, (session) => session.user)
+  sessions: AuthSession[];
+
+  @OneToMany(() => KycProfile, (kycProfile) => kycProfile.user)
+  kycProfiles: KycProfile[];
+
+  @OneToMany(() => FinancialTransaction, (transaction) => transaction.user)
+  transactions: FinancialTransaction[];
+
+  @OneToMany(() => ProviderOperation, (operation) => operation.user)
+  providerOperations: ProviderOperation[];
+
+  @OneToMany(() => Card, (card) => card.user)
+  cards: Card[];
+
+  @OneToMany(() => Beneficiary, (beneficiary) => beneficiary.user)
+  beneficiaries: Beneficiary[];
+
+  @OneToMany(() => Notification, (notification) => notification.user)
+  notifications: Notification[];
+
+  @OneToMany(
+    () => NotificationPreference,
+    (notificationPreference) => notificationPreference.user,
+  )
+  notificationPreferences: NotificationPreference[];
+
+  @OneToMany(
+    () => NotificationDevice,
+    (notificationDevice) => notificationDevice.user,
+  )
+  notificationDevices: NotificationDevice[];
+
+  @OneToMany(() => SupportTicket, (supportTicket) => supportTicket.user)
+  supportTickets: SupportTicket[];
+
+  @OneToMany(() => Dispute, (dispute) => dispute.user)
+  disputes: Dispute[];
+
   @Column({ nullable: true })
   accountStatus: boolean;
 
@@ -92,6 +160,18 @@ export class User extends AbstractEntity {
 
   @Column({ default: false })
   isPhoneVerified: boolean;
+
+  @Column({ nullable: true })
+  kycStatus: string;
+
+  @Column({ type: 'simple-json', nullable: true })
+  capabilities: Record<string, unknown>;
+
+  @Column({ type: 'simple-json', nullable: true })
+  productAvailability: Record<string, unknown>;
+
+  @Column({ type: 'simple-json', nullable: true })
+  limits: Record<string, unknown>;
 
   @Column({ type: 'varchar', nullable: true })
   reasonForDeactivation: string;

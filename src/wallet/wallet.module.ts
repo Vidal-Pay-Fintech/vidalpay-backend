@@ -1,10 +1,12 @@
 import { Global, Module } from '@nestjs/common';
 import { WalletService } from './wallet.service';
-import { WalletController } from './wallet.controller';
+import { WalletController, WalletsController } from './wallet.controller';
+import { VidalpayModule } from 'src/vidalpay/vidalpay.module';
 
 @Global()
 @Module({
-  controllers: [WalletController],
+  imports: [VidalpayModule],
+  controllers: [WalletController, WalletsController],
   providers: [WalletService],
   exports: [WalletService],
 })

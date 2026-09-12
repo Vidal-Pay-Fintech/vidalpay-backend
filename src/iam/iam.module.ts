@@ -18,11 +18,12 @@ import { TokensService } from 'src/tokens/tokens.service';
 import { Token } from 'src/database/entities/token.entity';
 // import { Ticket } from 'src/database/entities/ticket.entity';
 import { GoogleStrategy } from './strategy/google.strategy';
+import { AuthSession } from 'src/database/entities/auth-session.entity';
 
 @Global()
 @Module({
   imports: [
-    TypeOrmModule.forFeature([User, Token]),
+    TypeOrmModule.forFeature([User, Token, AuthSession]),
     JwtModule.registerAsync(jwtConfig.asProvider()),
     ConfigModule.forFeature(jwtConfig),
   ],

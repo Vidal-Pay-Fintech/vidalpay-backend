@@ -36,4 +36,16 @@ export class SignUpDto {
     message: 'phoneNumber must be a valid phone number',
   })
   phoneNumber: string;
+
+  @IsOptional()
+  @IsString()
+  country?: string;
+
+  @IsOptional()
+  @IsString()
+  countryCode?: string;
+
+  @IsOptional()
+  @IsString()
+  residency?: string;
 }
