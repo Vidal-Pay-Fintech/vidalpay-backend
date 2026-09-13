@@ -9,23 +9,41 @@ import { WalletService } from 'src/wallet/wallet.service';
 import { MailService } from 'src/mail/mail.service';
 import { UserRepository } from 'src/database/repositories/user.repository';
 import { AuthSession } from 'src/database/entities/auth-session.entity';
-import { User } from 'src/database/entities/user.entity';
+import { AccountStatus, User } from 'src/database/entities/user.entity';
 import { PhoneService } from 'src/mail/phone.service';
 import jwtConfig from '../config/jwt.config';
+import { UserRole } from 'src/utils/enums/user.enum';
 
 describe('AuthenticationService', () => {
   let service: AuthenticationService;
   const userRepository = {
     findUserById: jest.fn(),
     findOneAndUpdate: jest.fn(),
+    checkUserExistByEmail: jest.fn(),
+    create: jest.fn(),
+    findUserByEmail: jest.fn(),
+    findUserByPhone: jest.fn(),
   };
   const hashingService = { hash: jest.fn(), compare: jest.fn() };
+  const jwtService = { signAsync: jest.fn(), verifyAsync: jest.fn() };
+  const walletService = { createCustomerWallets: jest.fn() };
   const tokenService = {
     create: jest.fn(),
+    findOneByToken: jest.fn(),
     findOneByTokenAndValidate: jest.fn(),
     delete: jest.fn(),
   };
-  const mailService = { sendResetTransactionPinCode: jest.fn() };
+  const mailService = {
+    sendEmailVerificationCode: jest.fn(),
+    sendResetTransactionPinCode: jest.fn(),
+  };
+  const authSessionRepository = {
+    find: jest.fn(),
+    findOne: jest.fn(),
+    update: jest.fn(),
+    create: jest.fn((payload) => payload),
+    save: jest.fn(async (payload) => ({ id: 'session-1', familyId: 'family-1', ...payload })),
+  };
 
   beforeEach(async () => {
     jest.clearAllMocks();
@@ -34,14 +52,14 @@ describe('AuthenticationService', () => {
         AuthenticationService,
         { provide: getRepositoryToken(User), useValue: {} },
         { provide: HashingService, useValue: hashingService },
-        { provide: JwtService, useValue: { signAsync: jest.fn(), verifyAsync: jest.fn() } },
+        { provide: JwtService, useValue: jwtService },
         { provide: TokensService, useValue: tokenService },
-        { provide: WalletService, useValue: {} },
+        { provide: WalletService, useValue: walletService },
         { provide: MailService, useValue: mailService },
         { provide: UserRepository, useValue: userRepository },
-        { provide: getRepositoryToken(AuthSession), useValue: { find: jest.fn(), findOne: jest.fn(), update: jest.fn(), create: jest.fn(), save: jest.fn() } },
+        { provide: getRepositoryToken(AuthSession), useValue: authSessionRepository },
         { provide: PhoneService, useValue: {} },
-        { provide: jwtConfig.KEY, useValue: { secret: 'secret', audience: 'audience', issuer: 'issuer' } },
+        { provide: jwtConfig.KEY, useValue: { secret: 'secret', audience: 'audience', issuer: 'issuer', accessTokenTtl: 3600, refreshAccessTokenTtl: 86400 } },
       ],
     }).compile();
 
@@ -85,5 +103,72 @@ describe('AuthenticationService', () => {
 
     expect(tokenService.create).toHaveBeenCalledWith(expect.objectContaining({ user: { id: 'user-1' } }));
     expect(mailService.sendResetTransactionPinCode).toHaveBeenCalledWith('user-1', expect.any(String));
+  });
+
+  it('normalizes US signup phone numbers before storing the user', async () => {
+    userRepository.checkUserExistByEmail.mockResolvedValue(true);
+    userRepository.create.mockImplementation(async (payload) => ({
+      id: 'user-1',
+      role: UserRole.CUSTOMER,
+      isVerified: false,
+      status: AccountStatus.ACTIVE,
+      ...payload,
+    }));
+    hashingService.hash.mockResolvedValue('hashed-password');
+    walletService.createCustomerWallets.mockResolvedValue(undefined);
+    tokenService.create.mockResolvedValue({ id: 'token-1' });
+    mailService.sendEmailVerificationCode.mockResolvedValue(undefined);
+    jwtService.signAsync
+      .mockResolvedValueOnce('access-token')
+      .mockResolvedValueOnce('refresh-token');
+
+    await service.signUp({
+      firstName: 'Ada',
+      lastName: 'Lovelace',
+      email: 'ada@example.com',
+      password: 'StrongPass1!',
+      pin: '',
+      phoneNumber: '5551234567',
+      countryCode: 'US',
+      country: 'United States',
+    });
+
+    expect(userRepository.create).toHaveBeenCalledWith(
+      expect.objectContaining({
+        phoneNumber: '+15551234567',
+        countryCode: 'US',
+        country: 'United States',
+        region: 'US',
+      }),
+    );
+  });
+
+  it('finds US users by local or E.164 phone variants during login', async () => {
+    const user = {
+      id: 'user-1',
+      password: 'hashed-password',
+      role: UserRole.CUSTOMER,
+      isVerified: true,
+      status: AccountStatus.ACTIVE,
+      phoneNumber: '+15551234567',
+      lastLogin: new Date(),
+    };
+    userRepository.findUserByPhone.mockImplementation(async (phone: string) =>
+      phone === '+15551234567' ? user : null,
+    );
+    hashingService.compare.mockResolvedValue(true);
+    jwtService.signAsync
+      .mockResolvedValueOnce('access-token')
+      .mockResolvedValueOnce('refresh-token');
+
+    await expect(
+      service.signIn({ email: '', phoneNumber: '5551234567', password: 'secret' }),
+    ).resolves.toEqual(
+      expect.objectContaining({
+        accessToken: 'access-token',
+        refreshToken: 'refresh-token',
+      }),
+    );
+    expect(userRepository.findUserByPhone).toHaveBeenCalledWith('+15551234567');
   });
 });

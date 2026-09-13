@@ -83,6 +83,11 @@ export class AuthenticationService {
   @Transactional()
   async signUp(signUpDto: SignUpDto, request?: Request) {
     const { firstName, lastName, password, phoneNumber, email } = signUpDto;
+    const normalizedPhoneNumber = this.normalizePhoneNumberForRegion(
+      phoneNumber,
+      signUpDto.countryCode,
+      signUpDto.country,
+    );
 
     await this.userRepository.checkUserExistByEmail(email);
     // await this.userRepository.checkUserExistByPhone(phoneNumber);
@@ -99,11 +104,15 @@ export class AuthenticationService {
       password: hashedPassword,
       tagId,
       email,
-      phoneNumber,
+      phoneNumber: normalizedPhoneNumber,
       countryCode: signUpDto.countryCode,
       country: signUpDto.country,
       residency: signUpDto.residency,
-      region: this.inferRegion(signUpDto.countryCode, signUpDto.country, phoneNumber),
+      region: this.inferRegion(
+        signUpDto.countryCode,
+        signUpDto.country,
+        normalizedPhoneNumber,
+      ),
     });
 
     // CREATE THE CUSTOMER WALLET
@@ -194,7 +203,7 @@ export class AuthenticationService {
   }
 
   async resendVerificationPhone(phone: string) {
-    const user = await this.userRepository.findUserByEmailOrPhone(phone);
+    const user = await this.findUserByEmailOrPhoneVariants(phone);
     if (!user) {
       throw new BadRequestException(API_MESSAGES.USER_NOT_FOUND);
     }
@@ -217,7 +226,7 @@ export class AuthenticationService {
     const user = email
       ? await this.userRepository.findUserByEmail(email)
       : phoneNumber
-        ? await this.userRepository.findUserByPhone(phoneNumber)
+        ? await this.findUserByPhoneVariants(phoneNumber)
         : null;
     if (!user) {
       throw new BadRequestException(API_MESSAGES.INVALID_LOGIN_CREDENTIALS);
@@ -945,6 +954,90 @@ export class AuthenticationService {
   private sanitizeUser(user: User) {
     const { password, pin, resetToken, resetTokenExpiry, ...safeUser } = user;
     return safeUser;
+  }
+
+  private async findUserByEmailOrPhoneVariants(value: string) {
+    if (value.includes('@')) {
+      return this.userRepository.findUserByEmailOrPhone(value);
+    }
+
+    return this.findUserByPhoneVariants(value);
+  }
+
+  private async findUserByPhoneVariants(phoneNumber: string) {
+    const variants = this.phoneNumberVariants(phoneNumber);
+
+    for (const variant of variants) {
+      const user = await this.userRepository.findUserByPhone(variant);
+      if (user) {
+        return user;
+      }
+    }
+
+    return null;
+  }
+
+  private phoneNumberVariants(phoneNumber: string) {
+    const compact = phoneNumber.replace(/[\s\-\(\)]/g, '');
+    const digits = compact.replace(/\D/g, '');
+    const variants = [
+      compact,
+      this.normalizePhoneNumberForRegion(phoneNumber),
+      this.normalizePhoneNumberForRegion(phoneNumber, 'US'),
+      this.normalizePhoneNumberForRegion(phoneNumber, 'NG'),
+      digits,
+      digits ? `+${digits}` : null,
+    ].filter((value): value is string => Boolean(value));
+
+    return [...new Set(variants)];
+  }
+
+  private normalizePhoneNumberForRegion(
+    phoneNumber: string,
+    countryCode?: string,
+    country?: string,
+  ) {
+    const compact = phoneNumber.replace(/[\s\-\(\)]/g, '');
+    const digits = compact.replace(/\D/g, '');
+    const region = this.inferRegion(countryCode, country, compact);
+
+    if (!digits) {
+      return compact;
+    }
+
+    if (compact.startsWith('+')) {
+      return `+${digits}`;
+    }
+
+    if (region === 'US') {
+      if (digits.length === 10) {
+        return `+1${digits}`;
+      }
+      if (digits.length === 11 && digits.startsWith('1')) {
+        return `+${digits}`;
+      }
+    }
+
+    if (region === 'NG') {
+      if (digits.length === 10 && /^[789]/.test(digits)) {
+        return `+234${digits}`;
+      }
+      if (digits.length === 11 && digits.startsWith('0')) {
+        return `+234${digits.slice(1)}`;
+      }
+      if (digits.length === 13 && digits.startsWith('234')) {
+        return `+${digits}`;
+      }
+    }
+
+    if (digits.length === 11 && digits.startsWith('1')) {
+      return `+${digits}`;
+    }
+    if (digits.length === 13 && digits.startsWith('234')) {
+      return `+${digits}`;
+    }
+
+    return compact;
   }
 
   private inferRegion(
