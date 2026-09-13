@@ -2,6 +2,7 @@ import {
   Body,
   Controller,
   Get,
+  Headers,
   Param,
   Patch,
   Post,
@@ -680,17 +681,40 @@ export class WebhooksController {
   constructor(private readonly vidalpayService: VidalpayService) {}
 
   @Post('kyc/metamap')
-  kyc(@Body() body: AnyRecord) {
-    return this.vidalpayService.handleKycWebhook(body);
+  kyc(
+    @Body() body: AnyRecord,
+    @Headers('x-metamap-signature') metamapSignature?: string,
+    @Headers('x-webhook-signature') webhookSignature?: string,
+  ) {
+    return this.vidalpayService.handleKycWebhook(
+      body,
+      metamapSignature ?? webhookSignature,
+    );
   }
 
   @Post('unit')
-  unit(@Body() body: AnyRecord) {
-    return this.vidalpayService.handleProviderWebhook('Unit.co', body);
+  unit(
+    @Body() body: AnyRecord,
+    @Headers('x-unit-signature') unitSignature?: string,
+    @Headers('x-signature') signature?: string,
+  ) {
+    return this.vidalpayService.handleProviderWebhook(
+      'Unit.co',
+      body,
+      unitSignature ?? signature,
+    );
   }
 
   @Post('payvessel')
-  payvessel(@Body() body: AnyRecord) {
-    return this.vidalpayService.handleProviderWebhook('PayVessel', body);
+  payvessel(
+    @Body() body: AnyRecord,
+    @Headers('x-payvessel-signature') payVesselSignature?: string,
+    @Headers('x-signature') signature?: string,
+  ) {
+    return this.vidalpayService.handleProviderWebhook(
+      'PayVessel',
+      body,
+      payVesselSignature ?? signature,
+    );
   }
 }

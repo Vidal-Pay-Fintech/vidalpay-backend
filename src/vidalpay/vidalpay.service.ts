@@ -10,7 +10,7 @@ import { ConfigService } from '@nestjs/config';
 import { InjectRepository } from '@nestjs/typeorm';
 import axios from 'axios';
 import { compare } from 'bcrypt';
-import { randomUUID } from 'crypto';
+import { createHash, createHmac, randomUUID, timingSafeEqual } from 'crypto';
 import { DataSource, In, IsNull, Repository } from 'typeorm';
 import { QueryDeepPartialEntity } from 'typeorm/query-builder/QueryPartialEntity';
 import { Beneficiary } from 'src/database/entities/beneficiary.entity';
@@ -566,13 +566,14 @@ export class VidalpayService {
       this.asString(payload.tagId) ??
       this.asString(payload.tag);
     const idempotencyKey =
-      this.asString(payload.idempotencyKey) ??
-      this.asString(payload.reference) ??
-      `internal_${randomUUID()}`;
+      this.asString(payload.idempotencyKey) ?? this.asString(payload.reference);
     const pin = this.asString(payload.pin);
 
     if (!recipientTag) {
       throw new BadRequestException('recipientTag is required');
+    }
+    if (!idempotencyKey) {
+      throw new BadRequestException('idempotencyKey is required');
     }
     if (!pin) {
       throw new BadRequestException('pin is required');
@@ -601,10 +602,32 @@ export class VidalpayService {
         throw new BadRequestException('You cannot transfer to your own tag');
       }
 
-      const [senderWallet, recipientWallet] = await Promise.all([
-        wallets.findOne({ where: { userId, currency } }),
-        wallets.findOne({ where: { userId: recipient.id, currency } }),
-      ]);
+      // Lock both currency-specific wallet rows in deterministic user-id order.
+      // This prevents concurrent retries/transfers from spending the same
+      // balance and avoids opposite-direction transfers deadlocking each other.
+      const walletOwners = [userId, recipient.id].sort();
+      const lockedWallets = new Map<string, Wallet>();
+      for (const ownerId of walletOwners) {
+        const wallet = await wallets
+          .createQueryBuilder('wallet')
+          .setLock('pessimistic_write')
+          .where('wallet.userId = :ownerId', { ownerId })
+          .andWhere('wallet.currency = :currency', { currency })
+          .getOne();
+        if (wallet) {
+          lockedWallets.set(ownerId, wallet);
+        }
+      }
+
+      const operationAfterLock = await operations.findOne({
+        where: { userId, type: 'internal_transfer', idempotencyKey },
+      });
+      if (operationAfterLock) {
+        return this.normalizeOperation(operationAfterLock);
+      }
+
+      const senderWallet = lockedWallets.get(userId);
+      const recipientWallet = lockedWallets.get(recipient.id);
 
       if (!senderWallet || !recipientWallet) {
         throw new BadRequestException(`Both users must have a ${currency} wallet`);
@@ -836,7 +859,26 @@ export class VidalpayService {
     profile.capabilities = this.capabilitiesForKycStatus(decision);
     profile.limits = this.defaultLimits(decision);
     await this.kycProfileRepository.save(profile);
+    user.kycStatus = decision;
     await this.userRepository.update(userId, { kycStatus: decision });
+
+    const auditReference = `kyc_review_${randomUUID()}`;
+    await this.providerOperationRepository.save(
+      this.providerOperationRepository.create({
+        userId,
+        type: 'kyc_admin_review',
+        idempotencyKey: auditReference,
+        reference: auditReference,
+        status: 'APPLIED',
+        provider: 'VidalPay',
+        requestPayload: {
+          decision,
+          reason: normalizedReason,
+          reviewedBy: adminUserId,
+        },
+        metadata: { audit: true, adminUserId, decision },
+      }),
+    );
 
     const notification = await this.sendNotificationToUser(userId, {
       title:
@@ -979,7 +1021,33 @@ export class VidalpayService {
     return this.normalizeKycProfile(profile);
   }
 
-  async handleKycWebhook(payload: AnyRecord) {
+  async handleKycWebhook(payload: AnyRecord, signature?: string) {
+    this.assertKycWebhookSignature(payload, signature);
+
+    const eventId =
+      this.asString(payload.eventId) ??
+      this.asString(payload.event_id) ??
+      this.asString(payload.verificationId) ??
+      this.asString(payload.reference) ??
+      this.asString(payload.id);
+    const idempotencyKey =
+      eventId ??
+      `payload:${createHash('sha256')
+        .update(JSON.stringify(payload))
+        .digest('hex')}`;
+
+    const existingOperation = await this.providerOperationRepository.findOne({
+      where: { type: 'kyc_webhook', idempotencyKey },
+    });
+    if (existingOperation) {
+      return {
+        received: true,
+        updated: false,
+        duplicate: true,
+        status: existingOperation.metadata?.status ?? existingOperation.status,
+      };
+    }
+
     const metadata = this.asRecord(payload.metadata) ?? {};
     const userId = this.asString(metadata.userId) ?? this.asString(payload.userId);
     const status = this.mapProviderKycStatus(
@@ -1003,6 +1071,24 @@ export class VidalpayService {
     await this.userRepository.update(userId, {
       kycStatus: status,
     });
+
+    const reference = `kyc_webhook_${createHash('sha256')
+      .update(idempotencyKey)
+      .digest('hex')}`;
+    await this.providerOperationRepository.save(
+      this.providerOperationRepository.create({
+        userId,
+        type: 'kyc_webhook',
+        idempotencyKey,
+        reference,
+        status: 'APPLIED',
+        provider: 'MetaMap',
+        providerReference: profile.providerReference,
+        requestPayload: this.redactPayload(payload),
+        responsePayload: { status, userId },
+        metadata: { status, eventId: eventId ?? null },
+      }),
+    );
 
     const notification = await this.sendNotificationToUser(userId, {
       title: 'KYC status updated',
@@ -1668,7 +1754,13 @@ export class VidalpayService {
     });
   }
 
-  async handleProviderWebhook(provider: string, payload: AnyRecord) {
+  async handleProviderWebhook(
+    provider: string,
+    payload: AnyRecord,
+    signature?: string,
+  ) {
+    this.assertProviderWebhookSignature(provider, payload, signature);
+
     const reference =
       this.asString(payload.reference) ??
       this.asString(payload.providerReference) ??
@@ -2336,6 +2428,87 @@ export class VidalpayService {
       return normalized;
     }
     return 'UNDER_REVIEW';
+  }
+
+  private assertKycWebhookSignature(payload: AnyRecord, signature?: string) {
+    const secret = this.configService.get<string>('METAMAP_WEBHOOK_SECRET');
+    const environment = this.configService.get<string>('NODE_ENV') ?? 'development';
+
+    if (!secret) {
+      if (environment === 'production') {
+        this.throwProviderUnavailable({
+          code: 'KYC_WEBHOOK_NOT_CONFIGURED',
+          feature: 'kyc_webhook',
+          capability: 'kyc_start',
+          provider: 'MetaMap',
+          reason: 'The MetaMap webhook secret is not configured.',
+          missingRequirements: ['METAMAP_WEBHOOK_SECRET'],
+        });
+      }
+      return;
+    }
+
+    if (!signature) {
+      throw new UnauthorizedException('KYC webhook signature is required');
+    }
+
+    const expected = createHmac('sha256', secret)
+      .update(JSON.stringify(payload))
+      .digest('hex');
+    const provided = signature.replace(/^sha256=/i, '').trim();
+    const expectedBuffer = Buffer.from(expected, 'utf8');
+    const providedBuffer = Buffer.from(provided, 'utf8');
+
+    if (
+      expectedBuffer.length !== providedBuffer.length ||
+      !timingSafeEqual(expectedBuffer, providedBuffer)
+    ) {
+      throw new UnauthorizedException('Invalid KYC webhook signature');
+    }
+  }
+
+  private assertProviderWebhookSignature(
+    provider: string,
+    payload: AnyRecord,
+    signature?: string,
+  ) {
+    const secretKey = provider === 'Unit.co'
+      ? 'UNIT_WEBHOOK_SECRET'
+      : 'PAYVESSEL_WEBHOOK_SECRET';
+    const secret = this.configService.get<string>(secretKey);
+    const environment = this.configService.get<string>('NODE_ENV') ?? 'development';
+
+    if (!secret) {
+      if (environment === 'production') {
+        this.throwProviderUnavailable({
+          code: 'PROVIDER_WEBHOOK_NOT_CONFIGURED',
+          feature: `${provider} webhook`,
+          capability: provider === 'Unit.co' ? 'usd_wallet' : 'ngn_wallet',
+          provider,
+          reason: `${provider} webhook signing secret is not configured.`,
+          missingRequirements: [secretKey],
+        });
+      }
+      return;
+    }
+
+    if (!signature) {
+      throw new UnauthorizedException(`${provider} webhook signature is required`);
+    }
+
+    const expected = createHmac('sha256', secret)
+      .update(JSON.stringify(payload))
+      .digest('hex');
+    const provided = signature.replace(/^sha256=/i, '').trim();
+    const expectedBuffer = Buffer.from(expected, 'utf8');
+    const providedBuffer = Buffer.from(provided, 'utf8');
+
+    if (
+      expectedBuffer.length !== providedBuffer.length ||
+      !timingSafeEqual(expectedBuffer, providedBuffer)
+    ) {
+      throw new UnauthorizedException(`Invalid ${provider} webhook signature`);
+    }
   }
 
   private capabilitiesForKycStatus(status: string) {

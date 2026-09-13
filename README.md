@@ -31,6 +31,21 @@ The mobile API audit, provider-readiness matrix, unavailable-response contract,
 required environment variables, webhook URLs, request/response examples, and
 test results are documented in [API_CONTRACT.md](./API_CONTRACT.md).
 
+## Render deployment
+
+Use the existing Render PostgreSQL `DATABASE_URL` and keep TypeORM schema
+synchronization and migrations disabled. Configure Render with:
+
+```text
+Build Command: yarn install --frozen-lockfile --production=false && yarn build
+Start Command: npm run start:prod
+```
+
+Do not prepend `npm run db:migrate` to the Start Command for the existing
+database. The repository's compatibility script is a no-op so an old Render
+command cannot run migrations, but changing the dashboard Start Command to
+`npm run start:prod` is the intended configuration.
+
 ## Project setup
 
 ```bash

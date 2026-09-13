@@ -88,26 +88,6 @@ const EmailLayout = ({ children }) => {
             </div>
 
             <div>
-              {/* <div className="flex md:justify-between">
-                <Link href="#" className="inline-block mr-5">
-                  <Img
-                    src="https://stageapi.hervest.ng/uploads/icons/HV-Android.png"
-                    alt="LottoNowNow on Google Play Store"
-                    className="block  w-28 md:min-w-[116px]"
-                  />
-                </Link>
-                <Link
-                  href="https://apps.apple.com/ng/app/hervest/id1509714516?platform=iphone"
-                  className="inline-block"
-                >
-                  <Img
-                    src="https://stageapi.hervest.ng/uploads/icons/HV-Apple.png"
-                    alt="LottoNowNow on Apple Store"
-                    className="block w-28 md:min-w-[116px]"
-                  />
-                </Link>
-              </div> */}
-
               <div className="w-full flex space-x-2 md:mt-20 my-10">
                 <Link href="https://www.instagram.com/vidalpay">
                   <Img
@@ -132,21 +112,6 @@ const EmailLayout = ({ children }) => {
                   />
                 </Link>
 
-                {/* <Link href="https://www.linkedin.com/company/hervest">
-                  <Img
-                    src="https://res.cloudinary.com/dlhjvo4tz/image/upload/v1721545013/linkedln_gxdejy.png"
-                    alt="Linkedin"
-                    className="w-[32px] h-[32px] mx-2 "
-                  />
-                </Link> */}
-
-                {/* <Link href="#">
-                  <Img
-                    src="https://res.cloudinary.com/dlhjvo4tz/image/upload/v1721545012/telegram_y4gpxy.png"
-                    alt="Hervest Telegram"
-                    className="w-[32px] h-[32px] mx-2 "
-                  />
-                </Link> */}
               </div>
             </div>
           </div>

@@ -18,7 +18,7 @@ export const MailSubject = {
   NON_WINNING_TICKET: 'Non-Winning Ticket Notification',
   WINNING_TICKET: 'Winning Ticket Notification',
   DRAW_INCOMPLETE: 'Draw Incomplete Notification',
-  ADMIN_INVITE: 'LottoNowNow Admin Invitation',
+  ADMIN_INVITE: 'VidalPay Admin Invitation',
   RESET_TRANSACTION_PIN: 'Reset Transaction Pin',
   WITHDRAWAL_SUCCESSFUL: `Withdrawal Successful ${CONFIG_VARIABLES.APP_NAME}`,
   ACCOUNT_DEACTIVATED: `Account Deactivated ${CONFIG_VARIABLES.APP_NAME}`,

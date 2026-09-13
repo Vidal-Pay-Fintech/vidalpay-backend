@@ -16,9 +16,7 @@
 // export class EmailService {
 //   constructor() {
 //     // Initialize SendGrid with API key
-//     sgMail.setApiKey(
-//       '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',
-//     );
+//     sgMail.setApiKey(process.env.SENDGRID_API_KEY ?? '');
 //   }
 
 //   private generateEmail = (template: any) => {

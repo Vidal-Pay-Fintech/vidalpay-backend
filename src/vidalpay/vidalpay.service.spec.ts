@@ -42,6 +42,9 @@ describe('VidalpayService', () => {
   let providerOperationRepository: ReturnType<typeof repo>;
   let rewardLedgerRepository: ReturnType<typeof repo>;
   let referralEventRepository: ReturnType<typeof repo>;
+  let notificationRepository: ReturnType<typeof repo>;
+  let notificationPreferenceRepository: ReturnType<typeof repo>;
+  let notificationDeviceRepository: ReturnType<typeof repo>;
   let providerStatusService: jest.Mocked<Pick<ProviderStatusService, 'getStatus' | 'getStatuses' | 'isCapabilityEnabled'>>;
 
   beforeEach(() => {
@@ -54,9 +57,9 @@ describe('VidalpayService', () => {
     referralEventRepository = repo();
     const cardRepository = repo();
     const beneficiaryRepository = repo();
-    const notificationRepository = repo();
-    const notificationPreferenceRepository = repo();
-    const notificationDeviceRepository = repo();
+    notificationRepository = repo();
+    notificationPreferenceRepository = repo();
+    notificationDeviceRepository = repo();
     const supportTicketRepository = repo();
     const tokenRepository = repo();
     const disputeRepository = repo();
@@ -65,7 +68,7 @@ describe('VidalpayService', () => {
         status({
           capability,
           provider: capability?.startsWith?.('ngn') ? 'PayVessel' : 'Unit.co',
-          missingEnvVars: capability?.startsWith?.('ngn') ? ['PAYVESSEL_SECRET_KEY', 'PAYVESSEL_BUSINESS_ID'] : ['UNIT_API_TOKEN'],
+          missingEnvVars: capability?.startsWith?.('ngn') ? ['PAYVESSEL_API_KEY', 'PAYVESSEL_API_SECRET'] : ['UNIT_API_TOKEN'],
         }),
       ),
       getStatuses: jest.fn().mockReturnValue([status()]),
@@ -339,6 +342,87 @@ describe('VidalpayService', () => {
             amountLimitsEnforced: false,
           }),
         }),
+      }),
+    );
+  });
+
+  it('maps a MetaMap webhook to KYC state and deduplicates the event', async () => {
+    userRepository.findOne.mockResolvedValue({ id: 'user-1' });
+    kycProfileRepository.findOne.mockResolvedValue({
+      id: 'kyc-1',
+      userId: 'user-1',
+      status: 'IN_PROGRESS',
+      region: 'US',
+      capabilities: {},
+      limits: {},
+    });
+    providerOperationRepository.findOne.mockResolvedValue(null);
+    notificationPreferenceRepository.findOne.mockResolvedValue({
+      userId: 'user-1',
+      preferences: { push: false },
+    });
+    notificationDeviceRepository.find.mockResolvedValue([]);
+    notificationRepository.find.mockResolvedValue([]);
+    notificationRepository.create.mockImplementation((payload) => payload);
+
+    const payload = {
+      eventId: 'metamap-event-1',
+      userId: 'user-1',
+      status: 'APPROVED',
+      verificationId: 'verification-1',
+    };
+
+    await expect(service.handleKycWebhook(payload)).resolves.toEqual(
+      expect.objectContaining({ received: true, updated: true, status: 'VERIFIED' }),
+    );
+    expect(userRepository.update).toHaveBeenCalledWith('user-1', {
+      kycStatus: 'VERIFIED',
+    });
+    expect(providerOperationRepository.save).toHaveBeenCalledWith(
+      expect.objectContaining({
+        type: 'kyc_webhook',
+        idempotencyKey: 'metamap-event-1',
+        status: 'APPLIED',
+      }),
+    );
+
+    providerOperationRepository.findOne.mockResolvedValue({
+      status: 'APPLIED',
+      metadata: { status: 'VERIFIED' },
+    });
+    await expect(service.handleKycWebhook(payload)).resolves.toEqual(
+      expect.objectContaining({ received: true, updated: false, duplicate: true, status: 'VERIFIED' }),
+    );
+  });
+
+  it('updates the returned KYC user and writes an admin review audit record', async () => {
+    const targetUser = { id: 'user-1', kycStatus: 'IN_PROGRESS' };
+    userRepository.findOne
+      .mockResolvedValueOnce({ id: 'admin-1' })
+      .mockResolvedValue(targetUser);
+    kycProfileRepository.findOne.mockResolvedValue({
+      id: 'kyc-1',
+      userId: 'user-1',
+      status: 'IN_PROGRESS',
+      region: 'US',
+      capabilities: {},
+      limits: {},
+    });
+    notificationPreferenceRepository.findOne.mockResolvedValue({
+      userId: 'user-1',
+      preferences: { push: false },
+    });
+    notificationDeviceRepository.find.mockResolvedValue([]);
+    notificationRepository.find.mockResolvedValue([]);
+
+    const result = await service.reviewKyc('admin-1', 'user-1', 'VERIFIED');
+
+    expect(result.user).toEqual(expect.objectContaining({ id: 'user-1', kycStatus: 'VERIFIED' }));
+    expect(providerOperationRepository.save).toHaveBeenCalledWith(
+      expect.objectContaining({
+        type: 'kyc_admin_review',
+        status: 'APPLIED',
+        metadata: expect.objectContaining({ adminUserId: 'admin-1', decision: 'VERIFIED' }),
       }),
     );
   });

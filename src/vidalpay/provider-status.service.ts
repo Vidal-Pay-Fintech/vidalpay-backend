@@ -11,6 +11,7 @@ type CapabilityConfig = {
   providerType: string;
   service: string;
   envVars: string[];
+  envVarGroups?: string[][];
   unsupported?: boolean;
   failureReason?: string;
 };
@@ -161,7 +162,11 @@ export class ProviderStatusService {
         provider: 'PayVessel/Unit.co',
         providerType: 'TRANSFER',
         service: 'Provider bank transfer rails',
-        envVars: ['PAYVESSEL_SECRET_KEY', 'PAYVESSEL_BUSINESS_ID'],
+        envVars: [],
+        envVarGroups: [
+          ['UNIT_API_TOKEN'],
+          ['PAYVESSEL_API_KEY', 'PAYVESSEL_API_SECRET'],
+        ],
       },
       tag_transfer: {
         provider: 'VidalPay',
@@ -295,9 +300,15 @@ export class ProviderStatusService {
 
   getStatus(capability: ProviderCapability): ProviderStatusItem {
     const config = this.capabilityConfig[capability];
-    const missingEnvVars = config.envVars.filter(
-      (envVar) => !this.configService.get<string>(envVar),
-    );
+    const missingEnvVars = config.envVarGroups
+      ? config.envVarGroups.some((group) =>
+          group.every((envVar) => this.configService.get<string>(envVar)),
+        )
+        ? []
+        : config.envVarGroups.map((group) => group.join(' + '))
+      : config.envVars.filter(
+          (envVar) => !this.configService.get<string>(envVar),
+        );
     const envConfigured = missingEnvVars.length === 0;
     const internalProvider = config.provider === 'VidalPay';
     const enabled = !config.unsupported && (envConfigured || internalProvider);

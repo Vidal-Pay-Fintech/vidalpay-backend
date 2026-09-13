@@ -77,10 +77,10 @@ returns a structured unavailable response.
 | Unit.co | USD physical cards | Yes | https://www.unit.co/docs/api/cards/api/ | `/cards` with physical debit card types | `UNIT_API_TOKEN`, customer/account/card program, shipping address | Yes | Blocked | Supported by Unit card API but not wired to a VidalPay provider customer yet |
 | Unit.co | Card lifecycle | Yes | https://www.unit.co/docs/api/cards/api/ | freeze/unfreeze/close card actions | `UNIT_API_TOKEN`, provider card id | Yes | Blocked | No local full PAN/CVV storage added |
 | Unit.co | Loans/credit | Yes | https://www.unit.co/docs/api/credit-accounts/overview/ | credit account APIs | `UNIT_API_TOKEN`, credit program setup | Yes | Blocked | No APR/offers are fabricated |
-| PayVessel | NGN virtual accounts | Yes | https://docs.payvessel.com/api-reference/virtual-accounts/create-virtual-account | virtual account API | `PAYVESSEL_SECRET_KEY`, `PAYVESSEL_BUSINESS_ID` | Yes | Blocked | No account number is generated locally |
-| PayVessel | NGN transfers | Yes | https://docs.payvessel.com/api-reference/transfers/initiate-transfer | transfer API | `PAYVESSEL_SECRET_KEY`, `PAYVESSEL_BUSINESS_ID` | Yes | Blocked | External debits are blocked until provider execution is configured |
-| PayVessel | Virtual cards | Yes | https://docs.payvessel.com/api-reference/virtual-cards/create-customer-card | virtual card API | `PAYVESSEL_SECRET_KEY`, `PAYVESSEL_BUSINESS_ID` | Yes | Unsupported for NGN | Docs reviewed describe card issuing, but NGN card support was not confirmed |
-| PayVessel | Airtime/data/utilities | Yes | https://docs.payvessel.com/api-reference/biller-reseller/create-order | biller reseller order API | `PAYVESSEL_SECRET_KEY`, `PAYVESSEL_BUSINESS_ID` | Yes | Blocked | Catalogs return empty/unavailable until provider catalog calls are live-tested |
+| PayVessel | NGN virtual accounts | Yes | https://docs.payvessel.com/api-reference/virtual-accounts/create-virtual-account | virtual account API | `PAYVESSEL_API_KEY`, `PAYVESSEL_API_SECRET` | Yes | Blocked | No account number is generated locally |
+| PayVessel | NGN transfers | Yes | https://docs.payvessel.com/api-reference/transfers/initiate-transfer | transfer API | `PAYVESSEL_API_KEY`, `PAYVESSEL_API_SECRET` | Yes | Blocked | External debits are blocked until provider execution is configured |
+| PayVessel | Virtual cards | Yes | https://docs.payvessel.com/api-reference/virtual-cards/create-customer-card | virtual card API | `PAYVESSEL_API_KEY`, `PAYVESSEL_API_SECRET` | Yes | Unsupported for NGN | Docs reviewed describe card issuing, but NGN card support was not confirmed |
+| PayVessel | Airtime/data/utilities | Yes | https://docs.payvessel.com/api-reference/biller-reseller/create-order | biller reseller order API | `PAYVESSEL_API_KEY`, `PAYVESSEL_API_SECRET` | Yes | Blocked | Catalogs return empty/unavailable until provider catalog calls are live-tested |
 | FX provider | Quotes/conversion | No provider found in repo | N/A | N/A | `FX_PROVIDER_BASE_URL`, `FX_PROVIDER_API_KEY` | Depends on provider | Blocked | Backend does not invent rates |
 | Crypto provider | Overview/assets/deposit/withdrawal | No provider found in repo | N/A | N/A | `CRYPTO_PROVIDER`, `CRYPTO_PROVIDER_API_KEY` | Yes | Blocked | Overview/assets return honest disabled state with null values, not fabricated positions |
 | Investment provider | Products/orders | No provider found in repo | N/A | N/A | `INVESTMENT_PROVIDER`, `INVESTMENT_PROVIDER_API_KEY` | Yes | Blocked | No products or portfolio values are fabricated |
@@ -154,7 +154,7 @@ Blocked response example:
   "feature": "external_transfer",
   "capability": "bank_transfer",
   "reason": "External transfers must be executed by Unit.co or PayVessel; no live-tested provider path is configured.",
-  "missingRequirements": ["PAYVESSEL_SECRET_KEY", "PAYVESSEL_BUSINESS_ID"],
+  "missingRequirements": ["PAYVESSEL_API_KEY", "PAYVESSEL_API_SECRET"],
   "provider": "PayVessel",
   "retryable": false
 }
@@ -192,10 +192,16 @@ Provider status item example:
   `SMTP_MAIL_PASSWORD`, `TWILIO_ACCOUNT_SID`, `TWILIO_AUTH_TOKEN`,
   `TWILIO_PHONE_NUMBER`.
 - Unit: `UNIT_API_TOKEN`, optional `UNIT_BASE_URL`, `UNIT_WEBHOOK_SECRET`.
-- PayVessel: `PAYVESSEL_SECRET_KEY`, `PAYVESSEL_API_KEY`,
-  `PAYVESSEL_BUSINESS_ID`, optional `PAYVESSEL_BASE_URL`,
+- PayVessel: `PAYVESSEL_API_KEY`, `PAYVESSEL_API_SECRET`, optional
+  `PAYVESSEL_BASE_URL` (defaults to `https://sandbox.payvessel.com`), and
   `PAYVESSEL_WEBHOOK_SECRET`.
-- KYC: `METAMAP_CLIENT_ID`, `METAMAP_WORKFLOW_ID`.
+- KYC: `METAMAP_CLIENT_ID`, `METAMAP_WORKFLOW_ID`, and
+  `METAMAP_WEBHOOK_SECRET` for production webhook verification.
+- Notifications/profile media: optional `EXPO_PUSH_ACCESS_TOKEN`,
+  `EMAIL_LOGO_URL`, `PROFILE_IMAGE_STORAGE_PROVIDER`, and `ENCRYPT_KEY`.
+- SMTP delivery tuning: optional `SMTP_TLS_REJECT_UNAUTHORIZED`,
+  `SMTP_CONNECTION_TIMEOUT_MS`, `SMTP_GREETING_TIMEOUT_MS`, and
+  `SMTP_SOCKET_TIMEOUT_MS`.
 - Future providers: `FX_PROVIDER_BASE_URL`, `FX_PROVIDER_API_KEY`,
   `CRYPTO_PROVIDER`, `CRYPTO_PROVIDER_API_KEY`, `INVESTMENT_PROVIDER`,
   `INVESTMENT_PROVIDER_API_KEY`, `TAX_PROVIDER`, `TAX_PROVIDER_API_KEY`,
@@ -203,20 +209,46 @@ Provider status item example:
 
 ## Webhooks To Configure
 
-- Unit.co: `POST /api/v1/webhooks/unit`
-- PayVessel: `POST /api/v1/webhooks/payvessel`
-- MetaMap: `POST /api/v1/webhooks/kyc/metamap`
+- Unit.co: `POST /api/v1/webhooks/unit` with the configured Unit webhook
+  signature header and `UNIT_WEBHOOK_SECRET`.
+- PayVessel: `POST /api/v1/webhooks/payvessel` with the configured PayVessel
+  signature header and `PAYVESSEL_WEBHOOK_SECRET`.
+- MetaMap: `POST /api/v1/webhooks/kyc/metamap` with
+  `x-metamap-signature` and `METAMAP_WEBHOOK_SECRET`.
 
-## Database Migration Added
+## Existing database policy
 
-- `src/database/migrations/1788998400000-MobileContractSchema.ts` adds the
-  mobile contract tables and columns: `auth_session`, `kyc_profile`,
-  `provider_operation`, `financial_transaction`, `card`, `beneficiary`,
-  `notification`, `notification_preference`, `notification_device`,
-  `support_ticket`, `dispute`, plus additional provider/user columns on
-  `wallet` and `user`.
-- `src/database/migrations/1789084800000-RewardsReferralsSchema.ts` adds
-  `reward_ledger_entry` and `referral_event` for real rewards/referral history.
+The running application uses the existing Render PostgreSQL database with
+`synchronize: false` and `migrationsRun: false`. Render should start the
+service with `npm run start:prod`; it must not run `db:migrate` against the
+existing database. The repository keeps the migration files for controlled
+new-environment rollouts, but this deployment does not execute them and no
+database settings or migration files were changed in this pass. The
+compatibility `db:migrate` script exits without connecting to the database if
+an old Render start command still invokes it.
+
+The PostgreSQL metadata fix is limited to explicit TypeORM column types for
+nullable string/date fields. It does not alter existing rows or schema.
+
+For a read-only Render database check before enabling the new screens, run:
+
+```sql
+SELECT table_name
+FROM information_schema.tables
+WHERE table_schema = 'public'
+  AND table_name IN (
+    'user', 'wallet', 'token', 'auth_session', 'kyc_profile',
+    'provider_operation', 'financial_transaction', 'card', 'beneficiary',
+    'notification', 'notification_preference', 'notification_device',
+    'support_ticket', 'dispute', 'reward_ledger_entry', 'referral_event'
+  )
+ORDER BY table_name;
+```
+
+This query only reads metadata. If a table used by a route is absent, that
+route must remain disabled until the existing database is provisioned through
+VidalPay's approved database change process; this deployment does not create
+tables automatically.
 
 ## Additional Request/Response Examples
 
@@ -422,13 +454,43 @@ Provider status item example:
 
 ## Test Results
 
-- `corepack pnpm exec tsc --noEmit`
-- `corepack pnpm exec nest build`
-- `corepack pnpm exec jest --runInBand`
-- Final Jest result: 17 suites passed, 56 tests passed.
+- Backend build: `corepack pnpm exec nest build` passed.
+- Backend tests: `corepack pnpm exec jest --runInBand` passed with 19 suites and
+  67 tests.
+- Mobile TypeScript check: `corepack yarn tsc --noEmit --pretty false` passed.
+- `npm run db:migrate` was verified to exit without connecting to PostgreSQL.
+  Static checks do not replace a Render health check or provider sandbox
+  transaction test.
 
 ## Mobile Notes
 
 No provider secrets are needed in mobile. The mobile app should continue using
 `/providers/status` and blocked response `code/message/reason` to decide whether
 to show a feature, disable it, or explain missing provider setup.
+
+## Regional wallet and charge policy
+
+- A Nigerian account has NGN as its default wallet. A United States account has
+  USD as its default wallet.
+- Wallet and account-detail endpoints filter by the requested currency, and
+  normalized user responses order the regional default wallet first.
+- NGN airtime, data, and utility operations require an NGN wallet and a
+  PayVessel-backed flow. USD account rails and USD cards/credit require the
+  corresponding Unit.co capability.
+- FX, investment, crypto, and other cross-wallet operations remain blocked
+  until a real provider flow recomputes the quote/terms and records a journal.
+
+## KYC review and push delivery
+
+- `GET /api/v1/admin/kyc` and `GET /api/v1/admin/kyc/:userId` read the same
+  `kyc_profile` and user state used by the mobile app.
+- `POST /api/v1/admin/kyc/:userId/approve`, `/reject`, and
+  `/request-information` update the KYC status, capabilities, limits, and
+  dashboard response. Each review writes an audit operation and persists an
+  in-app notification.
+- `POST /api/v1/webhooks/kyc/metamap` maps provider statuses to
+  `VERIFIED`, `REJECTED`, `FAILED`, or `UNDER_REVIEW`, verifies
+  `x-metamap-signature` in production, and deduplicates events.
+- Push delivery uses registered Expo device tokens only when push preference is
+  enabled. The notification remains persisted if delivery is unavailable, and
+  invalid Expo devices are revoked after a `DeviceNotRegistered` response.

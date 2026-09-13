@@ -22,6 +22,7 @@ describe('VidalPay mobile contract controllers', () => {
     listNotifications: jest.fn(),
     markNotificationsRead: jest.fn(),
     handleProviderWebhook: jest.fn(),
+    handleKycWebhook: jest.fn(),
     rewardsDashboard: jest.fn(),
     rewardsHistory: jest.fn(),
     redeemRewards: jest.fn(),
@@ -107,7 +108,22 @@ describe('VidalPay mobile contract controllers', () => {
     controller.unit({ reference: 'unit-ref' });
     controller.payvessel({ reference: 'payvessel-ref' });
 
-    expect(service.handleProviderWebhook).toHaveBeenCalledWith('Unit.co', { reference: 'unit-ref' });
-    expect(service.handleProviderWebhook).toHaveBeenCalledWith('PayVessel', { reference: 'payvessel-ref' });
+    expect(service.handleProviderWebhook).toHaveBeenCalledWith('Unit.co', { reference: 'unit-ref' }, undefined);
+    expect(service.handleProviderWebhook).toHaveBeenCalledWith('PayVessel', { reference: 'payvessel-ref' }, undefined);
+  });
+
+  it('passes the MetaMap signature to the KYC webhook handler', () => {
+    const controller = new WebhooksController(service as VidalpayService);
+
+    controller.kyc(
+      { eventId: 'event-1', status: 'VERIFIED' },
+      'sha256=signature',
+      undefined,
+    );
+
+    expect(service.handleKycWebhook).toHaveBeenCalledWith(
+      { eventId: 'event-1', status: 'VERIFIED' },
+      'sha256=signature',
+    );
   });
 });

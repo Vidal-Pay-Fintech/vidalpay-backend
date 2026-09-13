@@ -39,6 +39,22 @@ describe('ProviderStatusService', () => {
     );
   });
 
+  it('accepts either configured currency rail for the shared bank-transfer capability', () => {
+    const payVesselService = buildService({
+      PAYVESSEL_API_KEY: 'sandbox-key',
+      PAYVESSEL_API_SECRET: 'sandbox-secret',
+    });
+
+    expect(payVesselService.getStatus('bank_transfer')).toEqual(
+      expect.objectContaining({
+        enabled: true,
+        envConfigured: true,
+        missingEnvVars: [],
+        readinessStatus: 'CONFIGURED_NOT_LIVE_TESTED',
+      }),
+    );
+  });
+
   it('does not mark unsupported or unimplemented product areas as available', () => {
     const service = buildService();
 

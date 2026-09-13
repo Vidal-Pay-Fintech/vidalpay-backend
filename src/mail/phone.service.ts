@@ -13,7 +13,7 @@ import { CONFIG_VARIABLES } from 'src/utils/config';
 
 @Injectable()
 export class PhoneService {
-  private readonly SENDER_ID = 'Lottonownow';
+  private readonly SENDER_ID = 'VidalPay';
   private user: User;
   private readonly logger = new Logger(PhoneService.name);
   private twilioClient: Twilio;
