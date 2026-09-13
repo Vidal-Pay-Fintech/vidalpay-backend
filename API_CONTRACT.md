@@ -86,6 +86,18 @@ returns a structured unavailable response.
 
 ## Structured Responses
 
+## Phone Number Handling
+
+- Signup accepts international E.164 phone numbers such as `+2348012345678`
+  and `+15551234567`.
+- If mobile sends a local US number with `countryCode: "US"` or
+  `country: "United States"`, the backend normalizes it to `+1...` before
+  storage.
+- If mobile sends a local Nigerian number with `countryCode: "NG"` or
+  `country: "Nigeria"`, the backend normalizes it to `+234...`.
+- Login and phone OTP lookup try safe phone variants so US users are not forced
+  into Nigerian `+234` formatting.
+
 Wallet response example:
 
 ```json

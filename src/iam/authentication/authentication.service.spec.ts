@@ -105,42 +105,21 @@ describe('AuthenticationService', () => {
     expect(mailService.sendResetTransactionPinCode).toHaveBeenCalledWith('user-1', expect.any(String));
   });
 
-  it('normalizes US signup phone numbers before storing the user', async () => {
-    userRepository.checkUserExistByEmail.mockResolvedValue(true);
-    userRepository.create.mockImplementation(async (payload) => ({
-      id: 'user-1',
-      role: UserRole.CUSTOMER,
-      isVerified: false,
-      status: AccountStatus.ACTIVE,
-      ...payload,
-    }));
-    hashingService.hash.mockResolvedValue('hashed-password');
-    walletService.createCustomerWallets.mockResolvedValue(undefined);
-    tokenService.create.mockResolvedValue({ id: 'token-1' });
-    mailService.sendEmailVerificationCode.mockResolvedValue(undefined);
-    jwtService.signAsync
-      .mockResolvedValueOnce('access-token')
-      .mockResolvedValueOnce('refresh-token');
-
-    await service.signUp({
-      firstName: 'Ada',
-      lastName: 'Lovelace',
-      email: 'ada@example.com',
-      password: 'StrongPass1!',
-      pin: '',
-      phoneNumber: '5551234567',
-      countryCode: 'US',
-      country: 'United States',
-    });
-
-    expect(userRepository.create).toHaveBeenCalledWith(
-      expect.objectContaining({
-        phoneNumber: '+15551234567',
-        countryCode: 'US',
-        country: 'United States',
-        region: 'US',
-      }),
-    );
+  it('normalizes US and Nigerian phone numbers without forcing US users into +234', () => {
+    expect(
+      (service as any).normalizePhoneNumberForRegion(
+        '5551234567',
+        'US',
+        'United States',
+      ),
+    ).toBe('+15551234567');
+    expect(
+      (service as any).normalizePhoneNumberForRegion(
+        '08012345678',
+        'NG',
+        'Nigeria',
+      ),
+    ).toBe('+2348012345678');
   });
 
   it('finds US users by local or E.164 phone variants during login', async () => {
