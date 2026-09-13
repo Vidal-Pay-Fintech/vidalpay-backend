@@ -45,11 +45,29 @@ describe('ProviderStatusService', () => {
     expect(service.getStatus('ngn_physical_card')).toEqual(
       expect.objectContaining({ enabled: false, readinessStatus: 'UNSUPPORTED' }),
     );
-    expect(service.getStatus('rewards')).toEqual(
-      expect.objectContaining({ enabled: false, readinessStatus: 'UNSUPPORTED' }),
-    );
     expect(service.getStatus('crypto_overview')).toEqual(
       expect.objectContaining({ enabled: false, missingEnvVars: ['CRYPTO_PROVIDER', 'CRYPTO_PROVIDER_API_KEY'] }),
+    );
+  });
+
+  it('marks internal rewards and referrals ledgers ready without mobile secrets', () => {
+    const service = buildService();
+
+    expect(service.getStatus('rewards')).toEqual(
+      expect.objectContaining({
+        provider: 'VidalPay',
+        enabled: true,
+        readinessStatus: 'READY',
+        missingEnvVars: [],
+      }),
+    );
+    expect(service.getStatus('referrals')).toEqual(
+      expect.objectContaining({
+        provider: 'VidalPay',
+        enabled: true,
+        readinessStatus: 'READY',
+        missingEnvVars: [],
+      }),
     );
   });
 });

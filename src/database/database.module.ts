@@ -22,6 +22,8 @@ import { Notification } from './entities/notification.entity';
 import { NotificationDevice } from './entities/notification-device.entity';
 import { NotificationPreference } from './entities/notification-preference.entity';
 import { ProviderOperation } from './entities/provider-operation.entity';
+import { ReferralEvent } from './entities/referral-event.entity';
+import { RewardLedgerEntry } from './entities/reward-ledger-entry.entity';
 import { SupportTicket } from './entities/support-ticket.entity';
 
 //REPOSITORIES
@@ -69,6 +71,8 @@ import { buildMysqlDataSourceOptions } from './database.config';
       NotificationDevice,
       NotificationPreference,
       ProviderOperation,
+      ReferralEvent,
+      RewardLedgerEntry,
       SupportTicket,
     ]),
   ],

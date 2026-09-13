@@ -31,6 +31,16 @@ export class UserController {
     return this.vidalpayService.getSecurityOverview(user.sub);
   }
 
+  @Get('account-level')
+  accountLevel(@ActiveUser() user: ActiveUserData) {
+    return this.vidalpayService.getAccountLevel(user.sub);
+  }
+
+  @Get('limits')
+  limits(@ActiveUser() user: ActiveUserData) {
+    return this.vidalpayService.getAccountLimits(user.sub);
+  }
+
   @Patch('profile')
   updateProfile(@ActiveUser() user: ActiveUserData, @Body() body: Record<string, unknown>) {
     return this.vidalpayService.updateProfile(user.sub, body);

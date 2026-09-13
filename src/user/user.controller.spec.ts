@@ -6,7 +6,10 @@ describe('UserController', () => {
   let controller: UserController;
   const vidalpayService = {
     getCurrentUser: jest.fn(),
-    getHome: jest.fn(),
+    getHomeOverview: jest.fn(),
+    getSecurityOverview: jest.fn(),
+    getAccountLevel: jest.fn(),
+    getAccountLimits: jest.fn(),
     updateProfile: jest.fn(),
     requestEmailChange: jest.fn(),
     submitKycIdentity: jest.fn(),
@@ -37,6 +40,22 @@ describe('UserController', () => {
     vidalpayService.updateProfile.mockResolvedValue({ id: 'user-1', firstName: 'Ada' });
 
     await expect(controller.updateProfile({ sub: 'user-1' } as any, { firstName: 'Ada' })).resolves.toEqual({ id: 'user-1', firstName: 'Ada' });
+  });
+
+  it('routes account level and limits through the backend source of truth', async () => {
+    vidalpayService.getAccountLevel.mockResolvedValue({ code: 'EMAIL_VERIFIED' });
+    vidalpayService.getAccountLimits.mockResolvedValue({
+      limits: { enforcement: { amountLimitsEnforced: false } },
+    });
+
+    await expect(controller.accountLevel({ sub: 'user-1' } as any)).resolves.toEqual({
+      code: 'EMAIL_VERIFIED',
+    });
+    await expect(controller.limits({ sub: 'user-1' } as any)).resolves.toEqual({
+      limits: { enforcement: { amountLimitsEnforced: false } },
+    });
+    expect(vidalpayService.getAccountLevel).toHaveBeenCalledWith('user-1');
+    expect(vidalpayService.getAccountLimits).toHaveBeenCalledWith('user-1');
   });
 
   it('routes account closure and deletion requests through the backend service', async () => {

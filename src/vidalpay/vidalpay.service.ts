@@ -21,6 +21,8 @@ import { Notification } from 'src/database/entities/notification.entity';
 import { NotificationDevice } from 'src/database/entities/notification-device.entity';
 import { NotificationPreference } from 'src/database/entities/notification-preference.entity';
 import { ProviderOperation } from 'src/database/entities/provider-operation.entity';
+import { ReferralEvent } from 'src/database/entities/referral-event.entity';
+import { RewardLedgerEntry } from 'src/database/entities/reward-ledger-entry.entity';
 import { SupportTicket } from 'src/database/entities/support-ticket.entity';
 import { Token } from 'src/database/entities/token.entity';
 import { AccountStatus, User } from 'src/database/entities/user.entity';
@@ -52,6 +54,10 @@ export class VidalpayService {
     private readonly transactionRepository: Repository<FinancialTransaction>,
     @InjectRepository(ProviderOperation)
     private readonly providerOperationRepository: Repository<ProviderOperation>,
+    @InjectRepository(RewardLedgerEntry)
+    private readonly rewardLedgerRepository: Repository<RewardLedgerEntry>,
+    @InjectRepository(ReferralEvent)
+    private readonly referralEventRepository: Repository<ReferralEvent>,
     @InjectRepository(Card)
     private readonly cardRepository: Repository<Card>,
     @InjectRepository(Beneficiary)
@@ -105,6 +111,28 @@ export class VidalpayService {
   async getSecurityOverview(userId: string) {
     const user = await this.findUser(userId);
     return this.buildSecurityOverview(user);
+  }
+
+  async getAccountLevel(userId: string) {
+    const user = await this.findUser(userId);
+    const kyc = await this.getOrCreateKycProfile(user);
+    return this.buildAccountLevel(user, kyc);
+  }
+
+  async getAccountLimits(userId: string) {
+    const user = await this.findUser(userId);
+    const kyc = await this.getOrCreateKycProfile(user);
+    const accountLevel = this.buildAccountLevel(user, kyc);
+    return {
+      accountLevel,
+      limits: kyc.limits ?? this.defaultLimits(kyc.status),
+      providerLimits: {
+        unit: null,
+        payvessel: null,
+      },
+      message:
+        'Amount limits are exposed from backend policy. Provider-specific limits remain null until Unit.co and PayVessel account/card provisioning is live-tested.',
+    };
   }
 
   async updateProfile(userId: string, payload: AnyRecord) {
@@ -1246,25 +1274,155 @@ export class VidalpayService {
 
   async rewardsDashboard(userId: string) {
     await this.findUser(userId);
+    const entries = await this.rewardLedgerRepository.find({
+      where: { userId },
+      order: { createdAt: 'DESC' },
+    });
+    const summary = this.buildRewardSummary(entries);
     return {
-      enabled: false,
-      balance: null,
+      enabled: true,
+      provider: 'VidalPay',
+      unit: 'POINTS',
       currency: null,
-      history: [],
+      ...summary,
+      redemption: {
+        enabled: false,
+        reason:
+          'Reward redemption requires an approved redemption policy and wallet-credit workflow before points can be converted or paid out.',
+      },
+      history: entries.map((entry) => this.normalizeRewardEntry(entry)),
       message:
-        'Rewards are unavailable because the backend has no implemented rewards ledger or redemption workflow.',
+        entries.length === 0
+          ? 'No reward entries have been recorded for this account yet.'
+          : null,
     };
+  }
+
+  async rewardsHistory(userId: string) {
+    await this.findUser(userId);
+    const entries = await this.rewardLedgerRepository.find({
+      where: { userId },
+      order: { createdAt: 'DESC' },
+    });
+    return {
+      rewards: entries.map((entry) => this.normalizeRewardEntry(entry)),
+      history: entries.map((entry) => this.normalizeRewardEntry(entry)),
+      nextCursor: null,
+    };
+  }
+
+  async redeemRewards(userId: string, payload: AnyRecord) {
+    await this.findUser(userId);
+    await this.recordBlockedOperation(userId, 'rewards_redeem', payload, {
+      provider: 'VidalPay',
+      capability: 'rewards',
+      reason:
+        'Reward ledger history is available, but redemption is blocked until VidalPay defines the points-to-value policy, approval flow, and wallet-credit journal.',
+    });
   }
 
   async referralsDashboard(userId: string) {
     const user = await this.findUser(userId);
+    const referralCode = await this.ensureReferralCode(user);
+    const [events, earnings] = await Promise.all([
+      this.referralEventRepository.find({
+        where: { referrerUserId: user.id },
+        order: { createdAt: 'DESC' },
+      }),
+      this.rewardLedgerRepository.find({
+        where: { userId: user.id, source: 'REFERRAL' },
+        order: { createdAt: 'DESC' },
+      }),
+    ]);
+    const referralRewardSummary = this.buildRewardSummary(earnings);
+
     return {
-      referralCode: user.referralCode,
-      inviteTrackingEnabled: false,
-      invitedCount: null,
-      earnings: [],
+      referralCode,
+      inviteTrackingEnabled: true,
+      invitedCount: events.length,
+      acceptedCount: events.filter((event) =>
+        ['SIGNED_UP', 'KYC_VERIFIED', 'REWARDED'].includes(event.status),
+      ).length,
+      rewardedCount: events.filter((event) => event.status === 'REWARDED').length,
+      earnings: earnings.map((entry) => this.normalizeRewardEntry(entry)),
+      rewardSummary: referralRewardSummary,
+      events: events.map((event) => this.normalizeReferralEvent(event)),
       message:
-        'Referral code is available; invite tracking and referral earnings are not implemented yet.',
+        events.length === 0
+          ? 'Referral code is available. No referral invites have been tracked yet.'
+          : null,
+    };
+  }
+
+  async referralEarnings(userId: string) {
+    await this.findUser(userId);
+    const earnings = await this.rewardLedgerRepository.find({
+      where: { userId, source: 'REFERRAL' },
+      order: { createdAt: 'DESC' },
+    });
+
+    return {
+      earnings: earnings.map((entry) => this.normalizeRewardEntry(entry)),
+      rewardSummary: this.buildRewardSummary(earnings),
+    };
+  }
+
+  async trackReferralInvite(userId: string, payload: AnyRecord) {
+    const user = await this.findUser(userId);
+    const referralCode = await this.ensureReferralCode(user);
+    const inviteeEmail =
+      this.asString(payload.inviteeEmail) ?? this.asString(payload.email);
+    const inviteePhoneNumber =
+      this.asString(payload.inviteePhoneNumber) ??
+      this.asString(payload.phoneNumber);
+
+    if (!inviteeEmail && !inviteePhoneNumber) {
+      throw new BadRequestException('inviteeEmail or inviteePhoneNumber is required');
+    }
+
+    const idempotencyKey =
+      this.asString(payload.idempotencyKey) ??
+      this.asString(payload.reference) ??
+      `referral_invite_${randomUUID()}`;
+    const existing = await this.referralEventRepository.findOne({
+      where: { referrerUserId: user.id, idempotencyKey },
+    });
+
+    if (existing) {
+      return {
+        tracked: true,
+        referralCode,
+        invite: this.normalizeReferralEvent(existing),
+        message:
+          'Referral invite was already tracked for this idempotency key. No duplicate reward was created.',
+      };
+    }
+
+    const invite = await this.referralEventRepository.save(
+      this.referralEventRepository.create({
+        referrerUserId: user.id,
+        referredUserId: null,
+        referralCode,
+        inviteeEmail,
+        inviteePhoneNumber,
+        status: 'INVITED',
+        reference: idempotencyKey,
+        idempotencyKey,
+        rewardLedgerEntryId: null,
+        metadata: {
+          channel: this.asString(payload.channel),
+          campaign: this.asString(payload.campaign),
+        },
+      }),
+    );
+
+    return {
+      tracked: true,
+      referralCode,
+      invite: this.normalizeReferralEvent(invite),
+      rewardCreated: false,
+      message:
+        'Referral invite was tracked. No earning is posted until the referred user completes the backend-defined qualifying action.',
     };
   }
 
@@ -1374,7 +1532,7 @@ export class VidalpayService {
         uploads: [],
         identity: {},
         capabilities: this.capabilitiesForKycStatus(status),
-        limits: this.defaultLimits(),
+        limits: this.defaultLimits(status),
       }),
     );
   }
@@ -1430,11 +1588,12 @@ export class VidalpayService {
       wallet: wallets.map((wallet) => this.normalizeWallet(wallet)),
       kyc: this.normalizeKycProfile(kyc),
       kycStatus: kyc.status,
+      accountLevel: this.buildAccountLevel(user, kyc),
       region: kyc.region ?? user.region ?? this.inferRegion(user),
       provider: kyc.provider,
       capabilities: kyc.capabilities ?? this.capabilitiesForKycStatus(kyc.status),
       productAvailability: this.buildProductAvailability(),
-      limits: kyc.limits ?? this.defaultLimits(),
+      limits: kyc.limits ?? this.defaultLimits(kyc.status),
       security: this.buildSecurityOverview(user),
       accountRails: this.buildAccountRails(wallets),
       fundingMethods: this.buildFundingMethods(),
@@ -1511,12 +1670,161 @@ export class VidalpayService {
       uploads: profile.uploads ?? [],
       capabilities:
         profile.capabilities ?? this.capabilitiesForKycStatus(profile.status),
-      limits: profile.limits ?? this.defaultLimits(),
+      limits: profile.limits ?? this.defaultLimits(profile.status),
       identity: profile.identity ?? {},
       providerReference: profile.providerReference,
       createdAt: profile.createdAt,
       updatedAt: profile.updatedAt,
     };
+  }
+
+  private buildAccountLevel(user: User, kyc: KycProfile) {
+    const kycStatus = kyc.status ?? user.kycStatus ?? 'NOT_STARTED';
+    const emailVerified = Boolean(user.isVerified);
+    const phoneVerified = Boolean(user.isPhoneVerified);
+    const verified = kycStatus === 'VERIFIED';
+    const level = verified
+      ? 'KYC_VERIFIED'
+      : emailVerified && phoneVerified
+        ? 'CONTACT_VERIFIED'
+        : emailVerified
+          ? 'EMAIL_VERIFIED'
+          : 'BASIC';
+    const rankByLevel: Record<string, number> = {
+      BASIC: 0,
+      EMAIL_VERIFIED: 1,
+      CONTACT_VERIFIED: 2,
+      KYC_VERIFIED: 3,
+    };
+    const requirements: string[] = [];
+
+    if (!emailVerified) {
+      requirements.push('VERIFY_EMAIL');
+    }
+    if (!phoneVerified) {
+      requirements.push('VERIFY_PHONE');
+    }
+    if (!verified) {
+      requirements.push('COMPLETE_KYC');
+    }
+
+    return {
+      code: level,
+      rank: rankByLevel[level],
+      status: verified ? 'ACTIVE' : 'LIMITED',
+      title: level
+        .split('_')
+        .map((part) => part.charAt(0) + part.slice(1).toLowerCase())
+        .join(' '),
+      kycStatus,
+      emailVerified,
+      phoneVerified,
+      requirements,
+      capabilities: this.capabilitiesForKycStatus(kycStatus),
+      limits: kyc.limits ?? this.defaultLimits(kycStatus),
+      message: verified
+        ? 'KYC is verified. Provider-specific limits still depend on live provider provisioning.'
+        : 'Complete verification requirements to unlock bank transfers and provider-backed features.',
+    };
+  }
+
+  private normalizeRewardEntry(entry: RewardLedgerEntry) {
+    return {
+      id: entry.id,
+      type: entry.type,
+      points: Number(entry.points ?? 0),
+      signedPoints: this.rewardEntrySignedPoints(entry),
+      unit: entry.unit ?? 'POINTS',
+      currency: entry.currency ?? null,
+      status: entry.status,
+      source: entry.source ?? null,
+      reference: entry.reference,
+      relatedReference: entry.relatedReference ?? null,
+      description: entry.description ?? null,
+      postedAt: entry.postedAt ?? null,
+      expiresAt: entry.expiresAt ?? null,
+      metadata: entry.metadata ?? null,
+      createdAt: entry.createdAt,
+      updatedAt: entry.updatedAt,
+    };
+  }
+
+  private normalizeReferralEvent(event: ReferralEvent) {
+    return {
+      id: event.id,
+      referralCode: event.referralCode,
+      referredUserId: event.referredUserId ?? null,
+      inviteeEmail: event.inviteeEmail ?? null,
+      inviteePhoneNumber: event.inviteePhoneNumber ?? null,
+      status: event.status,
+      reference: event.reference,
+      idempotencyKey: event.idempotencyKey ?? null,
+      rewardLedgerEntryId: event.rewardLedgerEntryId ?? null,
+      metadata: event.metadata ?? null,
+      createdAt: event.createdAt,
+      updatedAt: event.updatedAt,
+    };
+  }
+
+  private buildRewardSummary(entries: RewardLedgerEntry[]) {
+    const posted = entries.filter((entry) => entry.status === 'POSTED');
+    const pending = entries.filter((entry) => entry.status === 'PENDING');
+    const balance = posted.reduce(
+      (sum, entry) => sum + this.rewardEntrySignedPoints(entry),
+      0,
+    );
+    const pendingBalance = pending.reduce(
+      (sum, entry) => sum + this.rewardEntrySignedPoints(entry),
+      0,
+    );
+    const lifetimeEarned = posted
+      .map((entry) => this.rewardEntrySignedPoints(entry))
+      .filter((points) => points > 0)
+      .reduce((sum, points) => sum + points, 0);
+    const lifetimeRedeemed = Math.abs(
+      posted
+        .map((entry) => this.rewardEntrySignedPoints(entry))
+        .filter((points) => points < 0)
+        .reduce((sum, points) => sum + points, 0),
+    );
+
+    return {
+      balance: this.roundMoney(balance),
+      availableBalance: this.roundMoney(balance),
+      pendingBalance: this.roundMoney(pendingBalance),
+      lifetimeEarned: this.roundMoney(lifetimeEarned),
+      lifetimeRedeemed: this.roundMoney(lifetimeRedeemed),
+      entryCount: entries.length,
+    };
+  }
+
+  private rewardEntrySignedPoints(entry: RewardLedgerEntry) {
+    const points = Number(entry.points ?? 0);
+    const type = String(entry.type ?? '').toUpperCase();
+    return ['REDEEM', 'REDEMPTION', 'EXPIRY', 'REVERSAL'].includes(type)
+      ? -Math.abs(points)
+      : points;
+  }
+
+  private async ensureReferralCode(user: User) {
+    if (user.referralCode) {
+      return user.referralCode;
+    }
+
+    const code = this.generateReferralCode(user);
+    await this.userRepository.update(user.id, { referralCode: code });
+    user.referralCode = code;
+    return code;
+  }
+
+  private generateReferralCode(user: User) {
+    const nameSeed = `${user.firstName ?? ''}${user.lastName ?? ''}`
+      .replace(/[^a-z0-9]/gi, '')
+      .slice(0, 4)
+      .toUpperCase();
+    const prefix = nameSeed || 'VIDAL';
+    const suffix = randomUUID().replace(/-/g, '').slice(0, 6).toUpperCase();
+    return `${prefix}${suffix}`.slice(0, 12);
   }
 
   private normalizeOperation(operation: ProviderOperation) {
@@ -1787,10 +2095,68 @@ export class VidalpayService {
     };
   }
 
-  private defaultLimits() {
+  private defaultLimits(status = 'NOT_STARTED') {
+    const verified = status === 'VERIFIED';
     return {
-      outbound: { daily: null, monthly: null, currency: 'MIXED' },
-      inbound: { daily: null, monthly: null, currency: 'MIXED' },
+      version: '2026-09-13',
+      source: 'BACKEND_POLICY',
+      currency: 'MIXED',
+      enforcement: {
+        kycGatesEnforced: true,
+        amountLimitsEnforced: false,
+        reason:
+          'Daily and monthly amount limits are not configured for production enforcement yet. Provider-specific limits are returned only after provider provisioning.',
+      },
+      outbound: {
+        tagTransfer: {
+          enabled: true,
+          perTransaction: null,
+          daily: null,
+          monthly: null,
+          enforced: false,
+        },
+        bankTransfer: {
+          enabled: verified,
+          perTransaction: null,
+          daily: null,
+          monthly: null,
+          enforced: false,
+          blockedReason: verified
+            ? null
+            : 'Complete KYC before external bank transfers are enabled.',
+        },
+      },
+      inbound: {
+        internal: {
+          enabled: true,
+          daily: null,
+          monthly: null,
+          enforced: false,
+        },
+        bankTransfer: {
+          enabled: verified,
+          daily: null,
+          monthly: null,
+          enforced: false,
+          blockedReason: verified
+            ? null
+            : 'Complete KYC before provider bank-transfer rails are enabled.',
+        },
+      },
+      card: {
+        enabled: verified,
+        providerLimits: null,
+        blockedReason: verified
+          ? null
+          : 'Complete KYC before provider-backed cards are enabled.',
+      },
+      bills: {
+        enabled: verified,
+        providerLimits: null,
+        blockedReason: verified
+          ? null
+          : 'Complete KYC before provider-backed bill payments are enabled.',
+      },
       lastEvaluatedAt: null,
       trustSignals: {
         transactionVolume: null,

@@ -3,6 +3,8 @@ import {
   KycController,
   NotificationsController,
   ProvidersController,
+  ReferralsController,
+  RewardsController,
   TransfersController,
   WebhooksController,
 } from './vidalpay.controller';
@@ -20,6 +22,12 @@ describe('VidalPay mobile contract controllers', () => {
     listNotifications: jest.fn(),
     markNotificationsRead: jest.fn(),
     handleProviderWebhook: jest.fn(),
+    rewardsDashboard: jest.fn(),
+    rewardsHistory: jest.fn(),
+    redeemRewards: jest.fn(),
+    referralsDashboard: jest.fn(),
+    referralEarnings: jest.fn(),
+    trackReferralInvite: jest.fn(),
   } as unknown as jest.Mocked<Partial<VidalpayService>>;
   const user = { sub: 'user-1' } as any;
 
@@ -65,6 +73,32 @@ describe('VidalPay mobile contract controllers', () => {
     controller.read(user, { notificationIds: ['n-1'] });
 
     expect(service.markNotificationsRead).toHaveBeenCalledWith('user-1', ['n-1']);
+  });
+
+  it('routes rewards endpoints through ledger-aware service methods', () => {
+    const controller = new RewardsController(service as VidalpayService);
+    const body = { points: 100, idempotencyKey: 'redeem-1' };
+
+    controller.dashboard(user);
+    controller.history(user);
+    controller.redeem(user, body);
+
+    expect(service.rewardsDashboard).toHaveBeenCalledWith('user-1');
+    expect(service.rewardsHistory).toHaveBeenCalledWith('user-1');
+    expect(service.redeemRewards).toHaveBeenCalledWith('user-1', body);
+  });
+
+  it('routes referral dashboard, earnings, and invite tracking separately', () => {
+    const controller = new ReferralsController(service as VidalpayService);
+    const body = { email: 'friend@example.com', idempotencyKey: 'invite-1' };
+
+    controller.dashboard(user);
+    controller.earnings(user);
+    controller.invite(user, body);
+
+    expect(service.referralsDashboard).toHaveBeenCalledWith('user-1');
+    expect(service.referralEarnings).toHaveBeenCalledWith('user-1');
+    expect(service.trackReferralInvite).toHaveBeenCalledWith('user-1', body);
   });
 
   it('keeps provider webhooks unauthenticated and provider-scoped', () => {

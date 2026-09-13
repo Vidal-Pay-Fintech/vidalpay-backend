@@ -8,9 +8,10 @@ returns a structured unavailable response.
 ## Inventory
 
 - Framework/runtime: NestJS 11 on Node.js/TypeScript.
-- Database/ORM: MySQL through TypeORM. The repository currently has
-  `synchronize: true`; this pass also adds a migration for the new mobile
-  contract tables and columns.
+- Database/ORM: MySQL through TypeORM. Runtime and migration config supports a
+  MySQL `DATABASE_URL` plus `DB_SSL`/`DB_CONNECT_TIMEOUT_MS`, or the legacy
+  `MYSQL_*` variables. The repository currently has `synchronize: true`; this
+  pass also adds migrations for the new mobile contract tables and columns.
 - Auth: JWT bearer access tokens, rotating refresh tokens, and persisted
   revocable session families in `auth_session`.
 - Jobs/queues: none found.
@@ -41,7 +42,7 @@ returns a structured unavailable response.
 | Email OTP | POST `/auth/verify-email`, POST `/auth/resend-otp` | Yes | `AuthenticationController` | `AuthenticationService` | `token` | SMTP | Yes | SMTP env required for delivery |
 | Transaction PIN | POST `/auth/transaction-pin/request`, `/verify`, `/set`, `/validate` | Yes | `AuthenticationController` | `AuthenticationService` | `token`, `user` | Internal/SMTP | Yes | SMTP env required for OTP delivery |
 | Password reset | POST `/auth/password-reset/request`, `/verify-otp`, `/complete` | Yes | `AuthenticationController` | `AuthenticationService` | `token`, `user` | SMTP | Yes | SMTP env required for delivery |
-| User profile | GET `/user/me`, GET `/user/home`, GET `/user/security`, PATCH `/user/profile` | Yes | `UserController` | `VidalpayService` | `user`, `wallet`, `kyc_profile` | Internal | Yes | None |
+| User profile/account level | GET `/user/me`, GET `/user/home`, GET `/user/security`, GET `/user/account-level`, GET `/user/limits`, PATCH `/user/profile` | Yes | `UserController` | `VidalpayService` | `user`, `wallet`, `kyc_profile` | Internal | Yes | Provider-specific limits require provider provisioning |
 | Contact changes | POST `/user/security/change-email/*`, `/change-phone/*` | Yes | `UserController` | `VidalpayService` | `user`, `token` | SMTP | Yes | Phone OTP is delivered by email until SMS copy is added |
 | Account closure/deletion | POST `/user/account/closure`, POST `/user/account/deletion` | Yes | `UserController` | `VidalpayService` | `user` | Internal | Closure works; permanent deletion blocked | Add retention/provider-offboarding policy before hard deletion |
 | Scheduled transfers | GET/POST `/user/scheduled-transfers` | Yes | `UserController` | `VidalpayService` | `provider_operation` | Scheduler/provider jobs required | Listing disabled; create blocked | Add durable scheduler, retry, and PIN authorization jobs |
@@ -62,7 +63,7 @@ returns a structured unavailable response.
 | Investments | GET `/investments/*`, POST `/investments/account`, `/orders` | Yes | `InvestmentsController` | `VidalpayService` | `provider_operation` | Provider required | Reads disabled with null portfolio values; mutations blocked | Select provider |
 | Loans | GET/POST `/loans/*` | Yes | `LoansController` | `VidalpayService` | `provider_operation` | Unit credit required | Reads disabled; mutations blocked | Unit credit program setup |
 | Tax | GET `/tax/status`, `/tax/overview`, POST `/tax/filings` | Yes | `TaxController` | `VidalpayService` | `provider_operation` | Tax provider required | Reads disabled with null counts; filing blocked | Select provider/legal flow |
-| Rewards/referrals | GET/POST `/rewards/*`, `/referrals/*` | Yes | Rewards, Referrals controllers | `VidalpayService` | `user`, `provider_operation` | Internal | Referral code only; rewards/redemption/earnings blocked | Add reward/referral event ledgers |
+| Rewards/referrals | GET/POST `/rewards/*`, `/referrals/*` | Yes | Rewards, Referrals controllers | `VidalpayService` | `user`, `reward_ledger_entry`, `referral_event`, `provider_operation` | Internal | Ledger/history and invite tracking work; redemption blocked | Define reward redemption policy and wallet-credit journal |
 | QR/money requests | `/qr/*`, `/money-requests/*` | Yes | QR, MoneyRequests controllers | `VidalpayService` | `provider_operation` | Internal/provider flow required | Blocked/unimplemented | Define QR payload and request ledgers |
 | Provider status | GET `/providers/status` | Yes | `ProvidersController` | `ProviderStatusService` | none | Env-aware | Yes | Live sandbox probes |
 
@@ -146,8 +147,9 @@ Provider status item example:
 
 ## Required Environment Variables
 
-- Database: `MYSQL_HOST`, `MYSQL_PORT`, `MYSQL_DATABASE`, `MYSQL_USERNAME`,
-  `MYSQL_PASSWORD`.
+- Database: preferred Render-compatible MySQL `DATABASE_URL`, optional
+  `DB_SSL`, optional `DB_CONNECT_TIMEOUT_MS`; alternatively `MYSQL_HOST`,
+  `MYSQL_PORT`, `MYSQL_DATABASE`, `MYSQL_USERNAME`, `MYSQL_PASSWORD`.
 - JWT: `JWT_SECRET`, `JWT_TOKEN_AUDIENCE`, `JWT_TOKEN_ISSUER`,
   `JWT_ACCESS_TOKEN_TTL`, `JWT_REFRESH_TOKEN_TTL`. The legacy
   `JWT_ACCESS_TOKEN_TtL` spelling is still accepted as a fallback.
@@ -178,6 +180,8 @@ Provider status item example:
   `notification`, `notification_preference`, `notification_device`,
   `support_ticket`, `dispute`, plus additional provider/user columns on
   `wallet` and `user`.
+- `src/database/migrations/1789084800000-RewardsReferralsSchema.ts` adds
+  `reward_ledger_entry` and `referral_event` for real rewards/referral history.
 
 ## Additional Request/Response Examples
 
@@ -262,11 +266,131 @@ Provider status item example:
 }
 ```
 
+`GET /api/v1/user/account-level`
+
+```json
+{
+  "code": "EMAIL_VERIFIED",
+  "rank": 1,
+  "status": "LIMITED",
+  "title": "Email Verified",
+  "kycStatus": "NOT_STARTED",
+  "emailVerified": true,
+  "phoneVerified": false,
+  "requirements": ["VERIFY_PHONE", "COMPLETE_KYC"],
+  "capabilities": {
+    "canReceive": true,
+    "canTransfer": false,
+    "canTagTransfer": true,
+    "canBankTransfer": false
+  }
+}
+```
+
+`GET /api/v1/user/limits`
+
+```json
+{
+  "accountLevel": {
+    "code": "EMAIL_VERIFIED",
+    "status": "LIMITED"
+  },
+  "limits": {
+    "source": "BACKEND_POLICY",
+    "enforcement": {
+      "kycGatesEnforced": true,
+      "amountLimitsEnforced": false
+    },
+    "outbound": {
+      "tagTransfer": {
+        "enabled": true,
+        "perTransaction": null,
+        "daily": null,
+        "monthly": null,
+        "enforced": false
+      }
+    }
+  },
+  "providerLimits": {
+    "unit": null,
+    "payvessel": null
+  }
+}
+```
+
+`GET /api/v1/rewards/dashboard` when no rewards have been earned:
+
+```json
+{
+  "enabled": true,
+  "provider": "VidalPay",
+  "unit": "POINTS",
+  "currency": null,
+  "balance": 0,
+  "availableBalance": 0,
+  "pendingBalance": 0,
+  "lifetimeEarned": 0,
+  "lifetimeRedeemed": 0,
+  "entryCount": 0,
+  "redemption": {
+    "enabled": false,
+    "reason": "Reward redemption requires an approved redemption policy and wallet-credit workflow before points can be converted or paid out."
+  },
+  "history": [],
+  "message": "No reward entries have been recorded for this account yet."
+}
+```
+
+`POST /api/v1/referrals/invite`
+
+```json
+{
+  "email": "friend@example.com",
+  "idempotencyKey": "invite-2026-09-13-001"
+}
+```
+
+```json
+{
+  "tracked": true,
+  "referralCode": "VIDAL123",
+  "invite": {
+    "status": "INVITED",
+    "reference": "invite-2026-09-13-001"
+  },
+  "rewardCreated": false,
+  "message": "Referral invite was tracked. No earning is posted until the referred user completes the backend-defined qualifying action."
+}
+```
+
+`POST /api/v1/rewards/redeem` before redemption policy exists:
+
+```json
+{
+  "points": 100,
+  "idempotencyKey": "reward-redeem-001"
+}
+```
+
+```json
+{
+  "code": "PROVIDER_FLOW_NOT_LIVE_TESTED",
+  "message": "rewards_redeem is not available from the configured backend provider.",
+  "feature": "rewards_redeem",
+  "capability": "rewards",
+  "reason": "Reward ledger history is available, but redemption is blocked until VidalPay defines the points-to-value policy, approval flow, and wallet-credit journal.",
+  "missingRequirements": [],
+  "provider": "VidalPay",
+  "retryable": false
+}
+```
+
 ## Test Results
 
 - `corepack pnpm exec tsc --noEmit`
+- `corepack pnpm exec nest build`
 - `corepack pnpm exec jest --runInBand`
-- Final Jest result: 17 suites passed, 49 tests passed.
+- Final Jest result: 17 suites passed, 56 tests passed.
 
 ## Mobile Notes
 

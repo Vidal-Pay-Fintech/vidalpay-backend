@@ -10,6 +10,8 @@ import { Notification } from 'src/database/entities/notification.entity';
 import { NotificationDevice } from 'src/database/entities/notification-device.entity';
 import { NotificationPreference } from 'src/database/entities/notification-preference.entity';
 import { ProviderOperation } from 'src/database/entities/provider-operation.entity';
+import { ReferralEvent } from 'src/database/entities/referral-event.entity';
+import { RewardLedgerEntry } from 'src/database/entities/reward-ledger-entry.entity';
 import { SupportTicket } from 'src/database/entities/support-ticket.entity';
 import { Token } from 'src/database/entities/token.entity';
 import { User } from 'src/database/entities/user.entity';
@@ -53,6 +55,8 @@ import { VidalpayService } from './vidalpay.service';
       NotificationDevice,
       NotificationPreference,
       ProviderOperation,
+      ReferralEvent,
+      RewardLedgerEntry,
       SupportTicket,
       Token,
       User,

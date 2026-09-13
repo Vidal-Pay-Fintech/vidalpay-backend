@@ -511,17 +511,12 @@ export class RewardsController {
 
   @Get('history')
   history(@ActiveUser() user: ActiveUserData) {
-    return this.vidalpayService.rewardsDashboard(user.sub);
+    return this.vidalpayService.rewardsHistory(user.sub);
   }
 
   @Post('redeem')
   redeem(@ActiveUser() user: ActiveUserData, @Body() body: AnyRecord) {
-    return this.vidalpayService.blockGenericOperation(
-      user.sub,
-      'rewards_redeem',
-      'rewards',
-      body,
-    );
+    return this.vidalpayService.redeemRewards(user.sub, body);
   }
 }
 
@@ -536,17 +531,12 @@ export class ReferralsController {
 
   @Get('earnings')
   earnings(@ActiveUser() user: ActiveUserData) {
-    return this.vidalpayService.referralsDashboard(user.sub);
+    return this.vidalpayService.referralEarnings(user.sub);
   }
 
   @Post('invite')
   invite(@ActiveUser() user: ActiveUserData, @Body() body: AnyRecord) {
-    return this.vidalpayService.blockGenericOperation(
-      user.sub,
-      'referral_invite_tracking',
-      'referrals',
-      body,
-    );
+    return this.vidalpayService.trackReferralInvite(user.sub, body);
   }
 }
 

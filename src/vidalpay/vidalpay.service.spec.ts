@@ -38,15 +38,20 @@ describe('VidalpayService', () => {
   let service: VidalpayService;
   let userRepository: ReturnType<typeof repo>;
   let walletRepository: ReturnType<typeof repo>;
+  let kycProfileRepository: ReturnType<typeof repo>;
   let providerOperationRepository: ReturnType<typeof repo>;
+  let rewardLedgerRepository: ReturnType<typeof repo>;
+  let referralEventRepository: ReturnType<typeof repo>;
   let providerStatusService: jest.Mocked<Pick<ProviderStatusService, 'getStatus' | 'getStatuses' | 'isCapabilityEnabled'>>;
 
   beforeEach(() => {
     userRepository = repo();
     walletRepository = repo();
-    const kycProfileRepository = repo();
+    kycProfileRepository = repo();
     const transactionRepository = repo();
     providerOperationRepository = repo();
+    rewardLedgerRepository = repo();
+    referralEventRepository = repo();
     const cardRepository = repo();
     const beneficiaryRepository = repo();
     const notificationRepository = repo();
@@ -73,6 +78,8 @@ describe('VidalpayService', () => {
       kycProfileRepository as any,
       transactionRepository as any,
       providerOperationRepository as any,
+      rewardLedgerRepository as any,
+      referralEventRepository as any,
       cardRepository as any,
       beneficiaryRepository as any,
       notificationRepository as any,
@@ -217,6 +224,106 @@ describe('VidalpayService', () => {
         type: 'scheduled_transfer',
         idempotencyKey: 'schedule-1',
         status: 'BLOCKED',
+      }),
+    );
+  });
+
+  it('returns rewards from the real ledger and keeps redemption disabled', async () => {
+    userRepository.findOne.mockResolvedValue({ id: 'user-1' });
+    rewardLedgerRepository.find.mockResolvedValue([
+      {
+        id: 'reward-1',
+        userId: 'user-1',
+        type: 'EARN',
+        points: 100,
+        unit: 'POINTS',
+        status: 'POSTED',
+        source: 'REFERRAL',
+        reference: 'reward-1',
+      },
+      {
+        id: 'reward-2',
+        userId: 'user-1',
+        type: 'REDEEM',
+        points: 25,
+        unit: 'POINTS',
+        status: 'POSTED',
+        source: 'REDEMPTION',
+        reference: 'reward-2',
+      },
+    ]);
+
+    await expect(service.rewardsDashboard('user-1')).resolves.toEqual(
+      expect.objectContaining({
+        enabled: true,
+        balance: 75,
+        lifetimeEarned: 100,
+        lifetimeRedeemed: 25,
+        redemption: expect.objectContaining({ enabled: false }),
+      }),
+    );
+  });
+
+  it('tracks referral invites idempotently without creating fake earnings', async () => {
+    userRepository.findOne.mockResolvedValue({
+      id: 'user-1',
+      referralCode: 'VIDAL123',
+    });
+    referralEventRepository.findOne.mockResolvedValue(null);
+    referralEventRepository.save.mockImplementation(async (payload) => ({
+      id: 'invite-1',
+      ...payload,
+    }));
+
+    await expect(
+      service.trackReferralInvite('user-1', {
+        email: 'friend@example.com',
+        idempotencyKey: 'invite-1',
+      }),
+    ).resolves.toEqual(
+      expect.objectContaining({
+        tracked: true,
+        referralCode: 'VIDAL123',
+        rewardCreated: false,
+      }),
+    );
+    expect(referralEventRepository.save).toHaveBeenCalledWith(
+      expect.objectContaining({
+        referrerUserId: 'user-1',
+        inviteeEmail: 'friend@example.com',
+        status: 'INVITED',
+        idempotencyKey: 'invite-1',
+      }),
+    );
+  });
+
+  it('exposes account level and limit policy from verification state', async () => {
+    userRepository.findOne.mockResolvedValue({
+      id: 'user-1',
+      isVerified: true,
+      isPhoneVerified: false,
+      kycStatus: 'NOT_STARTED',
+    });
+    kycProfileRepository.findOne.mockResolvedValue({
+      id: 'kyc-1',
+      userId: 'user-1',
+      status: 'NOT_STARTED',
+      limits: null,
+    });
+
+    await expect(service.getAccountLevel('user-1')).resolves.toEqual(
+      expect.objectContaining({
+        code: 'EMAIL_VERIFIED',
+        requirements: expect.arrayContaining(['VERIFY_PHONE', 'COMPLETE_KYC']),
+      }),
+    );
+    await expect(service.getAccountLimits('user-1')).resolves.toEqual(
+      expect.objectContaining({
+        limits: expect.objectContaining({
+          enforcement: expect.objectContaining({
+            amountLimitsEnforced: false,
+          }),
+        }),
       }),
     );
   });

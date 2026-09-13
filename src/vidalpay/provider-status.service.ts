@@ -262,16 +262,13 @@ export class ProviderStatusService {
       rewards: {
         provider: 'VidalPay',
         providerType: 'INTERNAL',
-        service: 'VidalPay rewards ledger',
+        service: 'VidalPay rewards ledger/history',
         envVars: [],
-        unsupported: true,
-        failureReason:
-          'The backend has no implemented rewards ledger or redemption workflow yet.',
       },
       referrals: {
         provider: 'VidalPay',
         providerType: 'INTERNAL',
-        service: 'VidalPay referral codes',
+        service: 'VidalPay referral codes and invite tracking',
         envVars: [],
       },
       qr_payments: {

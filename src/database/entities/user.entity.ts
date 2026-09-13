@@ -18,6 +18,8 @@ import { Notification } from './notification.entity';
 import { NotificationDevice } from './notification-device.entity';
 import { NotificationPreference } from './notification-preference.entity';
 import { ProviderOperation } from './provider-operation.entity';
+import { ReferralEvent } from './referral-event.entity';
+import { RewardLedgerEntry } from './reward-ledger-entry.entity';
 import { SupportTicket } from './support-ticket.entity';
 // import { Winner } from './winner.entity';
 // import { Transaction } from './transaction.entity';
@@ -148,6 +150,15 @@ export class User extends AbstractEntity {
 
   @OneToMany(() => Dispute, (dispute) => dispute.user)
   disputes: Dispute[];
+
+  @OneToMany(
+    () => RewardLedgerEntry,
+    (rewardLedgerEntry) => rewardLedgerEntry.user,
+  )
+  rewardLedgerEntries: RewardLedgerEntry[];
+
+  @OneToMany(() => ReferralEvent, (referralEvent) => referralEvent.referrer)
+  referralEvents: ReferralEvent[];
 
   @Column({ nullable: true })
   accountStatus: boolean;
