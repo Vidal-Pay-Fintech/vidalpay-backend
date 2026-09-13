@@ -23,7 +23,7 @@ export class SupportTicket extends AbstractEntity {
   @Column({ default: 'OPEN' })
   status: string;
 
-  @Column({ nullable: true })
+  @Column({ type: 'varchar', nullable: true })
   preferredChannel: string | null;
 
   @Column({ type: 'text', nullable: true })

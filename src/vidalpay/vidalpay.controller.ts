@@ -11,6 +11,8 @@ import { Auth } from 'src/iam/authentication/decorators/auth.decorator';
 import { AuthType } from 'src/iam/authentication/enums/auth-type.enum';
 import { ActiveUser } from 'src/iam/decorators/active-user.decorator';
 import { ActiveUserData } from 'src/iam/interfaces/active-user-data-interfaces';
+import { Roles } from 'src/iam/decorators/roles.decorator';
+import { Role } from 'src/common/enum/role.enum';
 import { VidalpayService } from './vidalpay.service';
 
 type AnyRecord = Record<string, unknown>;
@@ -37,6 +39,65 @@ export class KycController {
   @Get('status')
   status(@ActiveUser() user: ActiveUserData) {
     return this.vidalpayService.getKycStatus(user.sub);
+  }
+}
+
+@Auth(AuthType.Bearer)
+@Roles(Role.ADMIN, Role.SUPER_ADMIN)
+@Controller('admin/kyc')
+export class AdminKycController {
+  constructor(private readonly vidalpayService: VidalpayService) {}
+
+  @Get()
+  list() {
+    return this.vidalpayService.listKycReviews();
+  }
+
+  @Get(':userId')
+  one(@Param('userId') userId: string) {
+    return this.vidalpayService.getKycReview(userId);
+  }
+
+  @Post(':userId/approve')
+  approve(
+    @ActiveUser() admin: ActiveUserData,
+    @Param('userId') userId: string,
+    @Body() body: AnyRecord,
+  ) {
+    return this.vidalpayService.reviewKyc(
+      admin.sub,
+      userId,
+      'VERIFIED',
+      typeof body.reason === 'string' ? body.reason : undefined,
+    );
+  }
+
+  @Post(':userId/reject')
+  reject(
+    @ActiveUser() admin: ActiveUserData,
+    @Param('userId') userId: string,
+    @Body() body: AnyRecord,
+  ) {
+    return this.vidalpayService.reviewKyc(
+      admin.sub,
+      userId,
+      'REJECTED',
+      typeof body.reason === 'string' ? body.reason : undefined,
+    );
+  }
+
+  @Post(':userId/request-information')
+  requestInformation(
+    @ActiveUser() admin: ActiveUserData,
+    @Param('userId') userId: string,
+    @Body() body: AnyRecord,
+  ) {
+    return this.vidalpayService.reviewKyc(
+      admin.sub,
+      userId,
+      'IN_PROGRESS',
+      typeof body.reason === 'string' ? body.reason : 'Additional KYC information is required.',
+    );
   }
 }
 

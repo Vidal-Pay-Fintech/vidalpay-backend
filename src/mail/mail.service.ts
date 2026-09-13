@@ -30,9 +30,6 @@ import { MailSubject } from 'src/common/enum/mail';
 // import { DrawType } from 'src/database/entities/draw-type.entity';
 @Injectable()
 export class MailService {
-  private firstName: string;
-  private email: string;
-
   constructor(
     // private readonly mailerService: MailerService,
     private readonly emailService: EmailService,
@@ -41,30 +38,27 @@ export class MailService {
   ) {}
 
   private async getLoggedUser(userId: string): Promise<any> {
-    const user = await this.userRepository.findUserById(userId);
-    this.firstName = user.firstName;
-    this.email = user.email;
-    return user;
+    return this.userRepository.findUserById(userId);
   }
 
   async sendEmailVerificationCode(userId: string, otp: string): Promise<void> {
-    await this.getLoggedUser(userId);
+    const user = await this.getLoggedUser(userId);
     await this.emailService.sendMail({
-      email: this.email,
+      email: user.email,
       subject: MailSubject.WELCOME_EMAIL,
       template: VerificationEmail({
-        firstName: this.firstName,
+        firstName: user.firstName,
         code: otp,
       }),
     });
   }
   async sendResetPasswordOTP(userId: string, otp: string): Promise<void> {
-    await this.getLoggedUser(userId);
+    const user = await this.getLoggedUser(userId);
     await this.emailService.sendMail({
-      email: this.email,
+      email: user.email,
       subject: MailSubject.RESET_PASSWORD_OTP,
       template: ResetPasswordOTP({
-        firstName: this.firstName,
+        firstName: user.firstName,
         code: otp,
       }),
     });
@@ -74,12 +68,12 @@ export class MailService {
     userId: string,
     otp: string,
   ): Promise<void> {
-    await this.getLoggedUser(userId);
+    const user = await this.getLoggedUser(userId);
     await this.emailService.sendMail({
-      email: this.email,
+      email: user.email,
       subject: MailSubject.RESET_TRANSACTION_PIN,
       template: ResetTransactionPin({
-        firstName: this.firstName,
+        firstName: user.firstName,
         otp,
       }),
     });
@@ -101,12 +95,12 @@ export class MailService {
   //   }
 
   async sendResetEmailLink(userId: string, link: string): Promise<void> {
-    await this.getLoggedUser(userId);
+    const user = await this.getLoggedUser(userId);
     await this.emailService.sendMail({
-      email: this.email,
+      email: user.email,
       subject: MailSubject.FORGOT_PASSWORD,
       template: ResetPassword({
-        firstName: this.firstName,
+        firstName: user.firstName,
         link,
       }),
     });

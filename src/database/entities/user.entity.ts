@@ -55,52 +55,52 @@ export class User extends AbstractEntity {
   @Column({ nullable: false })
   password: string;
 
-  @Column({ nullable: true })
+  @Column({ type: 'varchar', nullable: true })
   firstName: string;
 
-  @Column({ nullable: true })
+  @Column({ type: 'varchar', nullable: true })
   lastName: string;
 
-  @Column({ nullable: true })
+  @Column({ type: 'varchar', nullable: true })
   referralCode: string;
 
   @Column({ type: 'enum', enum: UserRole, default: UserRole.CUSTOMER })
   role: UserRole;
 
-  @Column({ nullable: true })
+  @Column({ type: 'varchar', nullable: true })
   tagId: string;
 
-  @Column({ nullable: true })
+  @Column({ type: 'varchar', nullable: true })
   phoneNumber: string;
 
-  @Column({ nullable: true })
+  @Column({ type: 'varchar', nullable: true })
   country: string;
 
-  @Column({ nullable: true })
+  @Column({ type: 'varchar', nullable: true })
   countryCode: string;
 
-  @Column({ nullable: true })
+  @Column({ type: 'varchar', nullable: true })
   residency: string;
 
-  @Column({ nullable: true })
+  @Column({ type: 'varchar', nullable: true })
   region: string;
 
-  @Column({ nullable: true })
+  @Column({ type: 'varchar', nullable: true })
   pendingEmail: string;
 
-  @Column({ nullable: true })
+  @Column({ type: 'varchar', nullable: true })
   pendingPhoneNumber: string;
 
-  @Column({ nullable: true })
+  @Column({ type: 'varchar', nullable: true })
   pin: string;
 
-  @Column({ nullable: true })
+  @Column({ type: 'varchar', nullable: true })
   dateOfBirth: string;
 
-  @Column({ nullable: true })
+  @Column({ type: 'timestamp', nullable: true })
   lastLogin: Date;
 
-  @Column({ nullable: true })
+  @Column({ type: 'varchar', nullable: true })
   profilePicture: string;
 
   //   @OneToMany(() => Wishlist, (wishlist) => wishlist.user, { cascade: true })
@@ -172,7 +172,7 @@ export class User extends AbstractEntity {
   @Column({ default: false })
   isPhoneVerified: boolean;
 
-  @Column({ nullable: true })
+  @Column({ type: 'varchar', nullable: true })
   kycStatus: string;
 
   @Column({ type: 'simple-json', nullable: true })
@@ -217,10 +217,10 @@ export class User extends AbstractEntity {
   // @OneToMany(() => PromoRedeem, (promoRedeem) => promoRedeem.user)
   // promoRedeems: PromoRedeem[];
 
-  @Column({ nullable: true })
+  @Column({ type: 'varchar', nullable: true })
   resetToken?: string;
 
-  @Column({ nullable: true })
+  @Column({ type: 'timestamp', nullable: true })
   resetTokenExpiry?: Date;
 
   @Column({

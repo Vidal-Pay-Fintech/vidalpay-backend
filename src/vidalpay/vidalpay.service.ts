@@ -8,6 +8,7 @@ import {
 } from '@nestjs/common';
 import { ConfigService } from '@nestjs/config';
 import { InjectRepository } from '@nestjs/typeorm';
+import axios from 'axios';
 import { compare } from 'bcrypt';
 import { randomUUID } from 'crypto';
 import { DataSource, In, IsNull, Repository } from 'typeorm';
@@ -160,6 +161,22 @@ export class VidalpayService {
       return this.getCurrentUser(user.id);
     }
 
+    const profilePicture = this.asString(update.profilePicture);
+    if (profilePicture?.startsWith('file://') || profilePicture?.startsWith('content://')) {
+      throw new ServiceUnavailableException(
+        createBlockedResponse({
+          code: 'PROFILE_IMAGE_STORAGE_UNAVAILABLE',
+          feature: 'profile_picture_upload',
+          capability: 'profile_picture_storage',
+          provider: 'VidalPay',
+          reason:
+            'A device-local image URI cannot be shared across devices. Configure backend object storage before accepting photo uploads.',
+          missingRequirements: ['PROFILE_IMAGE_STORAGE_PROVIDER'],
+          retryable: false,
+        }),
+      );
+    }
+
     await this.userRepository.update(
       user.id,
       update as QueryDeepPartialEntity<User>,
@@ -305,10 +322,12 @@ export class VidalpayService {
   }
 
   async getWallets(userId: string) {
-    await this.findUser(userId);
+    const user = await this.findUser(userId);
     const wallets = await this.ensureCustomerWallets(userId);
+    const defaultCurrency = this.defaultCurrencyForRegion(this.inferRegion(user));
+    const orderedWallets = this.orderWalletsByDefault(wallets, defaultCurrency);
     return {
-      wallets: wallets.map((wallet) => this.normalizeWallet(wallet)),
+      wallets: orderedWallets.map((wallet) => this.normalizeWallet(wallet)),
     };
   }
 
@@ -426,7 +445,19 @@ export class VidalpayService {
     return this.normalizeOperation(operation);
   }
 
-  async getCatalog(kind: 'airtime' | 'data' | 'utilities') {
+  async getCatalog(userId: string, kind: 'airtime' | 'data' | 'utilities') {
+    const user = await this.findUser(userId);
+    if (this.inferRegion(user) !== 'NG') {
+      const empty = kind === 'utilities' ? { categories: [] } : { networks: [] };
+      return {
+        region: this.inferRegion(user),
+        provider: 'PayVessel',
+        source: 'UNAVAILABLE_FOR_ACCOUNT_REGION',
+        message: 'Airtime, data, and bill payments are currently available only to Nigeria-based accounts.',
+        ...empty,
+      };
+    }
+
     const capabilityByKind: Record<typeof kind, ProviderCapability> = {
       airtime: 'airtime_catalog',
       data: 'data_catalog',
@@ -452,7 +483,15 @@ export class VidalpayService {
   }
 
   async validateUtilityCustomer(userId: string, payload: AnyRecord) {
-    await this.findUser(userId);
+    const user = await this.findUser(userId);
+    if (this.inferRegion(user) !== 'NG') {
+      this.throwProviderUnavailable({
+        feature: 'Utility customer validation',
+        capability: 'utilities_validate',
+        provider: 'PayVessel',
+        reason: 'Utility validation is available only for Nigeria-based accounts.',
+      });
+    }
     this.throwProviderUnavailable({
       feature: 'Utility customer validation',
       capability: 'utilities_validate',
@@ -473,6 +512,23 @@ export class VidalpayService {
       data: 'data_purchase',
       utilities: 'utilities_payment',
     };
+    const user = await this.findUser(userId);
+    if (this.inferRegion(user) !== 'NG') {
+      await this.recordBlockedOperation(userId, type, payload, {
+        provider: 'PayVessel',
+        capability: capabilityByKind[type],
+        reason:
+          'Airtime, data, and bill payments are available only for Nigeria-based accounts and use the NGN wallet.',
+      });
+    }
+    if (
+      payload.currency !== undefined &&
+      this.normalizeCurrency(payload.currency) !== Currency.NGN
+    ) {
+      throw new BadRequestException(
+        'Airtime, data, and bill payments must use the NGN wallet',
+      );
+    }
     await this.recordBlockedOperation(userId, type, payload, {
       provider: 'PayVessel',
       capability: capabilityByKind[type],
@@ -737,6 +793,74 @@ export class VidalpayService {
     return this.normalizeKycProfile(await this.getOrCreateKycProfile(user));
   }
 
+  async listKycReviews() {
+    const profiles = await this.kycProfileRepository.find({
+      order: { updatedAt: 'DESC' },
+    });
+    const users = profiles.length
+      ? await this.userRepository.findBy({ id: In(profiles.map((profile) => profile.userId)) })
+      : [];
+    const usersById = new Map(users.map((user) => [user.id, user]));
+
+    return {
+      items: profiles.map((profile) => ({
+        user: this.normalizeAdminUser(usersById.get(profile.userId)),
+        kyc: this.normalizeKycProfile(profile),
+      })),
+    };
+  }
+
+  async getKycReview(userId: string) {
+    const user = await this.findUser(userId);
+    const profile = await this.getOrCreateKycProfile(user);
+    return {
+      user: this.normalizeAdminUser(user),
+      kyc: this.normalizeKycProfile(profile),
+    };
+  }
+
+  async reviewKyc(
+    adminUserId: string,
+    userId: string,
+    decision: 'VERIFIED' | 'REJECTED' | 'IN_PROGRESS',
+    reason?: string,
+  ) {
+    await this.findUser(adminUserId);
+    const user = await this.findUser(userId);
+    const profile = await this.getOrCreateKycProfile(user);
+    const normalizedReason = this.asString(reason);
+
+    profile.status = decision;
+    profile.statusMessage = normalizedReason;
+    profile.rejectionReason = decision === 'REJECTED' ? normalizedReason : null;
+    profile.capabilities = this.capabilitiesForKycStatus(decision);
+    profile.limits = this.defaultLimits(decision);
+    await this.kycProfileRepository.save(profile);
+    await this.userRepository.update(userId, { kycStatus: decision });
+
+    const notification = await this.sendNotificationToUser(userId, {
+      title:
+        decision === 'VERIFIED'
+          ? 'Account verification approved'
+          : decision === 'REJECTED'
+            ? 'More KYC information is required'
+            : 'KYC review update',
+      body:
+        normalizedReason ??
+        (decision === 'VERIFIED'
+          ? 'Your account verification was approved.'
+          : 'Please review your KYC checklist and submit the remaining information.'),
+      category: 'KYC',
+      metadata: { status: decision, reviewedBy: adminUserId },
+    });
+
+    return {
+      user: this.normalizeAdminUser(user),
+      kyc: this.normalizeKycProfile(profile),
+      notification: notification.push,
+    };
+  }
+
   async startKyc(userId: string) {
     const user = await this.findUser(userId);
     const profile = await this.getOrCreateKycProfile(user);
@@ -805,27 +929,19 @@ export class VidalpayService {
   }
 
   async uploadKycDocument(userId: string, payload: AnyRecord) {
-    const user = await this.findUser(userId);
-    const profile = await this.getOrCreateKycProfile(user);
-    const category = this.asString(payload.category) ?? 'DOCUMENT';
-    const document = {
-      id: `kyc_doc_${randomUUID()}`,
-      category,
-      uri: null,
-      remoteUrl: null,
-      fileName: this.asString(payload.fileName) ?? null,
-      mimeType: this.asString(payload.mimeType) ?? null,
-      createdAt: new Date().toISOString(),
-      storage: 'backend_metadata_only',
-    };
-    profile.uploads = [...(profile.uploads ?? []), document];
-    profile.status = profile.status === 'NOT_STARTED' ? 'IN_PROGRESS' : profile.status;
-    await this.kycProfileRepository.save(profile);
-
-    return {
-      document,
-      kyc: this.normalizeKycProfile(profile),
-    };
+    await this.findUser(userId);
+    throw new ServiceUnavailableException(
+      createBlockedResponse({
+        code: 'KYC_DOCUMENT_STORAGE_UNAVAILABLE',
+        feature: 'kyc_document_upload',
+        capability: 'kyc_document_storage',
+        provider: 'VidalPay',
+        reason:
+          'KYC documents are not stored as local device URIs. Configure encrypted backend object storage or submit documents through the configured KYC provider.',
+        missingRequirements: ['KYC_DOCUMENT_STORAGE_PROVIDER'],
+        retryable: false,
+      }),
+    );
   }
 
   async submitKycSection(
@@ -888,7 +1004,19 @@ export class VidalpayService {
       kycStatus: status,
     });
 
-    return { received: true, updated: true, status };
+    const notification = await this.sendNotificationToUser(userId, {
+      title: 'KYC status updated',
+      body:
+        status === 'VERIFIED'
+          ? 'Your identity verification was approved.'
+          : status === 'REJECTED' || status === 'FAILED'
+            ? 'Your identity verification needs attention. Review the details and submit the missing information.'
+            : 'Your identity verification is being reviewed.',
+      category: 'KYC',
+      metadata: { kycStatus: status },
+    });
+
+    return { received: true, updated: true, status, notification: notification.push };
   }
 
   async listCards(userId: string) {
@@ -977,6 +1105,107 @@ export class VidalpayService {
       order: { createdAt: 'DESC' },
     });
     return { notifications };
+  }
+
+  async sendNotificationToUser(
+    userId: string,
+    payload: {
+      title: string;
+      body: string;
+      category?: string;
+      metadata?: AnyRecord;
+    },
+  ) {
+    await this.findUser(userId);
+    const notification = await this.notificationRepository.save(
+      this.notificationRepository.create({
+        userId,
+        title: payload.title,
+        body: payload.body,
+        category: payload.category ?? 'General',
+        read: false,
+        metadata: this.redactPayload(payload.metadata ?? {}),
+      }),
+    );
+
+    const preference = await this.getOrCreateNotificationPreference(userId);
+    const preferences = preference.preferences ?? this.defaultNotificationPreferences();
+    const devices = await this.notificationDeviceRepository.find({
+      where: { userId, revokedAt: IsNull() },
+    });
+    const pushDevices = preferences.push === false
+      ? []
+      : devices.filter((device) => this.asString(device.pushToken ?? device.token));
+
+    if (pushDevices.length === 0) {
+      return {
+        notification,
+        push: {
+          status: preferences.push === false ? 'DISABLED_BY_USER' : 'NO_ACTIVE_DEVICES',
+          attempted: 0,
+          delivered: 0,
+        },
+      };
+    }
+
+    const messages = pushDevices.map((device) => ({
+      to: this.asString(device.pushToken ?? device.token),
+      title: payload.title,
+      body: payload.body,
+      data: { notificationId: notification.id, ...(payload.metadata ?? {}) },
+      sound: 'default',
+    }));
+
+    try {
+      const headers: Record<string, string> = { 'Content-Type': 'application/json' };
+      const accessToken = this.configService.get<string>('EXPO_PUSH_ACCESS_TOKEN');
+      if (accessToken) {
+        headers.Authorization = `Bearer ${accessToken}`;
+      }
+      const response = await axios.post(
+        'https://exp.host/--/api/v2/push/send',
+        messages,
+        { headers, timeout: 10000 },
+      );
+      const receipts = Array.isArray(response.data?.data) ? response.data.data : [];
+      const errors = receipts.filter((receipt: AnyRecord) => receipt.status === 'error');
+
+      for (let index = 0; index < receipts.length; index += 1) {
+        const receipt = receipts[index] as AnyRecord;
+        if (receipt.status !== 'error') {
+          continue;
+        }
+        if (receipt.details && typeof receipt.details === 'object' &&
+            (receipt.details as AnyRecord).error === 'DeviceNotRegistered') {
+          const device = pushDevices[index];
+          await this.notificationDeviceRepository.update(
+            { id: device.id, userId },
+            { revokedAt: new Date() },
+          );
+        }
+      }
+
+      return {
+        notification,
+        push: {
+          status: errors.length ? 'PARTIAL_FAILURE' : 'SENT',
+          attempted: messages.length,
+          delivered: Math.max(messages.length - errors.length, 0),
+          failed: errors.length,
+        },
+      };
+    } catch (error) {
+      return {
+        notification,
+        push: {
+          status: 'DELIVERY_FAILED',
+          attempted: messages.length,
+          delivered: 0,
+          failed: messages.length,
+          failureReason: error instanceof Error ? error.message : 'Expo push request failed',
+        },
+      };
+    }
   }
 
   async markNotificationsRead(userId: string, notificationIds?: string[]) {
@@ -1582,23 +1811,54 @@ export class VidalpayService {
 
   private normalizeUser(user: User, wallets: Wallet[], kyc: KycProfile) {
     const { password, pin, resetToken, resetTokenExpiry, ...safeUser } = user;
+    const region = kyc.region ?? user.region ?? this.inferRegion(user);
+    const defaultCurrency =
+      region === 'NG'
+        ? Currency.NGN
+        : region === 'US'
+          ? Currency.USD
+          : null;
+    const orderedWallets = this.orderWalletsByDefault(wallets, defaultCurrency);
     return {
       ...safeUser,
       emailVerified: user.isVerified,
-      wallet: wallets.map((wallet) => this.normalizeWallet(wallet)),
+      wallet: orderedWallets.map((wallet) => this.normalizeWallet(wallet)),
       kyc: this.normalizeKycProfile(kyc),
       kycStatus: kyc.status,
       accountLevel: this.buildAccountLevel(user, kyc),
-      region: kyc.region ?? user.region ?? this.inferRegion(user),
+      region,
+      walletPreference: {
+        defaultCurrency,
+        source: 'ACCOUNT_REGION',
+      },
       provider: kyc.provider,
       capabilities: kyc.capabilities ?? this.capabilitiesForKycStatus(kyc.status),
-      productAvailability: this.buildProductAvailability(),
+      productAvailability: this.buildProductAvailability(region),
       limits: kyc.limits ?? this.defaultLimits(kyc.status),
       security: this.buildSecurityOverview(user),
-      accountRails: this.buildAccountRails(wallets),
+      accountRails: this.buildAccountRails(orderedWallets, defaultCurrency),
       fundingMethods: this.buildFundingMethods(),
       pendingActions: this.buildPendingActions(user, kyc),
       hasTransactionPin: Boolean(user.pin),
+    };
+  }
+
+  private normalizeAdminUser(user?: User) {
+    if (!user) {
+      return null;
+    }
+    return {
+      id: user.id,
+      email: user.email,
+      firstName: user.firstName ?? null,
+      lastName: user.lastName ?? null,
+      phoneNumber: user.phoneNumber ?? null,
+      country: user.country ?? null,
+      region: user.region ?? null,
+      isVerified: user.isVerified,
+      isPhoneVerified: user.isPhoneVerified,
+      kycStatus: user.kycStatus ?? null,
+      accountStatus: user.status,
     };
   }
 
@@ -2186,23 +2446,49 @@ export class VidalpayService {
     };
   }
 
-  private buildProductAvailability() {
+  private defaultCurrencyForRegion(region?: string | null) {
+    return region === 'US'
+      ? Currency.USD
+      : region === 'NG'
+        ? Currency.NGN
+        : null;
+  }
+
+  private orderWalletsByDefault(wallets: Wallet[], defaultCurrency?: Currency | null) {
+    if (!defaultCurrency) {
+      return wallets;
+    }
+    return [...wallets].sort((left, right) => {
+      if (left.currency === defaultCurrency) return -1;
+      if (right.currency === defaultCurrency) return 1;
+      return 0;
+    });
+  }
+
+  private buildProductAvailability(region?: string | null) {
+    const nigeriaAccount = region === 'NG';
     return {
       wallet: true,
       transfer: true,
       deposit: false,
       cardTopUp: false,
       conversion: false,
-      airtime: this.providerStatusService.isCapabilityEnabled('airtime_purchase'),
-      data: this.providerStatusService.isCapabilityEnabled('data_purchase'),
-      utilities: this.providerStatusService.isCapabilityEnabled('utilities_payment'),
+      airtime:
+        nigeriaAccount &&
+        this.providerStatusService.isCapabilityEnabled('airtime_purchase'),
+      data:
+        nigeriaAccount &&
+        this.providerStatusService.isCapabilityEnabled('data_purchase'),
+      utilities:
+        nigeriaAccount &&
+        this.providerStatusService.isCapabilityEnabled('utilities_payment'),
       loan: false,
       taxFiling: false,
       crypto: false,
     };
   }
 
-  private buildAccountRails(wallets: Wallet[]) {
+  private buildAccountRails(wallets: Wallet[], defaultCurrency?: Currency | null) {
     const rails = wallets.map((wallet) => ({
       walletId: wallet.id,
       currency: wallet.currency,
@@ -2232,7 +2518,8 @@ export class VidalpayService {
     }));
 
     return {
-      primary: rails[0] ?? null,
+      primary:
+        rails.find((rail) => rail.currency === defaultCurrency) ?? rails[0] ?? null,
       byCurrency: rails.reduce((acc, rail) => {
         acc[rail.currency] = rail;
         return acc;

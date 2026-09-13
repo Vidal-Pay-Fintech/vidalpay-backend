@@ -28,19 +28,19 @@ export class RewardLedgerEntry extends AbstractEntity {
   @Column({ default: 'POINTS' })
   unit: string;
 
-  @Column({ nullable: true })
+  @Column({ type: 'varchar', nullable: true })
   currency: string | null;
 
   @Column({ default: 'POSTED' })
   status: string;
 
-  @Column({ nullable: true })
+  @Column({ type: 'varchar', nullable: true })
   source: string | null;
 
   @Column({ unique: true })
   reference: string;
 
-  @Column({ nullable: true })
+  @Column({ type: 'varchar', nullable: true })
   relatedReference: string | null;
 
   @Column({ type: 'text', nullable: true })

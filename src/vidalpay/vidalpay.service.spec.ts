@@ -135,6 +135,21 @@ describe('VidalpayService', () => {
     expect(result.wallets.map((wallet) => wallet.currency)).toEqual([Currency.NGN, Currency.USD]);
   });
 
+  it('orders a US users default wallet and primary rail as USD', async () => {
+    userRepository.findOne.mockResolvedValue({
+      id: 'user-1',
+      countryCode: 'US',
+    });
+    walletRepository.find.mockResolvedValue([
+      { id: 'ngn-wallet', userId: 'user-1', currency: Currency.NGN, balance: 0 },
+      { id: 'usd-wallet', userId: 'user-1', currency: Currency.USD, balance: 0 },
+    ]);
+
+    const result = await service.getWallets('user-1');
+
+    expect(result.wallets[0].currency).toBe(Currency.USD);
+  });
+
   it('does not fabricate account numbers when provider provisioning has not happened', async () => {
     walletRepository.find.mockResolvedValue([{ id: 'usd-wallet', userId: 'user-1', currency: Currency.USD, balance: 0 }]);
     walletRepository.findOne.mockResolvedValue({ id: 'usd-wallet', userId: 'user-1', currency: Currency.USD, balance: 0, provider: 'Unit.co' });

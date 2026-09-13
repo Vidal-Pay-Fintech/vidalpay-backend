@@ -22,19 +22,19 @@ export class Card extends AbstractEntity {
   @Column({ default: 'PENDING' })
   status: string;
 
-  @Column({ nullable: true })
+  @Column({ type: 'varchar', nullable: true })
   maskedPan: string | null;
 
-  @Column({ nullable: true })
+  @Column({ type: 'varchar', nullable: true })
   last4: string | null;
 
-  @Column({ nullable: true })
+  @Column({ type: 'varchar', nullable: true })
   expiryMonth: string | null;
 
-  @Column({ nullable: true })
+  @Column({ type: 'varchar', nullable: true })
   expiryYear: string | null;
 
-  @Column({ nullable: true })
+  @Column({ type: 'varchar', nullable: true })
   cardholderName: string | null;
 
   @Column({
@@ -61,13 +61,13 @@ export class Card extends AbstractEntity {
   @Column({ type: 'simple-json', nullable: true })
   billingAddress: Record<string, unknown> | null;
 
-  @Column({ nullable: true })
+  @Column({ type: 'varchar', nullable: true })
   provider: string | null;
 
-  @Column({ nullable: true })
+  @Column({ type: 'varchar', nullable: true })
   providerCardId: string | null;
 
-  @Column({ nullable: true })
+  @Column({ type: 'varchar', nullable: true })
   providerStatus: string | null;
 
   @ManyToOne(() => User, (user) => user.cards)

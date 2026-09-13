@@ -15,13 +15,13 @@ export class FinancialTransaction extends AbstractEntity {
   @Column()
   userId: string;
 
-  @Column({ nullable: true })
+  @Column({ type: 'varchar', nullable: true })
   walletId: string | null;
 
   @Column({ unique: true })
   reference: string;
 
-  @Column({ nullable: true })
+  @Column({ type: 'varchar', nullable: true })
   operationReference: string | null;
 
   @Column()
@@ -65,16 +65,16 @@ export class FinancialTransaction extends AbstractEntity {
   @Column({ type: 'text', nullable: true })
   description: string | null;
 
-  @Column({ nullable: true })
+  @Column({ type: 'varchar', nullable: true })
   tag: string | null;
 
-  @Column({ nullable: true })
+  @Column({ type: 'varchar', nullable: true })
   provider: string | null;
 
-  @Column({ nullable: true })
+  @Column({ type: 'varchar', nullable: true })
   providerReference: string | null;
 
-  @Column({ nullable: true })
+  @Column({ type: 'varchar', nullable: true })
   idempotencyKey: string | null;
 
   @Column({ type: 'simple-json', nullable: true })

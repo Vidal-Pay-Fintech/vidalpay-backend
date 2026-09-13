@@ -116,18 +116,22 @@ interface SendMailConfiguration {
 export class EmailService {
   private transporter: nodemailer.Transporter;
   constructor() {
+    const port = Number(process.env.SMTP_MAIL_PORT) || 587;
     this.transporter = nodemailer.createTransport(
       {
         host: process.env.SMTP_MAIL_HOST,
-        port: Number(process.env.SMTP_MAIL_PORT),
-        secure: true, // true for 465, false for other port
+        port,
+        secure: port === 465,
         auth: {
           user: process.env.SMTP_MAIL_USERNAME,
           pass: process.env.SMTP_MAIL_PASSWORD,
         },
         tls: {
-          rejectUnauthorized: false, // Bypass the certificate validation (not recommended for production)
+          rejectUnauthorized: process.env.SMTP_TLS_REJECT_UNAUTHORIZED !== 'false',
         },
+        connectionTimeout: Number(process.env.SMTP_CONNECTION_TIMEOUT_MS) || 10000,
+        greetingTimeout: Number(process.env.SMTP_GREETING_TIMEOUT_MS) || 10000,
+        socketTimeout: Number(process.env.SMTP_SOCKET_TIMEOUT_MS) || 10000,
       },
       {
         from: {
@@ -159,15 +163,10 @@ export class EmailService {
     subject,
     html,
   }: SendMailConfiguration) {
-    try {
-      console.log('Sending email to:', email, 'Subject:', subject);
-      await this.transporter.sendMail({
-        to: email,
-        subject,
-        html,
-      });
-    } catch (err) {
-      console.log(err);
-    }
+    await this.transporter.sendMail({
+      to: email,
+      subject,
+      html,
+    });
   }
 }

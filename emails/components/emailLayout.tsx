@@ -13,10 +13,12 @@ import {
 } from '@react-email/components';
 
 const EmailLayout = ({ children }) => {
+  const logoUrl = process.env.EMAIL_LOGO_URL;
+
   return (
     <Html
       lang="en"
-      title="Lottonownow"
+      title="VidalPay"
       style={{
         fontFamily: 'Exo, Verdana, sans-serif',
         padding: '0',
@@ -39,11 +41,14 @@ const EmailLayout = ({ children }) => {
           />
         </Head>
         <Container className="w-full">
-          <Img
-            src="https://res.cloudinary.com/dlhjvo4tz/image/upload/v1734509114/Picture2_1_2_vij7bz.svg"
-            alt="layout"
-            className="w-full h-1/2 object-cover "
-          />
+          {logoUrl ? (
+            <Img src={logoUrl} alt="VidalPay" className="w-full object-contain" />
+          ) : (
+            <Section className="bg-green-700 p-6 text-center">
+              <Text className="text-3xl font-bold text-white">VidalPay</Text>
+              <Text className="text-sm text-white">FINTECH BANK</Text>
+            </Section>
+          )}
           <Section className="p-4 font-Exo text-sm bg-white my-5">
             {children}
           </Section>

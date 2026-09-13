@@ -51,18 +51,18 @@ export class WalletController {
   }
 
   @Get('catalogs/airtime')
-  airtimeCatalog() {
-    return this.vidalpayService.getCatalog('airtime');
+  airtimeCatalog(@ActiveUser() user: ActiveUserData) {
+    return this.vidalpayService.getCatalog(user.sub, 'airtime');
   }
 
   @Get('catalogs/data')
-  dataCatalog() {
-    return this.vidalpayService.getCatalog('data');
+  dataCatalog(@ActiveUser() user: ActiveUserData) {
+    return this.vidalpayService.getCatalog(user.sub, 'data');
   }
 
   @Get('catalogs/utilities')
-  utilitiesCatalog() {
-    return this.vidalpayService.getCatalog('utilities');
+  utilitiesCatalog(@ActiveUser() user: ActiveUserData) {
+    return this.vidalpayService.getCatalog(user.sub, 'utilities');
   }
 
   @Post('utilities/validate')

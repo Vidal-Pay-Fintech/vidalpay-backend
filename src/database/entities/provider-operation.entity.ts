@@ -36,13 +36,13 @@ export class ProviderOperation extends AbstractEntity {
   })
   amount: number | null;
 
-  @Column({ nullable: true })
+  @Column({ type: 'varchar', nullable: true })
   currency: string | null;
 
-  @Column({ nullable: true })
+  @Column({ type: 'varchar', nullable: true })
   provider: string | null;
 
-  @Column({ nullable: true })
+  @Column({ type: 'varchar', nullable: true })
   providerReference: string | null;
 
   @Column({ type: 'simple-json', nullable: true })
@@ -51,7 +51,7 @@ export class ProviderOperation extends AbstractEntity {
   @Column({ type: 'simple-json', nullable: true })
   responsePayload: Record<string, unknown> | null;
 
-  @Column({ nullable: true })
+  @Column({ type: 'varchar', nullable: true })
   errorCode: string | null;
 
   @Column({ type: 'text', nullable: true })

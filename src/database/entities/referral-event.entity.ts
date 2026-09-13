@@ -12,16 +12,16 @@ export class ReferralEvent extends AbstractEntity {
   @Column()
   referrerUserId: string;
 
-  @Column({ nullable: true })
+  @Column({ type: 'varchar', nullable: true })
   referredUserId: string | null;
 
   @Column()
   referralCode: string;
 
-  @Column({ nullable: true })
+  @Column({ type: 'varchar', nullable: true })
   inviteeEmail: string | null;
 
-  @Column({ nullable: true })
+  @Column({ type: 'varchar', nullable: true })
   inviteePhoneNumber: string | null;
 
   @Column({ default: 'INVITED' })
@@ -30,10 +30,10 @@ export class ReferralEvent extends AbstractEntity {
   @Column()
   reference: string;
 
-  @Column({ nullable: true })
+  @Column({ type: 'varchar', nullable: true })
   idempotencyKey: string | null;
 
-  @Column({ nullable: true })
+  @Column({ type: 'varchar', nullable: true })
   rewardLedgerEntryId: string | null;
 
   @Column({ type: 'simple-json', nullable: true })

@@ -30,19 +30,19 @@ export class Wallet extends AbstractEntity {
   })
   currency: Currency;
 
-  @Column({ nullable: true })
+  @Column({ type: 'varchar', nullable: true })
   accountNumber: string;
 
-  @Column({ nullable: true })
+  @Column({ type: 'varchar', nullable: true })
   routingNumber: string;
 
-  @Column({ nullable: true })
+  @Column({ type: 'varchar', nullable: true })
   accountName: string;
 
-  @Column({ nullable: true })
+  @Column({ type: 'varchar', nullable: true })
   bankName: string;
 
-  @Column({ nullable: true })
+  @Column({ type: 'varchar', nullable: true })
   sortCode: string;
 
   @Column({
@@ -66,22 +66,22 @@ export class Wallet extends AbstractEntity {
   @Column({ type: 'text', nullable: true })
   address: string;
 
-  @Column({ nullable: true })
+  @Column({ type: 'varchar', nullable: true })
   provider: string;
 
-  @Column({ nullable: true })
+  @Column({ type: 'varchar', nullable: true })
   providerCustomerId: string;
 
-  @Column({ nullable: true })
+  @Column({ type: 'varchar', nullable: true })
   providerAccountId: string;
 
-  @Column({ nullable: true })
+  @Column({ type: 'varchar', nullable: true })
   providerVirtualAccountId: string;
 
-  @Column({ nullable: true })
+  @Column({ type: 'varchar', nullable: true })
   providerStatus: string;
 
-  @Column({ nullable: true })
+  @Column({ type: 'varchar', nullable: true })
   providerReference: string;
 
   @Column({ type: 'simple-json', nullable: true })

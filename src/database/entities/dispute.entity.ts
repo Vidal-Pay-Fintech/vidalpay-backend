@@ -35,16 +35,16 @@ export class Dispute extends AbstractEntity {
   @Column({ type: 'boolean', default: false })
   attestation: boolean;
 
-  @Column({ nullable: true })
+  @Column({ type: 'varchar', nullable: true })
   idempotencyKey: string | null;
 
   @Column({ default: 'OPEN' })
   status: string;
 
-  @Column({ nullable: true })
+  @Column({ type: 'varchar', nullable: true })
   provider: string | null;
 
-  @Column({ nullable: true })
+  @Column({ type: 'varchar', nullable: true })
   providerReference: string | null;
 
   @Column({ type: 'simple-json', nullable: true })

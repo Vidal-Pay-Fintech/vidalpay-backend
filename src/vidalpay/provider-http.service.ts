@@ -20,13 +20,17 @@ export class ProviderHttpService {
   }
 
   payVesselClient(): AxiosInstance {
+    const apiSecret =
+      this.configService.get<string>('PAYVESSEL_API_SECRET') ??
+      this.configService.get<string>('PAYVESSEL_SECRET_KEY') ??
+      '';
     return axios.create({
       baseURL:
         this.configService.get<string>('PAYVESSEL_BASE_URL') ??
-        'https://api.payvessel.com',
+        'https://sandbox.payvessel.com',
       headers: {
-        Authorization: `Bearer ${this.configService.get<string>('PAYVESSEL_SECRET_KEY')}`,
         'api-key': this.configService.get<string>('PAYVESSEL_API_KEY') ?? '',
+        'api-secret': apiSecret,
         'Content-Type': 'application/json',
       },
       timeout: Number(this.configService.get<string>('PROVIDER_TIMEOUT_MS') ?? 15000),
