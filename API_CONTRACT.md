@@ -86,6 +86,28 @@ returns a structured unavailable response.
 
 ## Structured Responses
 
+Session reauthentication accepts either credential shape:
+
+```http
+POST /api/v1/auth/reauth
+Authorization: Bearer <access-token>
+Content-Type: application/json
+```
+
+```json
+{ "password": "ExamplePassword1!" }
+```
+
+or:
+
+```json
+{ "pin": "1234" }
+```
+
+`transactionPin` is also accepted as an alias for `pin`. A successful
+reauthentication returns `{ "authenticated": true }`; invalid credentials
+return a validation or authentication error and never unlock the client.
+
 ## Phone Number Handling
 
 - Signup accepts international E.164 phone numbers such as `+2348012345678`
