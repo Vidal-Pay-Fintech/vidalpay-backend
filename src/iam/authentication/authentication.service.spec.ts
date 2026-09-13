@@ -28,6 +28,20 @@ describe('AuthenticationService', () => {
         message: 'relation "auth_session" does not exist',
       },
     });
+  const invalidPasswordResetTokenTypeError = () =>
+    Object.assign(
+      new Error(
+        'invalid input value for enum token_type_enum: "password_reset"',
+      ),
+      {
+        code: '22P02',
+        driverError: {
+          code: '22P02',
+          message:
+            'invalid input value for enum token_type_enum: "password_reset"',
+        },
+      },
+    );
   const userRepository = {
     findUserById: jest.fn(),
     findOneAndUpdate: jest.fn(),
@@ -47,6 +61,7 @@ describe('AuthenticationService', () => {
   };
   const mailService = {
     sendEmailVerificationCode: jest.fn(),
+    sendResetPasswordOTP: jest.fn(),
     sendResetTransactionPinCode: jest.fn(),
   };
   const authSessionRepository = {
@@ -257,5 +272,59 @@ describe('AuthenticationService', () => {
     await expect(service.getSessions('user-1')).rejects.toBeInstanceOf(
       ServiceUnavailableException,
     );
+  });
+
+  it('creates and emails password reset OTPs', async () => {
+    const user = { id: 'user-1', email: 'user@example.com' };
+    userRepository.findUserByEmail.mockResolvedValue(user);
+    tokenService.create.mockResolvedValue({ id: 'token-1' });
+
+    await expect(
+      service.requestPasswordReset('user@example.com'),
+    ).resolves.toBe('Please enter the OTP sent to your email address');
+    expect(tokenService.create).toHaveBeenCalledWith(
+      expect.objectContaining({
+        type: 'password_reset',
+        user,
+      }),
+    );
+    expect(mailService.sendResetPasswordOTP).toHaveBeenCalledWith(
+      'user-1',
+      expect.any(String),
+    );
+  });
+
+  it('returns service unavailable when password reset token storage is not compatible', async () => {
+    userRepository.findUserByEmail.mockResolvedValue({
+      id: 'user-1',
+      email: 'user@example.com',
+    });
+    tokenService.create.mockRejectedValueOnce(
+      invalidPasswordResetTokenTypeError(),
+    );
+
+    await expect(
+      service.requestPasswordReset('user@example.com'),
+    ).rejects.toBeInstanceOf(ServiceUnavailableException);
+    expect(mailService.sendResetPasswordOTP).not.toHaveBeenCalled();
+  });
+
+  it('cleans up the password reset OTP when email delivery fails', async () => {
+    userRepository.findUserByEmail.mockResolvedValue({
+      id: 'user-1',
+      email: 'user@example.com',
+    });
+    tokenService.create.mockResolvedValue({ id: 'token-1' });
+    mailService.sendResetPasswordOTP.mockRejectedValueOnce(
+      new ServiceUnavailableException({
+        code: 'EMAIL_DELIVERY_UNAVAILABLE',
+        reason: 'SMTP email delivery is not configured on the backend.',
+      }),
+    );
+
+    await expect(
+      service.requestPasswordReset('user@example.com'),
+    ).rejects.toBeInstanceOf(ServiceUnavailableException);
+    expect(tokenService.delete).toHaveBeenCalledWith('token-1');
   });
 });

@@ -188,9 +188,14 @@ Provider status item example:
 - JWT: `JWT_SECRET`, `JWT_TOKEN_AUDIENCE`, `JWT_TOKEN_ISSUER`,
   `JWT_ACCESS_TOKEN_TTL`, `JWT_REFRESH_TOKEN_TTL`. The legacy
   `JWT_ACCESS_TOKEN_TtL` spelling is still accepted as a fallback.
-- Email/SMS: `SMTP_MAIL_HOST`, `SMTP_MAIL_PORT`, `SMTP_MAIL_USERNAME`,
-  `SMTP_MAIL_PASSWORD`, `TWILIO_ACCOUNT_SID`, `TWILIO_AUTH_TOKEN`,
-  `TWILIO_PHONE_NUMBER`.
+- Email/SMS: prefer `SMTP_MAIL_HOST`, `SMTP_MAIL_PORT`,
+  `SMTP_MAIL_USERNAME`, `SMTP_MAIL_PASSWORD`, and optional
+  `SMTP_MAIL_FROM`. The mail service also accepts the existing aliases
+  `SMTP_HOST`/`MAIL_HOST`, `SMTP_PORT`/`MAIL_PORT`,
+  `SMTP_USER`/`MAIL_USER`, and `SMTP_PASS`/`MAIL_PASS`. `SMTP_MAIL_HOST` must
+  be the real remote SMTP hostname; an unset value must never fall back to
+  localhost. `TWILIO_ACCOUNT_SID`, `TWILIO_AUTH_TOKEN`, and
+  `TWILIO_PHONE_NUMBER` remain the SMS variables.
 - Unit: `UNIT_API_TOKEN`, optional `UNIT_BASE_URL`, `UNIT_WEBHOOK_SECRET`.
 - PayVessel: `PAYVESSEL_API_KEY`, `PAYVESSEL_API_SECRET`, optional
   `PAYVESSEL_BASE_URL` (defaults to `https://sandbox.payvessel.com`), and
@@ -202,6 +207,29 @@ Provider status item example:
 - SMTP delivery tuning: optional `SMTP_TLS_REJECT_UNAUTHORIZED`,
   `SMTP_CONNECTION_TIMEOUT_MS`, `SMTP_GREETING_TIMEOUT_MS`, and
   `SMTP_SOCKET_TIMEOUT_MS`.
+
+Password-reset and OTP delivery returns HTTP `503` with code
+`EMAIL_DELIVERY_UNAVAILABLE` or `PASSWORD_RESET_EMAIL_UNAVAILABLE` when SMTP
+is missing, points to localhost, or cannot be reached. The response contains
+only missing variable names and provider error codes; SMTP credentials and
+provider payloads are never returned to mobile.
+
+Example when Render has no usable SMTP host:
+
+```json
+{
+  "code": "PASSWORD_RESET_EMAIL_UNAVAILABLE",
+  "message": "We could not send the password reset OTP right now. Please try again later or contact support.",
+  "feature": "password_reset",
+  "capability": "password_reset_email_otp",
+  "reason": "SMTP email delivery is not configured on the backend.",
+  "missingRequirements": [
+    "SMTP_MAIL_HOST or SMTP_HOST or MAIL_HOST or EMAIL_HOST"
+  ],
+  "provider": "SMTP",
+  "retryable": false
+}
+```
 - Future providers: `FX_PROVIDER_BASE_URL`, `FX_PROVIDER_API_KEY`,
   `CRYPTO_PROVIDER`, `CRYPTO_PROVIDER_API_KEY`, `INVESTMENT_PROVIDER`,
   `INVESTMENT_PROVIDER_API_KEY`, `TAX_PROVIDER`, `TAX_PROVIDER_API_KEY`,
@@ -454,9 +482,9 @@ tables automatically.
 
 ## Test Results
 
-- Backend build: `corepack pnpm exec nest build` passed.
-- Backend tests: `corepack pnpm exec jest --runInBand` passed with 19 suites and
-  67 tests.
+- Backend build: `npm run build` passed.
+- Backend tests: `npx jest --runInBand` passed with 20 suites and 76 tests,
+  including SMTP configuration and password-reset delivery failure handling.
 - Mobile TypeScript check: `corepack yarn tsc --noEmit --pretty false` passed.
 - `npm run db:migrate` was verified to exit without connecting to PostgreSQL.
   Static checks do not replace a Render health check or provider sandbox

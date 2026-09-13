@@ -877,15 +877,25 @@ export class AuthenticationService {
     tokenExpiration.setHours(tokenExpiration.getHours() + 1); // 1 hour expiry
 
     // Save OTP token for password reset
-    await this.tokenService.create({
-      token: verificationToken,
-      expiration: tokenExpiration,
-      type: TokenType.PASSWORD_RESET,
+    const resetToken = await this.createPasswordResetToken(
       user,
-    });
+      verificationToken,
+      tokenExpiration,
+    );
 
     // Send OTP via email
-    await this.mailService.sendResetPasswordOTP(user.id, verificationToken);
+    try {
+      await this.mailService.sendResetPasswordOTP(user.id, verificationToken);
+    } catch (error) {
+      if (resetToken?.id) {
+        try {
+          await this.tokenService.delete(resetToken.id);
+        } catch {
+          // The reset token expires quickly; cleanup failure should not hide the delivery error.
+        }
+      }
+      this.throwPasswordResetEmailUnavailable(error);
+    }
 
     return API_MESSAGES.OTP_SENT;
   }
@@ -1099,6 +1109,178 @@ export class AuthenticationService {
       (/auth_session/i.test(message) &&
         /does not exist|no such table/i.test(message))
     );
+  }
+
+  private async createPasswordResetToken(
+    user: User,
+    verificationToken: string,
+    tokenExpiration: Date,
+  ) {
+    try {
+      return await this.tokenService.create({
+        token: verificationToken,
+        expiration: tokenExpiration,
+        type: TokenType.PASSWORD_RESET,
+        user,
+      });
+    } catch (error) {
+      throw new ServiceUnavailableException({
+        code: 'PASSWORD_RESET_TOKEN_STORE_UNAVAILABLE',
+        message:
+          'Password reset is temporarily unavailable. Please try again later or contact support.',
+        feature: 'password_reset',
+        capability: 'password_reset_otp',
+        reason:
+          'The backend could not save a password reset OTP for this account.',
+        missingRequirements: this.passwordResetStoreMissingRequirements(error),
+        provider: 'VidalPay',
+        retryable: false,
+      });
+    }
+  }
+
+  private throwPasswordResetEmailUnavailable(error: unknown): never {
+    throw new ServiceUnavailableException({
+      code: 'PASSWORD_RESET_EMAIL_UNAVAILABLE',
+      message:
+        'We could not send the password reset OTP right now. Please try again later or contact support.',
+      feature: 'password_reset',
+      capability: 'password_reset_email_otp',
+      reason: this.serviceUnavailableReason(
+        error,
+        'SMTP email delivery failed or is not configured.',
+      ),
+      missingRequirements: this.missingEmailConfiguration(),
+      provider: 'SMTP',
+      retryable: this.missingEmailConfiguration().length === 0,
+    });
+  }
+
+  private passwordResetStoreMissingRequirements(error: unknown) {
+    const code = this.errorCode(error);
+    const message = this.errorMessage(error);
+
+    if (
+      code === '22P02' ||
+      /password_reset/i.test(message) ||
+      /enum/i.test(message)
+    ) {
+      return ['token.type enum value password_reset'];
+    }
+
+    if (
+      code === '42P01' ||
+      /relation .*token.* does not exist/i.test(message)
+    ) {
+      return ['token table'];
+    }
+
+    if (code === '42703' || /column .*type.* does not exist/i.test(message)) {
+      return ['token.type column'];
+    }
+
+    return ['password reset token storage'];
+  }
+
+  private missingEmailConfiguration() {
+    const missing: string[] = [];
+    const host = this.firstEnv([
+      'SMTP_MAIL_HOST',
+      'SMTP_HOST',
+      'MAIL_HOST',
+      'EMAIL_HOST',
+    ]);
+
+    if (!host) {
+      missing.push('SMTP_MAIL_HOST or SMTP_HOST or MAIL_HOST or EMAIL_HOST');
+    } else if (
+      ['localhost', '127.0.0.1', '::1', '[::1]'].includes(host.toLowerCase()) &&
+      process.env.SMTP_ALLOW_LOCALHOST !== 'true'
+    ) {
+      missing.push(
+        'SMTP host must be a remote SMTP hostname, not localhost or 127.0.0.1',
+      );
+    }
+
+    if (
+      !this.firstEnv([
+        'SMTP_MAIL_USERNAME',
+        'SMTP_MAIL_USER',
+        'SMTP_USERNAME',
+        'SMTP_USER',
+        'MAIL_USERNAME',
+        'MAIL_USER',
+        'EMAIL_USERNAME',
+        'EMAIL_USER',
+      ])
+    ) {
+      missing.push(
+        'SMTP_MAIL_USERNAME or SMTP_MAIL_USER or SMTP_USER or MAIL_USER',
+      );
+    }
+
+    if (
+      !this.firstEnv([
+        'SMTP_MAIL_PASSWORD',
+        'SMTP_MAIL_PASS',
+        'SMTP_PASSWORD',
+        'SMTP_PASS',
+        'MAIL_PASSWORD',
+        'MAIL_PASS',
+        'EMAIL_PASSWORD',
+        'EMAIL_PASS',
+      ])
+    ) {
+      missing.push(
+        'SMTP_MAIL_PASSWORD or SMTP_MAIL_PASS or SMTP_PASS or MAIL_PASS',
+      );
+    }
+
+    return missing;
+  }
+
+  private firstEnv(names: string[]) {
+    for (const name of names) {
+      const value = process.env[name]?.trim();
+      if (value) {
+        return value;
+      }
+    }
+
+    return null;
+  }
+
+  private serviceUnavailableReason(error: unknown, fallback: string) {
+    const response = error as {
+      response?: { reason?: string; code?: string; message?: string };
+    };
+
+    return (
+      response?.response?.reason ??
+      response?.response?.message ??
+      this.errorMessage(error) ??
+      fallback
+    );
+  }
+
+  private errorCode(error: unknown) {
+    const candidate = error as {
+      code?: string;
+      driverError?: { code?: string };
+    };
+
+    return candidate?.driverError?.code ?? candidate?.code ?? null;
+  }
+
+  private errorMessage(error: unknown) {
+    const candidate = error as {
+      message?: string;
+      driverError?: { message?: string };
+    };
+
+    return `${candidate?.driverError?.message ?? ''} ${
+      candidate?.message ?? ''
+    }`.trim();
   }
 
   private async findUserByEmailOrPhoneVariants(value: string) {

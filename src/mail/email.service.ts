@@ -96,7 +96,7 @@
 //   }
 // }
 
-import { Injectable } from '@nestjs/common';
+import { Injectable, ServiceUnavailableException } from '@nestjs/common';
 import { render } from '@react-email/render';
 import * as nodemailer from 'nodemailer';
 
@@ -110,34 +110,51 @@ interface SendMailConfiguration {
   fileType?: string;
 }
 
+type SmtpConfig = {
+  host: string | null;
+  port: number;
+  secure: boolean;
+  user: string | null;
+  password: string | null;
+  fromAddress: string | null;
+};
+
 @Injectable()
 export class EmailService {
-  private transporter: nodemailer.Transporter;
+  private transporter: nodemailer.Transporter | null = null;
+  private readonly smtpConfig: SmtpConfig;
+
   constructor() {
-    const port = Number(process.env.SMTP_MAIL_PORT) || 587;
-    this.transporter = nodemailer.createTransport(
-      {
-        host: process.env.SMTP_MAIL_HOST,
-        port,
-        secure: port === 465,
-        auth: {
-          user: process.env.SMTP_MAIL_USERNAME,
-          pass: process.env.SMTP_MAIL_PASSWORD,
+    this.smtpConfig = this.readSmtpConfig();
+
+    if (this.missingConfiguration().length === 0) {
+      this.transporter = nodemailer.createTransport(
+        {
+          host: this.smtpConfig.host,
+          port: this.smtpConfig.port,
+          secure: this.smtpConfig.secure,
+          auth: {
+            user: this.smtpConfig.user,
+            pass: this.smtpConfig.password,
+          },
+          tls: {
+            rejectUnauthorized:
+              process.env.SMTP_TLS_REJECT_UNAUTHORIZED !== 'false',
+          },
+          connectionTimeout:
+            Number(process.env.SMTP_CONNECTION_TIMEOUT_MS) || 10000,
+          greetingTimeout:
+            Number(process.env.SMTP_GREETING_TIMEOUT_MS) || 10000,
+          socketTimeout: Number(process.env.SMTP_SOCKET_TIMEOUT_MS) || 10000,
         },
-        tls: {
-          rejectUnauthorized: process.env.SMTP_TLS_REJECT_UNAUTHORIZED !== 'false',
+        {
+          from: {
+            name: 'VidalPay',
+            address: this.smtpConfig.fromAddress ?? this.smtpConfig.user,
+          },
         },
-        connectionTimeout: Number(process.env.SMTP_CONNECTION_TIMEOUT_MS) || 10000,
-        greetingTimeout: Number(process.env.SMTP_GREETING_TIMEOUT_MS) || 10000,
-        socketTimeout: Number(process.env.SMTP_SOCKET_TIMEOUT_MS) || 10000,
-      },
-      {
-        from: {
-          name: 'VidalPay',
-          address: process.env.SMTP_MAIL_USERNAME,
-        },
-      },
-    );
+      );
+    }
   }
 
   private generateEmail = (template: any) => {
@@ -145,8 +162,13 @@ export class EmailService {
   };
 
   async sendMail({ email, subject, template, file }: SendMailConfiguration) {
+    this.assertConfigured();
     const html = await this.generateEmail(template);
-    return await this.sendEmailNodeMailer({ email, subject, html, file });
+    try {
+      return await this.sendEmailNodeMailer({ email, subject, html, file });
+    } catch (error) {
+      this.throwEmailUnavailable(error);
+    }
   }
 
   /**
@@ -161,10 +183,164 @@ export class EmailService {
     subject,
     html,
   }: SendMailConfiguration) {
-    await this.transporter.sendMail({
+    if (!this.transporter) {
+      this.assertConfigured();
+    }
+
+    await this.transporter?.sendMail({
       to: email,
       subject,
       html,
     });
+  }
+
+  private assertConfigured() {
+    const missingRequirements = this.missingConfiguration();
+
+    if (missingRequirements.length > 0) {
+      throw new ServiceUnavailableException({
+        code: 'EMAIL_DELIVERY_UNAVAILABLE',
+        message:
+          'We could not send this email right now. Please try again later or contact support.',
+        feature: 'email_delivery',
+        capability: 'email_delivery',
+        reason: 'SMTP email delivery is not configured on the backend.',
+        missingRequirements,
+        provider: 'SMTP',
+        retryable: false,
+      });
+    }
+  }
+
+  private throwEmailUnavailable(error: unknown): never {
+    const code =
+      error && typeof error === 'object' && 'code' in error
+        ? String((error as { code?: string }).code)
+        : null;
+
+    throw new ServiceUnavailableException({
+      code: 'EMAIL_DELIVERY_UNAVAILABLE',
+      message:
+        'We could not send this email right now. Please try again later or contact support.',
+      feature: 'email_delivery',
+      capability: 'email_delivery',
+      reason: code
+        ? `SMTP email delivery failed with provider code ${code}.`
+        : 'SMTP email delivery failed.',
+      missingRequirements: this.missingConfiguration(),
+      provider: 'SMTP',
+      retryable: true,
+    });
+  }
+
+  private missingConfiguration() {
+    const missing: string[] = [];
+
+    if (!this.smtpConfig.host) {
+      missing.push('SMTP_MAIL_HOST or SMTP_HOST or MAIL_HOST or EMAIL_HOST');
+    } else if (this.isLocalSmtpHost(this.smtpConfig.host)) {
+      missing.push(
+        'SMTP host must be a remote SMTP hostname, not localhost or 127.0.0.1',
+      );
+    }
+
+    if (!this.smtpConfig.user) {
+      missing.push(
+        'SMTP_MAIL_USERNAME or SMTP_MAIL_USER or SMTP_USER or MAIL_USER',
+      );
+    }
+
+    if (!this.smtpConfig.password) {
+      missing.push(
+        'SMTP_MAIL_PASSWORD or SMTP_MAIL_PASS or SMTP_PASS or MAIL_PASS',
+      );
+    }
+
+    return missing;
+  }
+
+  private readSmtpConfig(): SmtpConfig {
+    const port =
+      Number(
+        this.firstEnv([
+          'SMTP_MAIL_PORT',
+          'SMTP_PORT',
+          'MAIL_PORT',
+          'EMAIL_PORT',
+        ]),
+      ) || 587;
+    const secure = this.parseBoolean(
+      this.firstEnv(['SMTP_MAIL_SECURE', 'SMTP_SECURE', 'MAIL_SECURE']),
+      port === 465,
+    );
+    const user = this.firstEnv([
+      'SMTP_MAIL_USERNAME',
+      'SMTP_MAIL_USER',
+      'SMTP_USERNAME',
+      'SMTP_USER',
+      'MAIL_USERNAME',
+      'MAIL_USER',
+      'EMAIL_USERNAME',
+      'EMAIL_USER',
+    ]);
+
+    return {
+      host: this.firstEnv([
+        'SMTP_MAIL_HOST',
+        'SMTP_HOST',
+        'MAIL_HOST',
+        'EMAIL_HOST',
+      ]),
+      port,
+      secure,
+      user,
+      password: this.firstEnv([
+        'SMTP_MAIL_PASSWORD',
+        'SMTP_MAIL_PASS',
+        'SMTP_PASSWORD',
+        'SMTP_PASS',
+        'MAIL_PASSWORD',
+        'MAIL_PASS',
+        'EMAIL_PASSWORD',
+        'EMAIL_PASS',
+      ]),
+      fromAddress:
+        this.firstEnv([
+          'SMTP_FROM_EMAIL',
+          'SMTP_MAIL_FROM',
+          'MAIL_FROM',
+          'EMAIL_FROM',
+          'SENDGRID_FROM_EMAIL',
+        ]) ?? user,
+    };
+  }
+
+  private firstEnv(names: string[]) {
+    for (const name of names) {
+      const value = process.env[name]?.trim();
+      if (value) {
+        return value;
+      }
+    }
+
+    return null;
+  }
+
+  private parseBoolean(value: string | null, fallback: boolean) {
+    if (!value) {
+      return fallback;
+    }
+
+    return ['1', 'true', 'yes'].includes(value.toLowerCase());
+  }
+
+  private isLocalSmtpHost(host: string) {
+    if (process.env.SMTP_ALLOW_LOCALHOST === 'true') {
+      return false;
+    }
+
+    return ['localhost', '127.0.0.1', '::1', '[::1]'].includes(
+      host.toLowerCase(),
+    );
   }
 }

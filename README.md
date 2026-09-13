@@ -46,6 +46,23 @@ database. The repository's compatibility script is a no-op so an old Render
 command cannot run migrations, but changing the dashboard Start Command to
 `npm run start:prod` is the intended configuration.
 
+For OTP and password-reset email delivery, set these Render environment
+variables with the SMTP provider's actual values:
+
+```text
+SMTP_MAIL_HOST=smtp.example.com
+SMTP_MAIL_PORT=587
+SMTP_MAIL_USERNAME=provider-username
+SMTP_MAIL_PASSWORD=provider-password
+SMTP_MAIL_FROM=verified-sender@example.com
+```
+
+The backend also accepts `SMTP_HOST`, `SMTP_PORT`, `SMTP_USER`, and
+`SMTP_PASS`, but the `SMTP_MAIL_*` names are the canonical deployment names.
+Do not set the host to `localhost` or `127.0.0.1`; Render has no local SMTP
+server. Gmail requires an app password, and a transactional provider such as
+SendGrid requires its SMTP relay hostname and credentials.
+
 ## Project setup
 
 ```bash
