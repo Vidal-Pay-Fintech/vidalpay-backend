@@ -95,6 +95,14 @@ describe('AuthenticationService', () => {
     await expect(service.reauth('user-1', { password: 'bad' })).rejects.toBeInstanceOf(UnauthorizedException);
   });
 
+  it('reauthenticates a locked session with either transaction PIN field name', async () => {
+    userRepository.findUserById.mockResolvedValue({ id: 'user-1', pin: 'hashed-pin' });
+    hashingService.compare.mockResolvedValue(true);
+
+    await expect(service.reauth('user-1', { transactionPin: '1234' })).resolves.toEqual({ authenticated: true });
+    expect(hashingService.compare).toHaveBeenCalledWith('1234', 'hashed-pin');
+  });
+
   it('creates and emails transaction PIN reset OTPs', async () => {
     userRepository.findUserById.mockResolvedValue({ id: 'user-1' });
     tokenService.create.mockResolvedValue({ id: 'token-1' });

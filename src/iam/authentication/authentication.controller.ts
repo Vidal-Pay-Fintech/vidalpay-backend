@@ -33,6 +33,7 @@ import { CreateTransactionPinDto } from './dto/create-transaction-pin.dto';
 import { RequestPasswordResetDto } from './dto/request-password-reset.dto';
 import { VerifyPasswordResetOtpDto } from './dto/verify-password-resetotp.dto';
 import { ResetPasswordAfterOtpDto } from './dto/reset-password-afterotp-verification.dto';
+import { ReauthDto } from './dto/reauth.dto';
 
 @ApiTags('Authentication')
 @Auth(AuthType.None) // route with no auth guard
@@ -188,7 +189,7 @@ export class AuthenticationController {
   @Post('reauth')
   async reauth(
     @ActiveUser() user: ActiveUserData,
-    @Body() body: Record<string, string>,
+    @Body() body: ReauthDto,
   ) {
     return this.authService.reauth(user.sub, body);
   }

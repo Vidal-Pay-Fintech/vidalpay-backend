@@ -52,6 +52,7 @@ import { UserRole } from 'src/utils/enums/user.enum';
 import { TagIdGenerator } from 'src/utils/tagIdGenerator';
 import { VerifyPasswordResetOtpDto } from './dto/verify-password-resetotp.dto';
 import { ResetPasswordAfterOtpDto } from './dto/reset-password-afterotp-verification.dto';
+import { ReauthDto } from './dto/reauth.dto';
 import { Request } from 'express';
 import { AuthSession } from 'src/database/entities/auth-session.entity';
 import { Repository, IsNull } from 'typeorm';
@@ -486,7 +487,7 @@ export class AuthenticationService {
     };
   }
 
-  async reauth(userId: string, body: Record<string, string>) {
+  async reauth(userId: string, body: ReauthDto) {
     const user = await this.userRepository.findUserById(userId);
     if (body.password) {
       const validPassword = await this.hashingService.compare(
@@ -498,8 +499,9 @@ export class AuthenticationService {
       }
       return { authenticated: true };
     }
-    if (body.pin) {
-      await this.validateTransactionPin(userId, body.pin);
+    const transactionPin = body.pin ?? body.transactionPin;
+    if (transactionPin) {
+      await this.validateTransactionPin(userId, transactionPin);
       return { authenticated: true };
     }
     throw new BadRequestException('password or pin is required');
