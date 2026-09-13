@@ -76,19 +76,49 @@ export class User extends AbstractEntity {
   @Column({ type: 'varchar', nullable: true })
   country: string;
 
-  @Column({ type: 'varchar', nullable: true })
+  @Column({
+    type: 'varchar',
+    nullable: true,
+    select: false,
+    insert: false,
+    update: false,
+  })
   countryCode: string;
 
-  @Column({ type: 'varchar', nullable: true })
+  @Column({
+    type: 'varchar',
+    nullable: true,
+    select: false,
+    insert: false,
+    update: false,
+  })
   residency: string;
 
-  @Column({ type: 'varchar', nullable: true })
+  @Column({
+    type: 'varchar',
+    nullable: true,
+    select: false,
+    insert: false,
+    update: false,
+  })
   region: string;
 
-  @Column({ type: 'varchar', nullable: true })
+  @Column({
+    type: 'varchar',
+    nullable: true,
+    select: false,
+    insert: false,
+    update: false,
+  })
   pendingEmail: string;
 
-  @Column({ type: 'varchar', nullable: true })
+  @Column({
+    type: 'varchar',
+    nullable: true,
+    select: false,
+    insert: false,
+    update: false,
+  })
   pendingPhoneNumber: string;
 
   @Column({ type: 'varchar', nullable: true })
@@ -172,16 +202,40 @@ export class User extends AbstractEntity {
   @Column({ default: false })
   isPhoneVerified: boolean;
 
-  @Column({ type: 'varchar', nullable: true })
+  @Column({
+    type: 'varchar',
+    nullable: true,
+    select: false,
+    insert: false,
+    update: false,
+  })
   kycStatus: string;
 
-  @Column({ type: 'simple-json', nullable: true })
+  @Column({
+    type: 'simple-json',
+    nullable: true,
+    select: false,
+    insert: false,
+    update: false,
+  })
   capabilities: Record<string, unknown>;
 
-  @Column({ type: 'simple-json', nullable: true })
+  @Column({
+    type: 'simple-json',
+    nullable: true,
+    select: false,
+    insert: false,
+    update: false,
+  })
   productAvailability: Record<string, unknown>;
 
-  @Column({ type: 'simple-json', nullable: true })
+  @Column({
+    type: 'simple-json',
+    nullable: true,
+    select: false,
+    insert: false,
+    update: false,
+  })
   limits: Record<string, unknown>;
 
   @Column({ type: 'varchar', nullable: true })

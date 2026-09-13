@@ -1,4 +1,8 @@
-import { PreconditionFailedException, UnauthorizedException } from '@nestjs/common';
+import {
+  PreconditionFailedException,
+  ServiceUnavailableException,
+  UnauthorizedException,
+} from '@nestjs/common';
 import { Test, TestingModule } from '@nestjs/testing';
 import { getRepositoryToken } from '@nestjs/typeorm';
 import { JwtService } from '@nestjs/jwt';
@@ -16,6 +20,14 @@ import { UserRole } from 'src/utils/enums/user.enum';
 
 describe('AuthenticationService', () => {
   let service: AuthenticationService;
+  const missingAuthSessionTableError = () =>
+    Object.assign(new Error('relation "auth_session" does not exist'), {
+      code: '42P01',
+      driverError: {
+        code: '42P01',
+        message: 'relation "auth_session" does not exist',
+      },
+    });
   const userRepository = {
     findUserById: jest.fn(),
     findOneAndUpdate: jest.fn(),
@@ -42,7 +54,11 @@ describe('AuthenticationService', () => {
     findOne: jest.fn(),
     update: jest.fn(),
     create: jest.fn((payload) => payload),
-    save: jest.fn(async (payload) => ({ id: 'session-1', familyId: 'family-1', ...payload })),
+    save: jest.fn(async (payload) => ({
+      id: 'session-1',
+      familyId: 'family-1',
+      ...payload,
+    })),
   };
 
   beforeEach(async () => {
@@ -57,9 +73,21 @@ describe('AuthenticationService', () => {
         { provide: WalletService, useValue: walletService },
         { provide: MailService, useValue: mailService },
         { provide: UserRepository, useValue: userRepository },
-        { provide: getRepositoryToken(AuthSession), useValue: authSessionRepository },
+        {
+          provide: getRepositoryToken(AuthSession),
+          useValue: authSessionRepository,
+        },
         { provide: PhoneService, useValue: {} },
-        { provide: jwtConfig.KEY, useValue: { secret: 'secret', audience: 'audience', issuer: 'issuer', accessTokenTtl: 3600, refreshAccessTokenTtl: 86400 } },
+        {
+          provide: jwtConfig.KEY,
+          useValue: {
+            secret: 'secret',
+            audience: 'audience',
+            issuer: 'issuer',
+            accessTokenTtl: 3600,
+            refreshAccessTokenTtl: 86400,
+          },
+        },
       ],
     }).compile();
 
@@ -67,39 +95,64 @@ describe('AuthenticationService', () => {
   });
 
   it('validates transaction PINs through backend-side hashing', async () => {
-    userRepository.findUserById.mockResolvedValue({ id: 'user-1', pin: 'hashed-pin' });
+    userRepository.findUserById.mockResolvedValue({
+      id: 'user-1',
+      pin: 'hashed-pin',
+    });
     hashingService.compare.mockResolvedValue(true);
 
-    await expect(service.validateTransactionPin('user-1', '1234')).resolves.toBe(true);
+    await expect(
+      service.validateTransactionPin('user-1', '1234'),
+    ).resolves.toBe(true);
     expect(hashingService.compare).toHaveBeenCalledWith('1234', 'hashed-pin');
   });
 
   it('rejects invalid transaction PINs', async () => {
-    userRepository.findUserById.mockResolvedValue({ id: 'user-1', pin: 'hashed-pin' });
+    userRepository.findUserById.mockResolvedValue({
+      id: 'user-1',
+      pin: 'hashed-pin',
+    });
     hashingService.compare.mockResolvedValue(false);
 
-    await expect(service.validateTransactionPin('user-1', '9999')).rejects.toBeInstanceOf(PreconditionFailedException);
+    await expect(
+      service.validateTransactionPin('user-1', '9999'),
+    ).rejects.toBeInstanceOf(PreconditionFailedException);
   });
 
   it('reauthenticates a locked session with password', async () => {
-    userRepository.findUserById.mockResolvedValue({ id: 'user-1', password: 'hash' });
+    userRepository.findUserById.mockResolvedValue({
+      id: 'user-1',
+      password: 'hash',
+    });
     hashingService.compare.mockResolvedValue(true);
 
-    await expect(service.reauth('user-1', { password: 'secret' })).resolves.toEqual({ authenticated: true });
+    await expect(
+      service.reauth('user-1', { password: 'secret' }),
+    ).resolves.toEqual({ authenticated: true });
   });
 
   it('rejects failed password reauthentication', async () => {
-    userRepository.findUserById.mockResolvedValue({ id: 'user-1', password: 'hash' });
+    userRepository.findUserById.mockResolvedValue({
+      id: 'user-1',
+      password: 'hash',
+    });
     hashingService.compare.mockResolvedValue(false);
 
-    await expect(service.reauth('user-1', { password: 'bad' })).rejects.toBeInstanceOf(UnauthorizedException);
+    await expect(
+      service.reauth('user-1', { password: 'bad' }),
+    ).rejects.toBeInstanceOf(UnauthorizedException);
   });
 
   it('reauthenticates a locked session with either transaction PIN field name', async () => {
-    userRepository.findUserById.mockResolvedValue({ id: 'user-1', pin: 'hashed-pin' });
+    userRepository.findUserById.mockResolvedValue({
+      id: 'user-1',
+      pin: 'hashed-pin',
+    });
     hashingService.compare.mockResolvedValue(true);
 
-    await expect(service.reauth('user-1', { transactionPin: '1234' })).resolves.toEqual({ authenticated: true });
+    await expect(
+      service.reauth('user-1', { transactionPin: '1234' }),
+    ).resolves.toEqual({ authenticated: true });
     expect(hashingService.compare).toHaveBeenCalledWith('1234', 'hashed-pin');
   });
 
@@ -109,8 +162,13 @@ describe('AuthenticationService', () => {
 
     await service.requestTransactionPinReset('user-1');
 
-    expect(tokenService.create).toHaveBeenCalledWith(expect.objectContaining({ user: { id: 'user-1' } }));
-    expect(mailService.sendResetTransactionPinCode).toHaveBeenCalledWith('user-1', expect.any(String));
+    expect(tokenService.create).toHaveBeenCalledWith(
+      expect.objectContaining({ user: { id: 'user-1' } }),
+    );
+    expect(mailService.sendResetTransactionPinCode).toHaveBeenCalledWith(
+      'user-1',
+      expect.any(String),
+    );
   });
 
   it('normalizes US and Nigerian phone numbers without forcing US users into +234', () => {
@@ -149,7 +207,11 @@ describe('AuthenticationService', () => {
       .mockResolvedValueOnce('refresh-token');
 
     await expect(
-      service.signIn({ email: '', phoneNumber: '5551234567', password: 'secret' }),
+      service.signIn({
+        email: '',
+        phoneNumber: '5551234567',
+        password: 'secret',
+      }),
     ).resolves.toEqual(
       expect.objectContaining({
         accessToken: 'access-token',
@@ -157,5 +219,43 @@ describe('AuthenticationService', () => {
       }),
     );
     expect(userRepository.findUserByPhone).toHaveBeenCalledWith('+15551234567');
+  });
+
+  it('falls back to stateless tokens when the auth session table is missing', async () => {
+    authSessionRepository.save.mockRejectedValueOnce(
+      missingAuthSessionTableError(),
+    );
+    jwtService.signAsync
+      .mockResolvedValueOnce('access-token')
+      .mockResolvedValueOnce('refresh-token');
+
+    await expect(
+      service.generateToken({
+        id: 'user-1',
+        email: 'user@example.com',
+        role: UserRole.CUSTOMER,
+      } as User),
+    ).resolves.toEqual(
+      expect.objectContaining({
+        accessToken: 'access-token',
+        refreshToken: 'refresh-token',
+        sessionMode: 'stateless',
+      }),
+    );
+    expect(jwtService.signAsync).toHaveBeenNthCalledWith(
+      1,
+      expect.not.objectContaining({ sessionId: expect.any(String) }),
+      expect.any(Object),
+    );
+  });
+
+  it('reports session management as unavailable when the auth session table is missing', async () => {
+    authSessionRepository.find.mockRejectedValueOnce(
+      missingAuthSessionTableError(),
+    );
+
+    await expect(service.getSessions('user-1')).rejects.toBeInstanceOf(
+      ServiceUnavailableException,
+    );
   });
 });

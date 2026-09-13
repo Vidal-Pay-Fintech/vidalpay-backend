@@ -4,6 +4,7 @@ import {
   Injectable,
   NotFoundException,
   PreconditionFailedException,
+  ServiceUnavailableException,
   UnauthorizedException,
   UnprocessableEntityException,
 } from '@nestjs/common';
@@ -150,7 +151,11 @@ export class AuthenticationService {
     // );
     // delete newUser.password;
     const tokens = await this.generateToken(newUser, request);
-    return { ...tokens, user: this.sanitizeUser(newUser), newUser: this.sanitizeUser(newUser) };
+    return {
+      ...tokens,
+      user: this.sanitizeUser(newUser),
+      newUser: this.sanitizeUser(newUser),
+    };
   }
 
   async createTransactionPin(pin: string, userId: string) {
@@ -166,9 +171,12 @@ export class AuthenticationService {
     if (!tokenEntity || tokenEntity.expiration < new Date()) {
       throw new UnauthorizedException('Token is invalid or expired');
     }
-    const user = await this.userRepository.findOneAndUpdate(tokenEntity.user.id, {
-      isVerified: true,
-    });
+    const user = await this.userRepository.findOneAndUpdate(
+      tokenEntity.user.id,
+      {
+        isVerified: true,
+      },
+    );
     await this.tokenService.delete(tokenEntity.id);
     const tokens = await this.generateToken(user, request);
     return {
@@ -337,9 +345,23 @@ export class AuthenticationService {
     return API_MESSAGES.PASSWORD_CHANGED;
   }
 
-  async generateToken(user: User, request?: Request, existingSession?: AuthSession) {
-    const session =
-      existingSession ?? (await this.createAuthSession(user, request));
+  async generateToken(
+    user: User,
+    request?: Request,
+    existingSession?: AuthSession,
+  ) {
+    let session: AuthSession;
+
+    try {
+      session =
+        existingSession ?? (await this.createAuthSession(user, request));
+    } catch (error) {
+      if (this.isMissingAuthSessionStore(error)) {
+        return this.generateStatelessTokens(user);
+      }
+      throw error;
+    }
+
     const [accessToken, refreashToken] = await Promise.all([
       this.signToken<Partial<ActiveUserData>>(
         user.id,
@@ -363,9 +385,40 @@ export class AuthenticationService {
       Date.now() + this.jwtConfiguration.refreshAccessTokenTtl * 1000,
     );
     session.lastUsedAt = new Date();
-    await this.authSessionRepository.save(session);
+    try {
+      await this.authSessionRepository.save(session);
+    } catch (error) {
+      if (this.isMissingAuthSessionStore(error)) {
+        return this.generateStatelessTokens(user);
+      }
+      throw error;
+    }
 
     return { accessToken, refreshToken: refreashToken, refreashToken };
+  }
+
+  private async generateStatelessTokens(user: User) {
+    const [accessToken, refreashToken] = await Promise.all([
+      this.signToken<Partial<ActiveUserData>>(
+        user.id,
+        this.jwtConfiguration.accessTokenTtl,
+        {
+          email: user.email,
+          role: user.role,
+        },
+      ),
+      this.signToken(user.id, this.jwtConfiguration.refreshAccessTokenTtl, {
+        tokenType: 'refresh',
+        sessionMode: 'stateless',
+      }),
+    ]);
+
+    return {
+      accessToken,
+      refreshToken: refreashToken,
+      refreashToken,
+      sessionMode: 'stateless',
+    };
   }
 
   private async sendEmailVerificationOtp(user: User) {
@@ -402,27 +455,42 @@ export class AuthenticationService {
   }
 
   async refreshToken(refreshTokenDto: RefreshTokenDto) {
+    let payload: Pick<ActiveUserData, 'sub' | 'sessionId' | 'familyId'> & {
+      tokenType?: string;
+      sessionMode?: string;
+    };
+
     try {
-      const payload = await this.jwtService.verifyAsync<
-        Pick<ActiveUserData, 'sub' | 'sessionId' | 'familyId'> & {
-          tokenType?: string;
-        }
-      >(refreshTokenDto.refreshToken, {
-        secret: this.jwtConfiguration.secret,
-        audience: this.jwtConfiguration.audience,
-        issuer: this.jwtConfiguration.issuer,
-      });
+      payload = await this.jwtService.verifyAsync(
+        refreshTokenDto.refreshToken,
+        {
+          secret: this.jwtConfiguration.secret,
+          audience: this.jwtConfiguration.audience,
+          issuer: this.jwtConfiguration.issuer,
+        },
+      );
+    } catch (error) {
+      throw new UnauthorizedException();
+    }
+
+    try {
       const { sub, sessionId } = payload;
-      if (!sessionId || payload.tokenType !== 'refresh') {
+      if (payload.tokenType !== 'refresh') {
         throw new UnauthorizedException();
       }
       const user = await this.userRepository.findOne({
         where: { id: sub },
       });
+      if (!user) {
+        throw new UnauthorizedException();
+      }
+      if (!sessionId || payload.sessionMode === 'stateless') {
+        return this.generateStatelessTokens(user as User);
+      }
       const session = await this.authSessionRepository.findOne({
         where: { id: sessionId, userId: sub, revokedAt: IsNull() },
       });
-      if (!user || !session || !session.refreshTokenHash) {
+      if (!session || !session.refreshTokenHash) {
         throw new UnauthorizedException();
       }
       if (session.expiresAt && session.expiresAt < new Date()) {
@@ -437,6 +505,14 @@ export class AuthenticationService {
       }
       return this.generateToken(user as User, undefined, session);
     } catch (error) {
+      if (this.isMissingAuthSessionStore(error)) {
+        const user = await this.userRepository.findOne({
+          where: { id: payload.sub },
+        });
+        if (user && payload.tokenType === 'refresh') {
+          return this.generateStatelessTokens(user as User);
+        }
+      }
       throw new UnauthorizedException();
     }
   }
@@ -454,10 +530,16 @@ export class AuthenticationService {
         issuer: this.jwtConfiguration.issuer,
       });
       if (payload.sessionId) {
-        await this.authSessionRepository.update(
-          { id: payload.sessionId, userId: payload.sub },
-          { revokedAt: new Date() },
-        );
+        try {
+          await this.authSessionRepository.update(
+            { id: payload.sessionId, userId: payload.sub },
+            { revokedAt: new Date() },
+          );
+        } catch (error) {
+          if (!this.isMissingAuthSessionStore(error)) {
+            throw error;
+          }
+        }
       }
     } catch {
       return { loggedOut: true };
@@ -466,10 +548,14 @@ export class AuthenticationService {
   }
 
   async logoutAll(userId: string) {
-    await this.authSessionRepository.update(
-      { userId, revokedAt: IsNull() },
-      { revokedAt: new Date() },
-    );
+    try {
+      await this.authSessionRepository.update(
+        { userId, revokedAt: IsNull() },
+        { revokedAt: new Date() },
+      );
+    } catch (error) {
+      this.throwAuthSessionStoreUnavailable(error, 'logout_all');
+    }
     return { loggedOut: true };
   }
 
@@ -508,10 +594,17 @@ export class AuthenticationService {
   }
 
   async getSessions(userId: string) {
-    const sessions = await this.authSessionRepository.find({
-      where: { userId, revokedAt: IsNull() },
-      order: { lastUsedAt: 'DESC' },
-    });
+    let sessions: AuthSession[];
+
+    try {
+      sessions = await this.authSessionRepository.find({
+        where: { userId, revokedAt: IsNull() },
+        order: { lastUsedAt: 'DESC' },
+      });
+    } catch (error) {
+      this.throwAuthSessionStoreUnavailable(error, 'auth_sessions');
+    }
+
     return {
       sessions: sessions.map((session) => ({
         id: session.id,
@@ -529,24 +622,32 @@ export class AuthenticationService {
   }
 
   async revokeSession(userId: string, familyId: string) {
-    await this.authSessionRepository.update(
-      { userId, familyId },
-      { revokedAt: new Date() },
-    );
+    try {
+      await this.authSessionRepository.update(
+        { userId, familyId },
+        { revokedAt: new Date() },
+      );
+    } catch (error) {
+      this.throwAuthSessionStoreUnavailable(error, 'revoke_session');
+    }
     return { revoked: true, familyId };
   }
 
   async revokeOtherSessions(userId: string, sessionId?: string) {
-    const query = this.authSessionRepository
-      .createQueryBuilder()
-      .update(AuthSession)
-      .set({ revokedAt: new Date() })
-      .where('userId = :userId', { userId })
-      .andWhere('revokedAt IS NULL');
-    if (sessionId) {
-      query.andWhere('id != :sessionId', { sessionId });
+    try {
+      const query = this.authSessionRepository
+        .createQueryBuilder()
+        .update(AuthSession)
+        .set({ revokedAt: new Date() })
+        .where('userId = :userId', { userId })
+        .andWhere('revokedAt IS NULL');
+      if (sessionId) {
+        query.andWhere('id != :sessionId', { sessionId });
+      }
+      await query.execute();
+    } catch (error) {
+      this.throwAuthSessionStoreUnavailable(error, 'revoke_other_sessions');
     }
-    await query.execute();
     return { revokedOthers: true };
   }
 
@@ -894,6 +995,9 @@ export class AuthenticationService {
     if (user.status === AccountStatus.DEACTIVATED) {
       //CHECK THE LAST LOGIN OF THE USER IF IT'S WITHING THE LAST 30 DAYS. IF NOT WITHING THE LAST 30 DAYS, SUSPEND THE ACCOUNT AND ASK THE USER TO CONTACT SUPPORT
       const lastLogin = user.lastLogin;
+      if (!lastLogin) {
+        throw new UnauthorizedException(API_MESSAGES.ACCOUNT_DEACTIVATED);
+      }
       const currentDate = new Date();
       const diffInDays = Math.abs(
         (currentDate.getTime() - lastLogin.getTime()) / (1000 * 60 * 60 * 24),
@@ -956,6 +1060,45 @@ export class AuthenticationService {
   private sanitizeUser(user: User) {
     const { password, pin, resetToken, resetTokenExpiry, ...safeUser } = user;
     return safeUser;
+  }
+
+  private throwAuthSessionStoreUnavailable(
+    error: unknown,
+    feature: string,
+  ): never {
+    if (this.isMissingAuthSessionStore(error)) {
+      throw new ServiceUnavailableException({
+        code: 'AUTH_SESSION_STORE_UNAVAILABLE',
+        message:
+          'Session management is unavailable because the auth session store is not present in the connected database.',
+        feature,
+        capability: 'auth_sessions',
+        reason:
+          'The deployed backend is running against an existing database that has not been upgraded with the auth_session table.',
+        missingRequirements: ['auth_session table'],
+        provider: 'VidalPay',
+        retryable: false,
+      });
+    }
+
+    throw error;
+  }
+
+  private isMissingAuthSessionStore(error: unknown) {
+    const candidate = error as {
+      code?: string;
+      message?: string;
+      driverError?: { code?: string; message?: string };
+    };
+    const code = candidate?.driverError?.code ?? candidate?.code;
+    const message = `${candidate?.driverError?.message ?? ''} ${candidate?.message ?? ''}`;
+
+    return (
+      code === '42P01' ||
+      code === 'ER_NO_SUCH_TABLE' ||
+      (/auth_session/i.test(message) &&
+        /does not exist|no such table/i.test(message))
+    );
   }
 
   private async findUserByEmailOrPhoneVariants(value: string) {

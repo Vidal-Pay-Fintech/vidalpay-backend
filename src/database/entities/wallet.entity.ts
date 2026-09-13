@@ -51,6 +51,9 @@ export class Wallet extends AbstractEntity {
     scale: 2,
     nullable: true,
     default: 0.0,
+    select: false,
+    insert: false,
+    update: false,
   })
   availableBalance: number;
 
@@ -60,31 +63,82 @@ export class Wallet extends AbstractEntity {
     scale: 2,
     nullable: true,
     default: 0.0,
+    select: false,
+    insert: false,
+    update: false,
   })
   ledgerBalance: number;
 
-  @Column({ type: 'text', nullable: true })
+  @Column({
+    type: 'text',
+    nullable: true,
+    select: false,
+    insert: false,
+    update: false,
+  })
   address: string;
 
-  @Column({ type: 'varchar', nullable: true })
+  @Column({
+    type: 'varchar',
+    nullable: true,
+    select: false,
+    insert: false,
+    update: false,
+  })
   provider: string;
 
-  @Column({ type: 'varchar', nullable: true })
+  @Column({
+    type: 'varchar',
+    nullable: true,
+    select: false,
+    insert: false,
+    update: false,
+  })
   providerCustomerId: string;
 
-  @Column({ type: 'varchar', nullable: true })
+  @Column({
+    type: 'varchar',
+    nullable: true,
+    select: false,
+    insert: false,
+    update: false,
+  })
   providerAccountId: string;
 
-  @Column({ type: 'varchar', nullable: true })
+  @Column({
+    type: 'varchar',
+    nullable: true,
+    select: false,
+    insert: false,
+    update: false,
+  })
   providerVirtualAccountId: string;
 
-  @Column({ type: 'varchar', nullable: true })
+  @Column({
+    type: 'varchar',
+    nullable: true,
+    select: false,
+    insert: false,
+    update: false,
+  })
   providerStatus: string;
 
-  @Column({ type: 'varchar', nullable: true })
+  @Column({
+    type: 'varchar',
+    nullable: true,
+    select: false,
+    insert: false,
+    update: false,
+  })
   providerReference: string;
 
-  @Column({ type: 'simple-json', nullable: true })
+  @Column({
+    type: 'simple-json',
+    nullable: true,
+    select: false,
+    insert: false,
+    update: false,
+  })
   metadata: Record<string, unknown>;
 
   @ManyToOne(() => User, (user) => user.wallet)
