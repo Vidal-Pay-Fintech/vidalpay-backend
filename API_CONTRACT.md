@@ -8,10 +8,11 @@ returns a structured unavailable response.
 ## Inventory
 
 - Framework/runtime: NestJS 11 on Node.js/TypeScript.
-- Database/ORM: MySQL through TypeORM. Runtime and migration config supports a
-  MySQL `DATABASE_URL` plus `DB_SSL`/`DB_CONNECT_TIMEOUT_MS`, or the legacy
-  `MYSQL_*` variables. The repository currently has `synchronize: true`; this
-  pass also adds migrations for the new mobile contract tables and columns.
+- Database/ORM: PostgreSQL 18 through TypeORM for the existing Render
+  database. The runtime also retains the legacy MySQL connection fallback.
+  Production startup uses the existing `DATABASE_URL` with
+  `synchronize: false` and `migrationsRun: false`; the Render start command
+  must not run `db:migrate` against the existing database.
 - Auth: JWT bearer access tokens, rotating refresh tokens, and persisted
   revocable session families in `auth_session`.
 - Jobs/queues: none found.
@@ -181,9 +182,9 @@ Provider status item example:
 
 ## Required Environment Variables
 
-- Database: preferred Render-compatible MySQL `DATABASE_URL`, optional
-  `DB_SSL`, optional `DB_CONNECT_TIMEOUT_MS`; alternatively `MYSQL_HOST`,
-  `MYSQL_PORT`, `MYSQL_DATABASE`, `MYSQL_USERNAME`, `MYSQL_PASSWORD`.
+- Database: the existing Render PostgreSQL `DATABASE_URL`, optional `DB_SSL`,
+  optional `DB_CONNECT_TIMEOUT_MS`; legacy MySQL variables remain supported
+  for environments that still use them.
 - JWT: `JWT_SECRET`, `JWT_TOKEN_AUDIENCE`, `JWT_TOKEN_ISSUER`,
   `JWT_ACCESS_TOKEN_TTL`, `JWT_REFRESH_TOKEN_TTL`. The legacy
   `JWT_ACCESS_TOKEN_TtL` spelling is still accepted as a fallback.

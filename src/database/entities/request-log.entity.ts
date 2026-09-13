@@ -9,7 +9,7 @@ export class RequestLog extends AbstractEntity {
   @Column({ type: 'varchar', nullable: true })
   requestPath: string;
 
-  @Column({ type: 'longtext', nullable: true })
+  @Column({ type: 'text', nullable: true })
   requestBody: string;
 
   @Column({ type: 'text', nullable: true })

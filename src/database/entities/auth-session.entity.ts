@@ -11,7 +11,7 @@ export class AuthSession extends AbstractEntity {
   @Column({ unique: true })
   familyId: string;
 
-  @Column({ type: 'longtext', nullable: true })
+  @Column({ type: 'text', nullable: true })
   refreshTokenHash: string | null;
 
   @Column({ nullable: true })

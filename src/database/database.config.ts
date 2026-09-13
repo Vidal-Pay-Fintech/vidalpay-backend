@@ -1,4 +1,6 @@
+import { DataSourceOptions } from 'typeorm';
 import { MysqlConnectionOptions } from 'typeorm/driver/mysql/MysqlConnectionOptions';
+import { PostgresConnectionOptions } from 'typeorm/driver/postgres/PostgresConnectionOptions';
 
 const truthyValues = ['1', 'true', 'yes', 'require', 'required', 'enabled'];
 
@@ -13,18 +15,6 @@ const parsePositiveIntegerEnv = (value?: string) => {
   return Number.isFinite(parsed) && parsed > 0 ? parsed : undefined;
 };
 
-const assertMysqlDatabaseUrl = (databaseUrl: string) => {
-  if (!/^mysql2?:\/\//i.test(databaseUrl)) {
-    throw new Error(
-      [
-        'DATABASE_URL is configured, but this backend is currently configured for MySQL.',
-        'Use a MySQL connection URL such as mysql://user:password@host:3306/database.',
-        'PostgreSQL URLs from Render Postgres are not compatible with the current TypeORM entities and migrations.',
-      ].join(' '),
-    );
-  }
-};
-
 const sslOption = () =>
   parseBooleanEnv(process.env.DB_SSL)
     ? {
@@ -35,25 +25,39 @@ const sslOption = () =>
 const connectTimeout = () =>
   parsePositiveIntegerEnv(process.env.DB_CONNECT_TIMEOUT_MS);
 
-export const buildMysqlDataSourceOptions = (
-  overrides: Partial<MysqlConnectionOptions> = {},
-): MysqlConnectionOptions => {
+export const buildDatabaseDataSourceOptions = (
+  overrides: Partial<MysqlConnectionOptions | PostgresConnectionOptions> = {},
+): DataSourceOptions => {
   const databaseUrl = process.env.DATABASE_URL;
   const timeout = connectTimeout();
   const ssl = sslOption();
-  const sharedOptions: Partial<MysqlConnectionOptions> = {
-    ...(timeout ? { connectTimeout: timeout } : {}),
-    ...(ssl ? { ssl } : {}),
-  };
 
   if (databaseUrl) {
-    assertMysqlDatabaseUrl(databaseUrl);
+    if (/^postgres(?:ql)?:\/\//i.test(databaseUrl)) {
+      return {
+        type: 'postgres',
+        url: databaseUrl,
+        ...(timeout
+          ? { extra: { connectionTimeoutMillis: timeout } }
+          : {}),
+        ...(ssl ? { ssl } : {}),
+        ...overrides,
+      } as PostgresConnectionOptions;
+    }
+
+    if (!/^mysql2?:\/\//i.test(databaseUrl)) {
+      throw new Error(
+        'DATABASE_URL must be a PostgreSQL URL (postgresql://...) or a MySQL URL (mysql://...).',
+      );
+    }
+
     return {
       type: 'mysql',
       url: databaseUrl,
-      ...sharedOptions,
+      ...(timeout ? { connectTimeout: timeout } : {}),
+      ...(ssl ? { ssl } : {}),
       ...overrides,
-    };
+    } as MysqlConnectionOptions;
   }
 
   const requiredEnv = [
@@ -75,12 +79,17 @@ export const buildMysqlDataSourceOptions = (
 
   return {
     type: 'mysql',
-    host: process.env.MYSQL_HOST,
+    host: process.env.MYSQL_HOST as string,
     port: Number(process.env.MYSQL_PORT),
-    database: process.env.MYSQL_DATABASE,
-    username: process.env.MYSQL_USERNAME,
-    password: process.env.MYSQL_PASSWORD,
-    ...sharedOptions,
+    database: process.env.MYSQL_DATABASE as string,
+    username: process.env.MYSQL_USERNAME as string,
+    password: process.env.MYSQL_PASSWORD as string,
+    ...(timeout ? { connectTimeout: timeout } : {}),
+    ...(ssl ? { ssl } : {}),
     ...overrides,
-  };
+  } as MysqlConnectionOptions;
 };
+
+// Backwards-compatible export for code outside this module. The connection
+// type is selected from DATABASE_URL when one is supplied.
+export const buildMysqlDataSourceOptions = buildDatabaseDataSourceOptions;

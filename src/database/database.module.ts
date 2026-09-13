@@ -31,7 +31,7 @@ import { UserRepository } from './repositories/user.repository';
 import { TokenRepository } from './repositories/token.repository';
 import { Token } from './entities/token.entity';
 import { WalletRepository } from './repositories/wallet.repository';
-import { buildMysqlDataSourceOptions } from './database.config';
+import { buildDatabaseDataSourceOptions } from './database.config';
 
 @Global()
 @Module({
@@ -39,9 +39,12 @@ import { buildMysqlDataSourceOptions } from './database.config';
     // SeedersModule,
     TypeOrmModule.forRootAsync({
       useFactory: () => ({
-        ...buildMysqlDataSourceOptions(),
+        ...buildDatabaseDataSourceOptions(),
         autoLoadEntities: true,
-        synchronize: true,
+        // The Render database already contains production data. Schema
+        // changes must never be applied during application startup.
+        synchronize: false,
+        migrationsRun: false,
       }),
 
       async dataSourceFactory(options) {

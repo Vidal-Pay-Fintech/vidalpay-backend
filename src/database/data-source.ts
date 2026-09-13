@@ -1,11 +1,11 @@
 import 'reflect-metadata';
 import { DataSource } from 'typeorm';
 import { config as loadEnv } from 'dotenv';
-import { buildMysqlDataSourceOptions } from './database.config';
+import { buildDatabaseDataSourceOptions } from './database.config';
 
 loadEnv();
 
-export default new DataSource(buildMysqlDataSourceOptions({
+export default new DataSource(buildDatabaseDataSourceOptions({
   entities: [`${__dirname}/entities/*.entity.js`],
   migrations: [`${__dirname}/migrations/*.js`],
   synchronize: false,
