@@ -22,12 +22,10 @@ export abstract class AbstractRepository<T extends AbstractEntity> {
 
   async create(entity: DeepPartial<T>): Promise<T> {
     try {
-      this.logger.log(`Creating entity with data: ${JSON.stringify(entity)}`);
+      this.logger.log('Creating entity');
       const createdEntity = this.repository.create(entity);
       const savedEntity = await this.repository.save(createdEntity);
-      this.logger.log(
-        `Entity created successfully: ${JSON.stringify(savedEntity)}`,
-      );
+      this.logger.log('Entity created successfully');
       return savedEntity;
     } catch (error) {
       this.logger.error(`Error saving entity: ${error.message}`, error.stack);

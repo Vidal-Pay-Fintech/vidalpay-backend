@@ -1,6 +1,6 @@
 import { Injectable } from '@nestjs/common';
 import { InjectRepository } from '@nestjs/typeorm';
-import { Repository, MoreThan } from 'typeorm';
+import { Repository, MoreThan, LessThanOrEqual } from 'typeorm';
 import { Token } from '../database/entities/token.entity';
 import { TokenType } from 'src/common/enum/token-type.enum';
 
@@ -19,6 +19,20 @@ export class TokensService {
   async findOneByToken(token: string): Promise<Token | null> {
     return this.tokenRepository.findOne({
       where: { token },
+      relations: ['user'],
+    });
+  }
+
+  async findOneByTokenAndType(
+    token: string,
+    type: TokenType,
+  ): Promise<Token | null> {
+    return this.tokenRepository.findOne({
+      where: {
+        token,
+        type,
+        expiration: MoreThan(new Date()),
+      },
       relations: ['user'],
     });
   }
@@ -70,7 +84,7 @@ export class TokensService {
   // Optional: Delete all expired tokens (cleanup method)
   async deleteExpiredTokens(): Promise<void> {
     await this.tokenRepository.delete({
-      expiration: MoreThan(new Date()),
+      expiration: LessThanOrEqual(new Date()),
     });
   }
 

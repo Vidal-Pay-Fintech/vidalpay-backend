@@ -3,6 +3,14 @@ import {
   ServiceUnavailableException,
   UnauthorizedException,
 } from '@nestjs/common';
+jest.mock('typeorm-transactional', () => ({
+  ...jest.requireActual('typeorm-transactional'),
+  Transactional:
+    () =>
+    (_target: unknown, _propertyKey: string, descriptor: PropertyDescriptor) =>
+      descriptor,
+}));
+
 import { Test, TestingModule } from '@nestjs/testing';
 import { getRepositoryToken } from '@nestjs/typeorm';
 import { JwtService } from '@nestjs/jwt';
@@ -43,6 +51,7 @@ describe('AuthenticationService', () => {
       },
     );
   const userRepository = {
+    findOne: jest.fn(),
     findUserById: jest.fn(),
     findOneAndUpdate: jest.fn(),
     checkUserExistByEmail: jest.fn(),
@@ -56,6 +65,7 @@ describe('AuthenticationService', () => {
   const tokenService = {
     create: jest.fn(),
     findOneByToken: jest.fn(),
+    findOneByTokenAndType: jest.fn(),
     findOneByTokenAndValidate: jest.fn(),
     delete: jest.fn(),
   };
@@ -201,6 +211,116 @@ describe('AuthenticationService', () => {
         'Nigeria',
       ),
     ).toBe('+2348012345678');
+  });
+
+  it('creates a real pending signup session with wallets and a delivered verification OTP', async () => {
+    hashingService.hash.mockResolvedValue('hashed-password');
+    userRepository.create.mockResolvedValue({
+      id: 'new-user',
+      firstName: 'New',
+      lastName: 'Customer',
+      email: 'new@example.com',
+      phoneNumber: '+15551234567',
+      password: 'hashed-password',
+      role: UserRole.CUSTOMER,
+      isVerified: false,
+      status: AccountStatus.ACTIVE,
+    });
+    tokenService.create.mockResolvedValue({ id: 'verification-token-1' });
+    mailService.sendEmailVerificationCode.mockResolvedValue({
+      id: 'email-1',
+    });
+    jwtService.signAsync
+      .mockResolvedValueOnce('access-token')
+      .mockResolvedValueOnce('refresh-token');
+
+    const result = await service.signUp({
+      firstName: 'New',
+      lastName: 'Customer',
+      email: 'new@example.com',
+      phoneNumber: '5551234567',
+      password: 'Strong1!',
+      country: 'United States',
+      countryCode: 'US',
+      residency: 'US',
+    });
+
+    expect(result).toEqual(
+      expect.objectContaining({
+        accessToken: 'access-token',
+        refreshToken: 'refresh-token',
+        user: expect.objectContaining({
+          id: 'new-user',
+          isVerified: false,
+        }),
+      }),
+    );
+    expect(result.user).not.toHaveProperty('password');
+    expect(walletService.createCustomerWallets).toHaveBeenCalledWith(
+      'new-user',
+    );
+    expect(tokenService.create).toHaveBeenCalledWith(
+      expect.objectContaining({
+        type: 'verification',
+        user: expect.objectContaining({ id: 'new-user' }),
+      }),
+    );
+    expect(mailService.sendEmailVerificationCode).toHaveBeenCalledWith(
+      'new-user',
+      expect.stringMatching(/^\d{6}$/),
+    );
+  });
+
+  it('verifies only a live email-verification OTP and reissues a usable session', async () => {
+    const user = {
+      id: 'user-1',
+      email: 'user@example.com',
+      role: UserRole.CUSTOMER,
+      isVerified: false,
+      status: AccountStatus.ACTIVE,
+    } as User;
+    tokenService.findOneByTokenAndType.mockResolvedValue({
+      id: 'verification-token-1',
+      user,
+    });
+    userRepository.findOneAndUpdate.mockResolvedValue({
+      ...user,
+      isVerified: true,
+    });
+    jwtService.signAsync
+      .mockResolvedValueOnce('access-token')
+      .mockResolvedValueOnce('refresh-token');
+
+    await expect(service.verifyUserEmail('123456')).resolves.toEqual(
+      expect.objectContaining({
+        accessToken: 'access-token',
+        refreshToken: 'refresh-token',
+        user: expect.objectContaining({ isVerified: true }),
+      }),
+    );
+    expect(tokenService.findOneByTokenAndType).toHaveBeenCalledWith(
+      '123456',
+      'verification',
+    );
+    expect(tokenService.delete).toHaveBeenCalledWith('verification-token-1');
+  });
+
+  it('finishes account-status validation before issuing login tokens', async () => {
+    const user = {
+      id: 'user-1',
+      email: 'user@example.com',
+      password: 'hashed-password',
+      role: UserRole.CUSTOMER,
+      isVerified: true,
+      status: AccountStatus.SUSPENDED,
+    } as User;
+    userRepository.findUserByEmail.mockResolvedValue(user);
+    hashingService.compare.mockResolvedValue(true);
+
+    await expect(
+      service.signIn({ email: user.email, password: 'secret' } as any),
+    ).rejects.toBeInstanceOf(UnauthorizedException);
+    expect(jwtService.signAsync).not.toHaveBeenCalled();
   });
 
   it('finds US users by local or E.164 phone variants during login', async () => {

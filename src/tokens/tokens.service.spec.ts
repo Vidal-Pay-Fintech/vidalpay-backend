@@ -26,21 +26,60 @@ describe('TokensService', () => {
   });
 
   it('persists created tokens through the repository', async () => {
-    const token = await service.create({ token: '123456', type: TokenType.VERIFICATION });
+    const token = await service.create({
+      token: '123456',
+      type: TokenType.VERIFICATION,
+    });
 
-    expect(tokenRepository.create).toHaveBeenCalledWith({ token: '123456', type: TokenType.VERIFICATION });
-    expect(tokenRepository.save).toHaveBeenCalledWith(expect.objectContaining({ token: '123456' }));
+    expect(tokenRepository.create).toHaveBeenCalledWith({
+      token: '123456',
+      type: TokenType.VERIFICATION,
+    });
+    expect(tokenRepository.save).toHaveBeenCalledWith(
+      expect.objectContaining({ token: '123456' }),
+    );
     expect(token).toEqual(expect.objectContaining({ token: '123456' }));
   });
 
   it('looks up valid tokens by value, type, user, and future expiration', async () => {
-    await service.findOneByTokenAndValidate('123456', TokenType.PASSWORD_RESET, 'user-1');
+    await service.findOneByTokenAndValidate(
+      '123456',
+      TokenType.PASSWORD_RESET,
+      'user-1',
+    );
 
     expect(tokenRepository.findOne).toHaveBeenCalledWith(
       expect.objectContaining({
-        where: expect.objectContaining({ token: '123456', type: TokenType.PASSWORD_RESET, user: { id: 'user-1' } }),
+        where: expect.objectContaining({
+          token: '123456',
+          type: TokenType.PASSWORD_RESET,
+          user: { id: 'user-1' },
+        }),
         relations: ['user'],
       }),
     );
+  });
+
+  it('looks up email-verification tokens by value, type, and expiry', async () => {
+    await service.findOneByTokenAndType('654321', TokenType.VERIFICATION);
+
+    expect(tokenRepository.findOne).toHaveBeenCalledWith(
+      expect.objectContaining({
+        where: expect.objectContaining({
+          token: '654321',
+          type: TokenType.VERIFICATION,
+          expiration: expect.any(Object),
+        }),
+        relations: ['user'],
+      }),
+    );
+  });
+
+  it('deletes expired tokens rather than live tokens', async () => {
+    await service.deleteExpiredTokens();
+
+    expect(tokenRepository.delete).toHaveBeenCalledWith({
+      expiration: expect.any(Object),
+    });
   });
 });

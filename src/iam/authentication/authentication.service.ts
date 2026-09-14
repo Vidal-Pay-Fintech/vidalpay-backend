@@ -167,8 +167,11 @@ export class AuthenticationService {
   }
 
   async verifyUserEmail(token: string, request?: Request) {
-    const tokenEntity = await this.tokenService.findOneByToken(token);
-    if (!tokenEntity || tokenEntity.expiration < new Date()) {
+    const tokenEntity = await this.tokenService.findOneByTokenAndType(
+      token,
+      TokenType.VERIFICATION,
+    );
+    if (!tokenEntity) {
       throw new UnauthorizedException('Token is invalid or expired');
     }
     const user = await this.userRepository.findOneAndUpdate(
@@ -250,6 +253,7 @@ export class AuthenticationService {
     }
 
     await this.validateUserValidity(user);
+    await this.checkAccountStatus(user);
     const tokens = await this.generateToken(user, request);
     // await this.notificationService.sendNotificationToUser(
     //   user.id,
@@ -260,8 +264,6 @@ export class AuthenticationService {
     await this.userRepository.findOneAndUpdate(user.id, {
       lastLogin: new Date(),
     });
-    //CHECK THE ACCOUNT STATUS OF THE USER
-    await this.checkAccountStatus(user);
     // delete user.password;
     return {
       ...tokens,

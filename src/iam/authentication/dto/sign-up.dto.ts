@@ -30,7 +30,7 @@ export class SignUpDto {
   @IsOptional()
   @MinLength(4)
   @IsString()
-  pin: string;
+  pin?: string;
 
   @Matches(/^\+?[1-9]\d{1,14}$/, {
     message: 'phoneNumber must be a valid phone number',
