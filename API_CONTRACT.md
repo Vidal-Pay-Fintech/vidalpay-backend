@@ -556,3 +556,41 @@ notification when the required backend storage tables exist.
 - Push delivery uses registered Expo device tokens only when push preference is
   enabled. The notification remains persisted if delivery is unavailable, and
   invalid Expo devices are revoked after a `DeviceNotRegistered` response.
+# Legacy database read compatibility
+
+The following authenticated reads remain usable when the connected production database predates optional feature tables. These responses do not create records or imply provider availability.
+
+## `GET /api/v1/kyc/status`
+
+When `kyc_profile` is absent, the endpoint reports the status already stored on the user record:
+
+```json
+{
+  "status": "IN_PROGRESS",
+  "region": "NG",
+  "storageStatus": "LEGACY_FALLBACK",
+  "persistent": false
+}
+```
+
+## `GET /api/v1/cards`
+
+When `card` storage is absent, the endpoint returns an honest empty collection:
+
+```json
+{
+  "cards": [],
+  "storageStatus": "LEGACY_STORAGE_UNAVAILABLE",
+  "message": "No card storage exists in this legacy database. No card has been issued or fabricated."
+}
+```
+
+Card issuance availability is determined by `usd_virtual_card` or `ngn_virtual_card` in `GET /api/v1/providers/status`; `card_topup` is a separate funding capability.
+
+## `GET /api/v1/notifications/preferences`
+
+When `notification_preference` is absent, the endpoint returns safe defaults marked as non-persistent. Clients must not allow edits while `persistent` is false.
+
+## `GET /api/v1/notifications/devices`
+
+When `notification_device` is absent, the endpoint returns `devices: []`, `storageStatus: "LEGACY_STORAGE_UNAVAILABLE"`, and `persistent: false`. It does not claim that device registration was saved.

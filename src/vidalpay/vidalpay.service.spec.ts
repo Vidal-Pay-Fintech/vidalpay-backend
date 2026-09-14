@@ -45,6 +45,7 @@ describe('VidalpayService', () => {
   let notificationRepository: ReturnType<typeof repo>;
   let notificationPreferenceRepository: ReturnType<typeof repo>;
   let notificationDeviceRepository: ReturnType<typeof repo>;
+  let cardRepository: ReturnType<typeof repo>;
   let providerStatusService: jest.Mocked<
     Pick<
       ProviderStatusService,
@@ -60,7 +61,7 @@ describe('VidalpayService', () => {
     providerOperationRepository = repo();
     rewardLedgerRepository = repo();
     referralEventRepository = repo();
-    const cardRepository = repo();
+    cardRepository = repo();
     const beneficiaryRepository = repo();
     notificationRepository = repo();
     notificationPreferenceRepository = repo();
@@ -249,6 +250,72 @@ describe('VidalpayService', () => {
       }),
     );
     expect(kycProfileRepository.save).not.toHaveBeenCalled();
+  });
+
+  it('returns the legacy user KYC status when KYC profile storage is absent', async () => {
+    userRepository.findOne.mockResolvedValue({
+      id: 'legacy-user',
+      kycStatus: 'IN_PROGRESS',
+      countryCode: 'NG',
+    });
+    kycProfileRepository.findOne.mockRejectedValue(
+      Object.assign(new Error('relation "kyc_profile" does not exist'), {
+        code: '42P01',
+      }),
+    );
+
+    await expect(service.getKycStatus('legacy-user')).resolves.toEqual(
+      expect.objectContaining({
+        status: 'IN_PROGRESS',
+        region: 'NG',
+        storageStatus: 'LEGACY_FALLBACK',
+        persistent: false,
+      }),
+    );
+  });
+
+  it('returns an honest empty card state when legacy card storage is absent', async () => {
+    cardRepository.find.mockRejectedValue(
+      Object.assign(new Error('relation "card" does not exist'), {
+        code: '42P01',
+      }),
+    );
+
+    await expect(service.listCards('legacy-user')).resolves.toEqual(
+      expect.objectContaining({
+        cards: [],
+        storageStatus: 'LEGACY_STORAGE_UNAVAILABLE',
+      }),
+    );
+  });
+
+  it('returns non-persistent notification defaults for a legacy database', async () => {
+    notificationPreferenceRepository.findOne.mockRejectedValue(
+      Object.assign(
+        new Error('relation "notification_preference" does not exist'),
+        { code: '42P01' },
+      ),
+    );
+    notificationDeviceRepository.find.mockRejectedValue(
+      Object.assign(new Error('relation "notification_device" does not exist'), {
+        code: '42P01',
+      }),
+    );
+
+    await expect(service.getNotificationPreferences('legacy-user')).resolves.toEqual(
+      expect.objectContaining({
+        push: true,
+        persistent: false,
+        storageStatus: 'LEGACY_FALLBACK',
+      }),
+    );
+    await expect(service.listNotificationDevices('legacy-user')).resolves.toEqual(
+      expect.objectContaining({
+        devices: [],
+        persistent: false,
+        storageStatus: 'LEGACY_STORAGE_UNAVAILABLE',
+      }),
+    );
   });
 
   it('orders a US users default wallet and primary rail as USD', async () => {

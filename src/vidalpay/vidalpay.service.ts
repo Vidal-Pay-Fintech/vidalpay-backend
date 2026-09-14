@@ -841,7 +841,12 @@ export class VidalpayService {
 
   async getKycStatus(userId: string) {
     const user = await this.findUser(userId);
-    return this.normalizeKycProfile(await this.getOrCreateKycProfile(user));
+    const profile = await this.getKycProfileForSession(user);
+    return {
+      ...this.normalizeKycProfile(profile),
+      storageStatus: profile.id ? 'AVAILABLE' : 'LEGACY_FALLBACK',
+      persistent: Boolean(profile.id),
+    };
   }
 
   async listKycReviews() {
@@ -1158,11 +1163,26 @@ export class VidalpayService {
   }
 
   async listCards(userId: string) {
-    const cards = await this.cardRepository.find({
-      where: { userId },
-      order: { createdAt: 'DESC' },
-    });
-    return { cards: cards.map((card) => this.normalizeCard(card)) };
+    try {
+      const cards = await this.cardRepository.find({
+        where: { userId },
+        order: { createdAt: 'DESC' },
+      });
+      return {
+        cards: cards.map((card) => this.normalizeCard(card)),
+        storageStatus: 'AVAILABLE',
+      };
+    } catch (error) {
+      if (!this.isMissingTable(error, 'card')) {
+        throw error;
+      }
+      return {
+        cards: [],
+        storageStatus: 'LEGACY_STORAGE_UNAVAILABLE',
+        message:
+          'No card storage exists in this legacy database. No card has been issued or fabricated.',
+      };
+    }
   }
 
   async createCard(
@@ -1384,8 +1404,25 @@ export class VidalpayService {
   }
 
   async getNotificationPreferences(userId: string) {
-    const preference = await this.getOrCreateNotificationPreference(userId);
-    return preference.preferences ?? this.defaultNotificationPreferences();
+    try {
+      const preference = await this.getOrCreateNotificationPreference(userId);
+      return {
+        ...(preference.preferences ?? this.defaultNotificationPreferences()),
+        storageStatus: 'AVAILABLE',
+        persistent: true,
+      };
+    } catch (error) {
+      if (!this.isMissingTable(error, 'notification_preference')) {
+        throw error;
+      }
+      return {
+        ...this.defaultNotificationPreferences(),
+        storageStatus: 'LEGACY_FALLBACK',
+        persistent: false,
+        message:
+          'Default notification settings are shown until persistent preference storage is available.',
+      };
+    }
   }
 
   async updateNotificationPreferences(userId: string, payload: AnyRecord) {
@@ -1399,11 +1436,24 @@ export class VidalpayService {
   }
 
   async listNotificationDevices(userId: string) {
-    const devices = await this.notificationDeviceRepository.find({
-      where: { userId, revokedAt: IsNull() },
-      order: { createdAt: 'DESC' },
-    });
-    return { devices };
+    try {
+      const devices = await this.notificationDeviceRepository.find({
+        where: { userId, revokedAt: IsNull() },
+        order: { createdAt: 'DESC' },
+      });
+      return { devices, storageStatus: 'AVAILABLE', persistent: true };
+    } catch (error) {
+      if (!this.isMissingTable(error, 'notification_device')) {
+        throw error;
+      }
+      return {
+        devices: [],
+        storageStatus: 'LEGACY_STORAGE_UNAVAILABLE',
+        persistent: false,
+        message:
+          'Push notification devices cannot be registered persistently until device storage is available.',
+      };
+    }
   }
 
   async registerNotificationDevice(userId: string, payload: AnyRecord) {
