@@ -45,7 +45,12 @@ describe('VidalpayService', () => {
   let notificationRepository: ReturnType<typeof repo>;
   let notificationPreferenceRepository: ReturnType<typeof repo>;
   let notificationDeviceRepository: ReturnType<typeof repo>;
-  let providerStatusService: jest.Mocked<Pick<ProviderStatusService, 'getStatus' | 'getStatuses' | 'isCapabilityEnabled'>>;
+  let providerStatusService: jest.Mocked<
+    Pick<
+      ProviderStatusService,
+      'getStatus' | 'getStatuses' | 'isCapabilityEnabled'
+    >
+  >;
 
   beforeEach(() => {
     userRepository = repo();
@@ -68,7 +73,9 @@ describe('VidalpayService', () => {
         status({
           capability,
           provider: capability?.startsWith?.('ngn') ? 'PayVessel' : 'Unit.co',
-          missingEnvVars: capability?.startsWith?.('ngn') ? ['PAYVESSEL_API_KEY', 'PAYVESSEL_API_SECRET'] : ['UNIT_API_TOKEN'],
+          missingEnvVars: capability?.startsWith?.('ngn')
+            ? ['PAYVESSEL_API_KEY', 'PAYVESSEL_API_SECRET']
+            : ['UNIT_API_TOKEN'],
         }),
       ),
       getStatuses: jest.fn().mockReturnValue([status()]),
@@ -101,8 +108,22 @@ describe('VidalpayService', () => {
   it('keeps USD wallet responses isolated from NGN account data', async () => {
     userRepository.findOne.mockResolvedValue({ id: 'user-1' });
     walletRepository.find.mockResolvedValue([
-      { id: 'ngn-wallet', userId: 'user-1', currency: Currency.NGN, accountNumber: '0123456789', balance: 10, provider: 'PayVessel' },
-      { id: 'usd-wallet', userId: 'user-1', currency: Currency.USD, accountNumber: '000111222', balance: 20, provider: 'Unit.co' },
+      {
+        id: 'ngn-wallet',
+        userId: 'user-1',
+        currency: Currency.NGN,
+        accountNumber: '0123456789',
+        balance: 10,
+        provider: 'PayVessel',
+      },
+      {
+        id: 'usd-wallet',
+        userId: 'user-1',
+        currency: Currency.USD,
+        accountNumber: '000111222',
+        balance: 20,
+        provider: 'Unit.co',
+      },
     ]);
     walletRepository.findOne.mockResolvedValue({
       id: 'usd-wallet',
@@ -123,19 +144,70 @@ describe('VidalpayService', () => {
   it('creates only real local wallet records and marks provider account details unprovisioned', async () => {
     userRepository.findOne.mockResolvedValue({ id: 'user-1' });
     walletRepository.find.mockResolvedValueOnce([]).mockResolvedValueOnce([
-      { id: 'ngn-wallet', userId: 'user-1', currency: Currency.NGN, balance: 0 },
-      { id: 'usd-wallet', userId: 'user-1', currency: Currency.USD, balance: 0 },
+      {
+        id: 'ngn-wallet',
+        userId: 'user-1',
+        currency: Currency.NGN,
+        balance: 0,
+      },
+      {
+        id: 'usd-wallet',
+        userId: 'user-1',
+        currency: Currency.USD,
+        balance: 0,
+      },
     ]);
 
     const result = await service.getWallets('user-1');
 
     expect(walletRepository.save).toHaveBeenCalledWith(
       expect.arrayContaining([
-        expect.objectContaining({ currency: Currency.NGN, provider: 'PayVessel', balance: 0 }),
-        expect.objectContaining({ currency: Currency.USD, provider: 'Unit.co', balance: 0 }),
+        expect.objectContaining({
+          currency: Currency.NGN,
+          provider: 'PayVessel',
+          balance: 0,
+        }),
+        expect.objectContaining({
+          currency: Currency.USD,
+          provider: 'Unit.co',
+          balance: 0,
+        }),
       ]),
     );
-    expect(result.wallets.map((wallet) => wallet.currency)).toEqual([Currency.NGN, Currency.USD]);
+    expect(result.wallets.map((wallet) => wallet.currency)).toEqual([
+      Currency.NGN,
+      Currency.USD,
+    ]);
+  });
+
+  it('restores an existing user session when the optional KYC table is absent', async () => {
+    userRepository.findOne.mockResolvedValue({
+      id: 'legacy-user',
+      email: 'legacy@example.com',
+      isVerified: true,
+      isPhoneVerified: false,
+      kycStatus: 'NOT_STARTED',
+      countryCode: 'US',
+    });
+    walletRepository.find.mockResolvedValue([]);
+    kycProfileRepository.findOne.mockRejectedValue(
+      Object.assign(new Error('relation "kyc_profile" does not exist'), {
+        code: '42P01',
+      }),
+    );
+
+    await expect(service.getCurrentUser('legacy-user')).resolves.toEqual(
+      expect.objectContaining({
+        id: 'legacy-user',
+        email: 'legacy@example.com',
+        kycStatus: 'NOT_STARTED',
+        kyc: expect.objectContaining({
+          status: 'NOT_STARTED',
+          statusMessage: expect.stringContaining('storage is unavailable'),
+        }),
+      }),
+    );
+    expect(kycProfileRepository.save).not.toHaveBeenCalled();
   });
 
   it('orders a US users default wallet and primary rail as USD', async () => {
@@ -144,8 +216,18 @@ describe('VidalpayService', () => {
       countryCode: 'US',
     });
     walletRepository.find.mockResolvedValue([
-      { id: 'ngn-wallet', userId: 'user-1', currency: Currency.NGN, balance: 0 },
-      { id: 'usd-wallet', userId: 'user-1', currency: Currency.USD, balance: 0 },
+      {
+        id: 'ngn-wallet',
+        userId: 'user-1',
+        currency: Currency.NGN,
+        balance: 0,
+      },
+      {
+        id: 'usd-wallet',
+        userId: 'user-1',
+        currency: Currency.USD,
+        balance: 0,
+      },
     ]);
 
     const result = await service.getWallets('user-1');
@@ -154,10 +236,26 @@ describe('VidalpayService', () => {
   });
 
   it('does not fabricate account numbers when provider provisioning has not happened', async () => {
-    walletRepository.find.mockResolvedValue([{ id: 'usd-wallet', userId: 'user-1', currency: Currency.USD, balance: 0 }]);
-    walletRepository.findOne.mockResolvedValue({ id: 'usd-wallet', userId: 'user-1', currency: Currency.USD, balance: 0, provider: 'Unit.co' });
+    walletRepository.find.mockResolvedValue([
+      {
+        id: 'usd-wallet',
+        userId: 'user-1',
+        currency: Currency.USD,
+        balance: 0,
+      },
+    ]);
+    walletRepository.findOne.mockResolvedValue({
+      id: 'usd-wallet',
+      userId: 'user-1',
+      currency: Currency.USD,
+      balance: 0,
+      provider: 'Unit.co',
+    });
 
-    const response = await service.getWalletAccountDetails('user-1', Currency.USD);
+    const response = await service.getWalletAccountDetails(
+      'user-1',
+      Currency.USD,
+    );
 
     expect(response.accountDetails.isProvisioned).toBe(false);
     expect(response.accountDetails.accountNumber).toBeNull();
@@ -168,7 +266,12 @@ describe('VidalpayService', () => {
     providerOperationRepository.findOne.mockResolvedValue(null);
 
     await expect(
-      service.externalTransfer('user-1', { currency: Currency.USD, amount: 25, pin: '1234', idempotencyKey: 'idem-1' }),
+      service.externalTransfer('user-1', {
+        currency: Currency.USD,
+        amount: 25,
+        pin: '1234',
+        idempotencyKey: 'idem-1',
+      }),
     ).rejects.toBeInstanceOf(ServiceUnavailableException);
 
     expect(providerOperationRepository.save).toHaveBeenCalledWith(
@@ -202,7 +305,10 @@ describe('VidalpayService', () => {
     await expect(
       service.closeAccount('user-1', { password: 'secret' }),
     ).resolves.toEqual(
-      expect.objectContaining({ closed: true, status: AccountStatus.DEACTIVATED }),
+      expect.objectContaining({
+        closed: true,
+        status: AccountStatus.DEACTIVATED,
+      }),
     );
     expect(userRepository.update).toHaveBeenCalledWith('user-1', {
       status: AccountStatus.DEACTIVATED,
@@ -373,7 +479,11 @@ describe('VidalpayService', () => {
     };
 
     await expect(service.handleKycWebhook(payload)).resolves.toEqual(
-      expect.objectContaining({ received: true, updated: true, status: 'VERIFIED' }),
+      expect.objectContaining({
+        received: true,
+        updated: true,
+        status: 'VERIFIED',
+      }),
     );
     expect(userRepository.update).toHaveBeenCalledWith('user-1', {
       kycStatus: 'VERIFIED',
@@ -391,7 +501,12 @@ describe('VidalpayService', () => {
       metadata: { status: 'VERIFIED' },
     });
     await expect(service.handleKycWebhook(payload)).resolves.toEqual(
-      expect.objectContaining({ received: true, updated: false, duplicate: true, status: 'VERIFIED' }),
+      expect.objectContaining({
+        received: true,
+        updated: false,
+        duplicate: true,
+        status: 'VERIFIED',
+      }),
     );
   });
 
@@ -417,12 +532,17 @@ describe('VidalpayService', () => {
 
     const result = await service.reviewKyc('admin-1', 'user-1', 'VERIFIED');
 
-    expect(result.user).toEqual(expect.objectContaining({ id: 'user-1', kycStatus: 'VERIFIED' }));
+    expect(result.user).toEqual(
+      expect.objectContaining({ id: 'user-1', kycStatus: 'VERIFIED' }),
+    );
     expect(providerOperationRepository.save).toHaveBeenCalledWith(
       expect.objectContaining({
         type: 'kyc_admin_review',
         status: 'APPLIED',
-        metadata: expect.objectContaining({ adminUserId: 'admin-1', decision: 'VERIFIED' }),
+        metadata: expect.objectContaining({
+          adminUserId: 'admin-1',
+          decision: 'VERIFIED',
+        }),
       }),
     );
   });

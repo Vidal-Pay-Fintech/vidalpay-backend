@@ -95,7 +95,7 @@ export class VidalpayService {
         where: { userId: user.id },
         order: { currency: 'ASC' },
       }),
-      this.getOrCreateKycProfile(user),
+      this.getKycProfileForSession(user),
     ]);
 
     return this.normalizeUser(user, wallets, kyc);
@@ -162,7 +162,10 @@ export class VidalpayService {
     }
 
     const profilePicture = this.asString(update.profilePicture);
-    if (profilePicture?.startsWith('file://') || profilePicture?.startsWith('content://')) {
+    if (
+      profilePicture?.startsWith('file://') ||
+      profilePicture?.startsWith('content://')
+    ) {
       throw new ServiceUnavailableException(
         createBlockedResponse({
           code: 'PROFILE_IMAGE_STORAGE_UNAVAILABLE',
@@ -324,7 +327,9 @@ export class VidalpayService {
   async getWallets(userId: string) {
     const user = await this.findUser(userId);
     const wallets = await this.ensureCustomerWallets(userId);
-    const defaultCurrency = this.defaultCurrencyForRegion(this.inferRegion(user));
+    const defaultCurrency = this.defaultCurrencyForRegion(
+      this.inferRegion(user),
+    );
     const orderedWallets = this.orderWalletsByDefault(wallets, defaultCurrency);
     return {
       wallets: orderedWallets.map((wallet) => this.normalizeWallet(wallet)),
@@ -350,7 +355,8 @@ export class VidalpayService {
           currency,
           provider: normalized.provider,
           providerStatus:
-            normalized.providerStatus ?? this.providerReadinessForCurrency(currency),
+            normalized.providerStatus ??
+            this.providerReadinessForCurrency(currency),
           isProvisioned: false,
           message:
             currency === Currency.NGN
@@ -402,15 +408,16 @@ export class VidalpayService {
   async resolveExternalTransfer(userId: string, payload: AnyRecord) {
     await this.findUser(userId);
     const currency = this.normalizeCurrency(payload.currency);
-    const capability = currency === Currency.USD ? 'usd_account_details' : 'bank_transfer';
+    const capability =
+      currency === Currency.USD ? 'usd_account_details' : 'bank_transfer';
     this.throwProviderUnavailable({
       feature: 'External transfer resolution',
       capability,
-      provider:
-        currency === Currency.USD ? 'Unit.co' : 'PayVessel',
+      provider: currency === Currency.USD ? 'Unit.co' : 'PayVessel',
       reason:
         'External account resolution requires a live provider integration and credentials.',
-      missingRequirements: this.providerStatusService.getStatus(capability).missingEnvVars,
+      missingRequirements:
+        this.providerStatusService.getStatus(capability).missingEnvVars,
     });
   }
 
@@ -428,7 +435,8 @@ export class VidalpayService {
     await this.recordBlockedOperation(userId, 'card_topup', payload, {
       provider: 'Card top-up provider',
       capability: 'card_topup',
-      reason: 'Card top-up requires a configured payment processor webhook flow.',
+      reason:
+        'Card top-up requires a configured payment processor webhook flow.',
     });
   }
 
@@ -448,12 +456,14 @@ export class VidalpayService {
   async getCatalog(userId: string, kind: 'airtime' | 'data' | 'utilities') {
     const user = await this.findUser(userId);
     if (this.inferRegion(user) !== 'NG') {
-      const empty = kind === 'utilities' ? { categories: [] } : { networks: [] };
+      const empty =
+        kind === 'utilities' ? { categories: [] } : { networks: [] };
       return {
         region: this.inferRegion(user),
         provider: 'PayVessel',
         source: 'UNAVAILABLE_FOR_ACCOUNT_REGION',
-        message: 'Airtime, data, and bill payments are currently available only to Nigeria-based accounts.',
+        message:
+          'Airtime, data, and bill payments are currently available only to Nigeria-based accounts.',
         ...empty,
       };
     }
@@ -489,16 +499,19 @@ export class VidalpayService {
         feature: 'Utility customer validation',
         capability: 'utilities_validate',
         provider: 'PayVessel',
-        reason: 'Utility validation is available only for Nigeria-based accounts.',
+        reason:
+          'Utility validation is available only for Nigeria-based accounts.',
       });
     }
     this.throwProviderUnavailable({
       feature: 'Utility customer validation',
       capability: 'utilities_validate',
       provider: 'PayVessel',
-      reason: 'Utility validation must be confirmed by PayVessel before payment.',
+      reason:
+        'Utility validation must be confirmed by PayVessel before payment.',
       missingRequirements:
-        this.providerStatusService.getStatus('utilities_validate').missingEnvVars,
+        this.providerStatusService.getStatus('utilities_validate')
+          .missingEnvVars,
     });
   }
 
@@ -545,7 +558,8 @@ export class VidalpayService {
       provider: 'FX provider',
       reason:
         'The backend has no configured FX quote provider, so it cannot compute a final executable rate.',
-      missingRequirements: this.providerStatusService.getStatus('fx_quote').missingEnvVars,
+      missingRequirements:
+        this.providerStatusService.getStatus('fx_quote').missingEnvVars,
     });
   }
 
@@ -630,7 +644,9 @@ export class VidalpayService {
       const recipientWallet = lockedWallets.get(recipient.id);
 
       if (!senderWallet || !recipientWallet) {
-        throw new BadRequestException(`Both users must have a ${currency} wallet`);
+        throw new BadRequestException(
+          `Both users must have a ${currency} wallet`,
+        );
       }
       if (Number(senderWallet.balance ?? 0) < amount) {
         throw new PreconditionFailedException('Insufficient wallet balance');
@@ -821,7 +837,9 @@ export class VidalpayService {
       order: { updatedAt: 'DESC' },
     });
     const users = profiles.length
-      ? await this.userRepository.findBy({ id: In(profiles.map((profile) => profile.userId)) })
+      ? await this.userRepository.findBy({
+          id: In(profiles.map((profile) => profile.userId)),
+        })
       : [];
     const usersById = new Map(users.map((user) => [user.id, user]));
 
@@ -915,7 +933,8 @@ export class VidalpayService {
           feature: 'KYC',
           capability: 'kyc_start',
           provider: null,
-          reason: 'A supported country or phone region is required before KYC can start.',
+          reason:
+            'A supported country or phone region is required before KYC can start.',
           missingRequirements: ['country', 'countryCode', 'region'],
         }),
       );
@@ -927,7 +946,8 @@ export class VidalpayService {
           feature: 'KYC',
           capability: 'kyc_start',
           provider: null,
-          reason: 'KYC is currently configured for Nigeria and United States users.',
+          reason:
+            'KYC is currently configured for Nigeria and United States users.',
           missingRequirements: ['supportedRegion'],
         }),
       );
@@ -947,15 +967,17 @@ export class VidalpayService {
         capability: 'kyc_start',
         provider: 'MetaMap',
         reason: 'MetaMap client and workflow credentials are not configured.',
-        missingRequirements: ['METAMAP_CLIENT_ID', 'METAMAP_WORKFLOW_ID'].filter(
-          (key) => !this.configService.get<string>(key),
-        ),
+        missingRequirements: [
+          'METAMAP_CLIENT_ID',
+          'METAMAP_WORKFLOW_ID',
+        ].filter((key) => !this.configService.get<string>(key)),
       });
     }
 
     profile.region = region;
     profile.provider = 'METAMAP';
-    profile.status = profile.status === 'NOT_STARTED' ? 'IN_PROGRESS' : profile.status;
+    profile.status =
+      profile.status === 'NOT_STARTED' ? 'IN_PROGRESS' : profile.status;
     await this.kycProfileRepository.save(profile);
 
     return {
@@ -997,7 +1019,11 @@ export class VidalpayService {
       ...(profile.identity ?? {}),
       ...this.redactPayload(payload),
     };
-    profile.sections = this.updateKycSection(profile.sections, section, 'SUBMITTED');
+    profile.sections = this.updateKycSection(
+      profile.sections,
+      section,
+      'SUBMITTED',
+    );
     profile.status = this.computeKycStatus(profile.sections);
     await this.kycProfileRepository.save(profile);
     await this.userRepository.update(userId, { kycStatus: profile.status });
@@ -1049,7 +1075,8 @@ export class VidalpayService {
     }
 
     const metadata = this.asRecord(payload.metadata) ?? {};
-    const userId = this.asString(metadata.userId) ?? this.asString(payload.userId);
+    const userId =
+      this.asString(metadata.userId) ?? this.asString(payload.userId);
     const status = this.mapProviderKycStatus(
       this.asString(payload.status) ??
         this.asString(payload.verificationStatus) ??
@@ -1057,7 +1084,11 @@ export class VidalpayService {
     );
 
     if (!userId) {
-      return { received: true, updated: false, reason: 'No userId in webhook metadata' };
+      return {
+        received: true,
+        updated: false,
+        reason: 'No userId in webhook metadata',
+      };
     }
 
     const user = await this.findUser(userId);
@@ -1066,7 +1097,9 @@ export class VidalpayService {
     profile.statusMessage = this.asString(payload.message) ?? null;
     profile.rejectionReason = this.asString(payload.rejectionReason) ?? null;
     profile.providerReference =
-      this.asString(payload.verificationId) ?? this.asString(payload.id) ?? null;
+      this.asString(payload.verificationId) ??
+      this.asString(payload.id) ??
+      null;
     await this.kycProfileRepository.save(profile);
     await this.userRepository.update(userId, {
       kycStatus: status,
@@ -1102,7 +1135,12 @@ export class VidalpayService {
       metadata: { kycStatus: status },
     });
 
-    return { received: true, updated: true, status, notification: notification.push };
+    return {
+      received: true,
+      updated: true,
+      status,
+      notification: notification.push,
+    };
   }
 
   async listCards(userId: string) {
@@ -1113,7 +1151,11 @@ export class VidalpayService {
     return { cards: cards.map((card) => this.normalizeCard(card)) };
   }
 
-  async createCard(userId: string, type: 'virtual' | 'physical', payload: AnyRecord) {
+  async createCard(
+    userId: string,
+    type: 'virtual' | 'physical',
+    payload: AnyRecord,
+  ) {
     const currency = this.normalizeCurrency(payload.currency ?? Currency.USD);
     const capability: ProviderCapability =
       currency === Currency.USD
@@ -1133,7 +1175,9 @@ export class VidalpayService {
   }
 
   async getCard(userId: string, cardId: string) {
-    const card = await this.cardRepository.findOne({ where: { id: cardId, userId } });
+    const card = await this.cardRepository.findOne({
+      where: { id: cardId, userId },
+    });
     if (!card) {
       throw new NotFoundException('Card not found');
     }
@@ -1215,19 +1259,26 @@ export class VidalpayService {
     );
 
     const preference = await this.getOrCreateNotificationPreference(userId);
-    const preferences = preference.preferences ?? this.defaultNotificationPreferences();
+    const preferences =
+      preference.preferences ?? this.defaultNotificationPreferences();
     const devices = await this.notificationDeviceRepository.find({
       where: { userId, revokedAt: IsNull() },
     });
-    const pushDevices = preferences.push === false
-      ? []
-      : devices.filter((device) => this.asString(device.pushToken ?? device.token));
+    const pushDevices =
+      preferences.push === false
+        ? []
+        : devices.filter((device) =>
+            this.asString(device.pushToken ?? device.token),
+          );
 
     if (pushDevices.length === 0) {
       return {
         notification,
         push: {
-          status: preferences.push === false ? 'DISABLED_BY_USER' : 'NO_ACTIVE_DEVICES',
+          status:
+            preferences.push === false
+              ? 'DISABLED_BY_USER'
+              : 'NO_ACTIVE_DEVICES',
           attempted: 0,
           delivered: 0,
         },
@@ -1243,8 +1294,12 @@ export class VidalpayService {
     }));
 
     try {
-      const headers: Record<string, string> = { 'Content-Type': 'application/json' };
-      const accessToken = this.configService.get<string>('EXPO_PUSH_ACCESS_TOKEN');
+      const headers: Record<string, string> = {
+        'Content-Type': 'application/json',
+      };
+      const accessToken = this.configService.get<string>(
+        'EXPO_PUSH_ACCESS_TOKEN',
+      );
       if (accessToken) {
         headers.Authorization = `Bearer ${accessToken}`;
       }
@@ -1253,16 +1308,23 @@ export class VidalpayService {
         messages,
         { headers, timeout: 10000 },
       );
-      const receipts = Array.isArray(response.data?.data) ? response.data.data : [];
-      const errors = receipts.filter((receipt: AnyRecord) => receipt.status === 'error');
+      const receipts = Array.isArray(response.data?.data)
+        ? response.data.data
+        : [];
+      const errors = receipts.filter(
+        (receipt: AnyRecord) => receipt.status === 'error',
+      );
 
       for (let index = 0; index < receipts.length; index += 1) {
         const receipt = receipts[index] as AnyRecord;
         if (receipt.status !== 'error') {
           continue;
         }
-        if (receipt.details && typeof receipt.details === 'object' &&
-            (receipt.details as AnyRecord).error === 'DeviceNotRegistered') {
+        if (
+          receipt.details &&
+          typeof receipt.details === 'object' &&
+          (receipt.details as AnyRecord).error === 'DeviceNotRegistered'
+        ) {
           const device = pushDevices[index];
           await this.notificationDeviceRepository.update(
             { id: device.id, userId },
@@ -1288,7 +1350,8 @@ export class VidalpayService {
           attempted: messages.length,
           delivered: 0,
           failed: messages.length,
-          failureReason: error instanceof Error ? error.message : 'Expo push request failed',
+          failureReason:
+            error instanceof Error ? error.message : 'Expo push request failed',
         },
       };
     }
@@ -1328,9 +1391,12 @@ export class VidalpayService {
   async registerNotificationDevice(userId: string, payload: AnyRecord) {
     const deviceId = this.asString(payload.deviceId);
     const existing = deviceId
-      ? await this.notificationDeviceRepository.findOne({ where: { userId, deviceId } })
+      ? await this.notificationDeviceRepository.findOne({
+          where: { userId, deviceId },
+        })
       : null;
-    const entity = existing ?? this.notificationDeviceRepository.create({ userId });
+    const entity =
+      existing ?? this.notificationDeviceRepository.create({ userId });
     Object.assign(entity, {
       deviceId,
       subscriptionId: this.asString(payload.subscriptionId),
@@ -1361,7 +1427,8 @@ export class VidalpayService {
     return {
       contact: {
         email:
-          this.configService.get<string>('SUPPORT_EMAIL') ?? 'support@vidalpay.com',
+          this.configService.get<string>('SUPPORT_EMAIL') ??
+          'support@vidalpay.com',
         phone: this.configService.get<string>('SUPPORT_PHONE') ?? null,
       },
       responseWindows: {
@@ -1434,8 +1501,11 @@ export class VidalpayService {
   async legalOverview() {
     return {
       supportEmail:
-        this.configService.get<string>('SUPPORT_EMAIL') ?? 'support@vidalpay.com',
-      documents: this.legalDocuments().map(({ content, ...summary }) => summary),
+        this.configService.get<string>('SUPPORT_EMAIL') ??
+        'support@vidalpay.com',
+      documents: this.legalDocuments().map(
+        ({ content, ...summary }) => summary,
+      ),
     };
   }
 
@@ -1468,7 +1538,11 @@ export class VidalpayService {
       },
       features: [
         { code: 'crypto_deposit', title: 'Crypto deposits', enabled: false },
-        { code: 'crypto_withdrawal', title: 'Crypto withdrawals', enabled: false },
+        {
+          code: 'crypto_withdrawal',
+          title: 'Crypto withdrawals',
+          enabled: false,
+        },
       ],
     };
   }
@@ -1508,7 +1582,11 @@ export class VidalpayService {
     return { products: [], items: [] };
   }
 
-  async blockInvestmentOperation(userId: string, payload: AnyRecord, type: string) {
+  async blockInvestmentOperation(
+    userId: string,
+    payload: AnyRecord,
+    type: string,
+  ) {
     await this.recordBlockedOperation(userId, type, payload, {
       provider: 'Investment provider',
       capability:
@@ -1583,7 +1661,8 @@ export class VidalpayService {
       provider: 'Unit.co',
       reason:
         'The backend has no live-tested Unit credit program integration for this loan action.',
-      missingRequirements: this.providerStatusService.getStatus(capability).missingEnvVars,
+      missingRequirements:
+        this.providerStatusService.getStatus(capability).missingEnvVars,
     });
   }
 
@@ -1658,7 +1737,8 @@ export class VidalpayService {
       acceptedCount: events.filter((event) =>
         ['SIGNED_UP', 'KYC_VERIFIED', 'REWARDED'].includes(event.status),
       ).length,
-      rewardedCount: events.filter((event) => event.status === 'REWARDED').length,
+      rewardedCount: events.filter((event) => event.status === 'REWARDED')
+        .length,
       earnings: earnings.map((entry) => this.normalizeRewardEntry(entry)),
       rewardSummary: referralRewardSummary,
       events: events.map((event) => this.normalizeReferralEvent(event)),
@@ -1692,7 +1772,9 @@ export class VidalpayService {
       this.asString(payload.phoneNumber);
 
     if (!inviteeEmail && !inviteePhoneNumber) {
-      throw new BadRequestException('inviteeEmail or inviteePhoneNumber is required');
+      throw new BadRequestException(
+        'inviteeEmail or inviteePhoneNumber is required',
+      );
     }
 
     const idempotencyKey =
@@ -1766,7 +1848,9 @@ export class VidalpayService {
       this.asString(payload.providerReference) ??
       this.asString(payload.transactionReference);
     const status =
-      this.asString(payload.status) ?? this.asString(payload.event) ?? 'RECEIVED';
+      this.asString(payload.status) ??
+      this.asString(payload.event) ??
+      'RECEIVED';
 
     if (reference) {
       const operation = await this.providerOperationRepository.findOne({
@@ -1784,7 +1868,9 @@ export class VidalpayService {
 
   async ensureCustomerWallets(userId: string) {
     const wallets = await this.walletRepository.find({ where: { userId } });
-    const byCurrency = new Map(wallets.map((wallet) => [wallet.currency, wallet]));
+    const byCurrency = new Map(
+      wallets.map((wallet) => [wallet.currency, wallet]),
+    );
     const created: Wallet[] = [];
 
     for (const currency of supportedCurrencies) {
@@ -1886,7 +1972,11 @@ export class VidalpayService {
     );
   }
 
-  private async validateOtpToken(userId: string, token: string, type: TokenType) {
+  private async validateOtpToken(
+    userId: string,
+    token: string,
+    type: TokenType,
+  ) {
     const tokenEntity = await this.tokenRepository.findOne({
       where: {
         token,
@@ -1905,11 +1995,7 @@ export class VidalpayService {
     const { password, pin, resetToken, resetTokenExpiry, ...safeUser } = user;
     const region = kyc.region ?? user.region ?? this.inferRegion(user);
     const defaultCurrency =
-      region === 'NG'
-        ? Currency.NGN
-        : region === 'US'
-          ? Currency.USD
-          : null;
+      region === 'NG' ? Currency.NGN : region === 'US' ? Currency.USD : null;
     const orderedWallets = this.orderWalletsByDefault(wallets, defaultCurrency);
     return {
       ...safeUser,
@@ -1924,7 +2010,8 @@ export class VidalpayService {
         source: 'ACCOUNT_REGION',
       },
       provider: kyc.provider,
-      capabilities: kyc.capabilities ?? this.capabilitiesForKycStatus(kyc.status),
+      capabilities:
+        kyc.capabilities ?? this.capabilitiesForKycStatus(kyc.status),
       productAvailability: this.buildProductAvailability(region),
       limits: kyc.limits ?? this.defaultLimits(kyc.status),
       security: this.buildSecurityOverview(user),
@@ -1933,6 +2020,56 @@ export class VidalpayService {
       pendingActions: this.buildPendingActions(user, kyc),
       hasTransactionPin: Boolean(user.pin),
     };
+  }
+
+  /**
+   * Session restoration must remain available for databases created before the
+   * optional KYC profile table was introduced. KYC mutation endpoints continue
+   * to use getOrCreateKycProfile and therefore still fail honestly until their
+   * required storage is provisioned.
+   */
+  private async getKycProfileForSession(user: User): Promise<KycProfile> {
+    try {
+      return await this.getOrCreateKycProfile(user);
+    } catch (error) {
+      if (!this.isMissingTable(error, 'kyc_profile')) {
+        throw error;
+      }
+
+      const status = user.kycStatus ?? 'NOT_STARTED';
+      const region = this.inferRegion(user);
+      return this.kycProfileRepository.create({
+        userId: user.id,
+        region,
+        provider: null,
+        status,
+        statusMessage:
+          'KYC profile storage is unavailable. Existing account access remains available.',
+        rejectionReason: null,
+        providerReference: null,
+        sections: this.defaultKycSections(region, status),
+        uploads: [],
+        identity: {},
+        capabilities: this.capabilitiesForKycStatus(status),
+        limits: this.defaultLimits(status),
+      });
+    }
+  }
+
+  private isMissingTable(error: unknown, tableName: string) {
+    const candidate = error as {
+      code?: string;
+      message?: string;
+      driverError?: { code?: string; message?: string };
+    };
+    const code = candidate?.code ?? candidate?.driverError?.code;
+    const message = `${candidate?.message ?? ''} ${candidate?.driverError?.message ?? ''}`;
+    return (
+      code === '42P01' &&
+      new RegExp(`relation ["']?${tableName}["']? does not exist`, 'i').test(
+        message,
+      )
+    );
   }
 
   private normalizeAdminUser(user?: User) {
@@ -1973,7 +2110,8 @@ export class VidalpayService {
       providerAccountId: wallet.providerAccountId ?? null,
       providerVirtualAccountId: wallet.providerVirtualAccountId ?? null,
       providerStatus:
-        wallet.providerStatus ?? this.providerReadinessForCurrency(wallet.currency),
+        wallet.providerStatus ??
+        this.providerReadinessForCurrency(wallet.currency),
       providerReference: wallet.providerReference ?? null,
       metadata: wallet.metadata ?? null,
       withdrawalSuspended: wallet.withdrawalSuspended,
@@ -2219,7 +2357,9 @@ export class VidalpayService {
       `${type}_${randomUUID()}`;
     const status = this.providerStatusService.getStatus(block.capability);
     const blocked = createBlockedResponse({
-      code: status.enabled ? 'PROVIDER_FLOW_NOT_LIVE_TESTED' : 'PROVIDER_UNAVAILABLE',
+      code: status.enabled
+        ? 'PROVIDER_FLOW_NOT_LIVE_TESTED'
+        : 'PROVIDER_UNAVAILABLE',
       feature: type,
       capability: block.capability,
       provider: block.provider,
@@ -2240,7 +2380,9 @@ export class VidalpayService {
           reference: idempotencyKey,
           status: 'BLOCKED',
           amount:
-            payload.amount === undefined ? null : this.normalizeAmount(payload.amount),
+            payload.amount === undefined
+              ? null
+              : this.normalizeAmount(payload.amount),
           currency: this.asString(payload.currency),
           provider: block.provider,
           requestPayload: this.redactPayload(payload),
@@ -2326,7 +2468,12 @@ export class VidalpayService {
   }
 
   private inferRegion(user: User): string | null {
-    const explicit = [user.region, user.countryCode, user.country, user.residency]
+    const explicit = [
+      user.region,
+      user.countryCode,
+      user.country,
+      user.residency,
+    ]
       .filter(Boolean)
       .map((value) => String(value).trim().toLowerCase());
 
@@ -2352,7 +2499,9 @@ export class VidalpayService {
   }
 
   private defaultKycSections(region: string | null, status = 'NOT_STARTED') {
-    const completed = ['SUBMITTED', 'UNDER_REVIEW', 'VERIFIED'].includes(status);
+    const completed = ['SUBMITTED', 'UNDER_REVIEW', 'VERIFIED'].includes(
+      status,
+    );
     return [
       {
         section: 'GOVERNMENT_ID',
@@ -2369,7 +2518,8 @@ export class VidalpayService {
       {
         section: 'ADDRESS',
         title: 'Verify Address',
-        description: 'Confirm your current address and upload proof of address.',
+        description:
+          'Confirm your current address and upload proof of address.',
         status,
         completed,
       },
@@ -2432,7 +2582,8 @@ export class VidalpayService {
 
   private assertKycWebhookSignature(payload: AnyRecord, signature?: string) {
     const secret = this.configService.get<string>('METAMAP_WEBHOOK_SECRET');
-    const environment = this.configService.get<string>('NODE_ENV') ?? 'development';
+    const environment =
+      this.configService.get<string>('NODE_ENV') ?? 'development';
 
     if (!secret) {
       if (environment === 'production') {
@@ -2472,11 +2623,13 @@ export class VidalpayService {
     payload: AnyRecord,
     signature?: string,
   ) {
-    const secretKey = provider === 'Unit.co'
-      ? 'UNIT_WEBHOOK_SECRET'
-      : 'PAYVESSEL_WEBHOOK_SECRET';
+    const secretKey =
+      provider === 'Unit.co'
+        ? 'UNIT_WEBHOOK_SECRET'
+        : 'PAYVESSEL_WEBHOOK_SECRET';
     const secret = this.configService.get<string>(secretKey);
-    const environment = this.configService.get<string>('NODE_ENV') ?? 'development';
+    const environment =
+      this.configService.get<string>('NODE_ENV') ?? 'development';
 
     if (!secret) {
       if (environment === 'production') {
@@ -2493,7 +2646,9 @@ export class VidalpayService {
     }
 
     if (!signature) {
-      throw new UnauthorizedException(`${provider} webhook signature is required`);
+      throw new UnauthorizedException(
+        `${provider} webhook signature is required`,
+      );
     }
 
     const expected = createHmac('sha256', secret)
@@ -2627,7 +2782,10 @@ export class VidalpayService {
         : null;
   }
 
-  private orderWalletsByDefault(wallets: Wallet[], defaultCurrency?: Currency | null) {
+  private orderWalletsByDefault(
+    wallets: Wallet[],
+    defaultCurrency?: Currency | null,
+  ) {
     if (!defaultCurrency) {
       return wallets;
     }
@@ -2661,7 +2819,10 @@ export class VidalpayService {
     };
   }
 
-  private buildAccountRails(wallets: Wallet[], defaultCurrency?: Currency | null) {
+  private buildAccountRails(
+    wallets: Wallet[],
+    defaultCurrency?: Currency | null,
+  ) {
     const rails = wallets.map((wallet) => ({
       walletId: wallet.id,
       currency: wallet.currency,
@@ -2692,7 +2853,9 @@ export class VidalpayService {
 
     return {
       primary:
-        rails.find((rail) => rail.currency === defaultCurrency) ?? rails[0] ?? null,
+        rails.find((rail) => rail.currency === defaultCurrency) ??
+        rails[0] ??
+        null,
       byCurrency: rails.reduce((acc, rail) => {
         acc[rail.currency] = rail;
         return acc;
