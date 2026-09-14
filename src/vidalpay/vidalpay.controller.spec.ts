@@ -35,9 +35,13 @@ describe('VidalPay mobile contract controllers', () => {
   beforeEach(() => jest.clearAllMocks());
 
   it('exposes provider readiness for mobile feature gating', async () => {
-    (service.getProviderStatuses as jest.Mock).mockReturnValue({ providers: [] });
+    (service.getProviderStatuses as jest.Mock).mockReturnValue({
+      providers: [],
+    });
 
-    expect(new ProvidersController(service as VidalpayService).status()).toEqual({ providers: [] });
+    expect(
+      new ProvidersController(service as VidalpayService).status(),
+    ).toEqual({ providers: [] });
   });
 
   it('routes KYC start/status through the backend KYC source of truth', () => {
@@ -51,7 +55,12 @@ describe('VidalPay mobile contract controllers', () => {
   });
 
   it('routes internal transfers with active-user context for backend PIN/idempotency checks', () => {
-    const body = { amount: 10, currency: 'USD', pin: '1234', idempotencyKey: 'idem-1' };
+    const body = {
+      amount: 10,
+      currency: 'USD',
+      pin: '1234',
+      idempotencyKey: 'idem-1',
+    };
 
     new TransfersController(service as VidalpayService).internal(user, body);
 
@@ -64,8 +73,14 @@ describe('VidalPay mobile contract controllers', () => {
     controller.virtual(user, { currency: 'USD' });
     controller.freeze(user, 'card-1');
 
-    expect(service.createCard).toHaveBeenCalledWith('user-1', 'virtual', { currency: 'USD' });
-    expect(service.blockCardOperation).toHaveBeenCalledWith('user-1', 'card-1', 'freeze');
+    expect(service.createCard).toHaveBeenCalledWith('user-1', 'virtual', {
+      currency: 'USD',
+    });
+    expect(service.blockCardOperation).toHaveBeenCalledWith(
+      'user-1',
+      'card-1',
+      'freeze',
+    );
   });
 
   it('routes notification reads with optional selected notification ids', () => {
@@ -73,7 +88,9 @@ describe('VidalPay mobile contract controllers', () => {
 
     controller.read(user, { notificationIds: ['n-1'] });
 
-    expect(service.markNotificationsRead).toHaveBeenCalledWith('user-1', ['n-1']);
+    expect(service.markNotificationsRead).toHaveBeenCalledWith('user-1', [
+      'n-1',
+    ]);
   });
 
   it('routes rewards endpoints through ledger-aware service methods', () => {
@@ -108,8 +125,16 @@ describe('VidalPay mobile contract controllers', () => {
     controller.unit({ reference: 'unit-ref' });
     controller.payvessel({ reference: 'payvessel-ref' });
 
-    expect(service.handleProviderWebhook).toHaveBeenCalledWith('Unit.co', { reference: 'unit-ref' }, undefined);
-    expect(service.handleProviderWebhook).toHaveBeenCalledWith('PayVessel', { reference: 'payvessel-ref' }, undefined);
+    expect(service.handleProviderWebhook).toHaveBeenCalledWith(
+      'Unit.co',
+      { reference: 'unit-ref' },
+      undefined,
+    );
+    expect(service.handleProviderWebhook).toHaveBeenCalledWith(
+      'PayVessel',
+      { reference: 'payvessel-ref' },
+      undefined,
+    );
   });
 
   it('passes the MetaMap signature to the KYC webhook handler', () => {
@@ -118,6 +143,7 @@ describe('VidalPay mobile contract controllers', () => {
     controller.kyc(
       { eventId: 'event-1', status: 'VERIFIED' },
       'sha256=signature',
+      undefined,
       undefined,
     );
 

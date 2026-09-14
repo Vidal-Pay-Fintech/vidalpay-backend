@@ -97,7 +97,9 @@ export class AdminKycController {
       admin.sub,
       userId,
       'IN_PROGRESS',
-      typeof body.reason === 'string' ? body.reason : 'Additional KYC information is required.',
+      typeof body.reason === 'string'
+        ? body.reason
+        : 'Additional KYC information is required.',
     );
   }
 }
@@ -205,13 +207,27 @@ export class CardsController {
   }
 
   @Post(':cardId/unfreeze')
-  unfreeze(@ActiveUser() user: ActiveUserData, @Param('cardId') cardId: string) {
-    return this.vidalpayService.blockCardOperation(user.sub, cardId, 'unfreeze');
+  unfreeze(
+    @ActiveUser() user: ActiveUserData,
+    @Param('cardId') cardId: string,
+  ) {
+    return this.vidalpayService.blockCardOperation(
+      user.sub,
+      cardId,
+      'unfreeze',
+    );
   }
 
   @Post(':cardId/terminate')
-  terminate(@ActiveUser() user: ActiveUserData, @Param('cardId') cardId: string) {
-    return this.vidalpayService.blockCardOperation(user.sub, cardId, 'terminate');
+  terminate(
+    @ActiveUser() user: ActiveUserData,
+    @Param('cardId') cardId: string,
+  ) {
+    return this.vidalpayService.blockCardOperation(
+      user.sub,
+      cardId,
+      'terminate',
+    );
   }
 
   @Patch(':cardId/settings')
@@ -253,7 +269,12 @@ export class CardsController {
     @Param('cardId') cardId: string,
     @Body() body: AnyRecord,
   ) {
-    return this.vidalpayService.blockCardOperation(user.sub, cardId, 'fund', body);
+    return this.vidalpayService.blockCardOperation(
+      user.sub,
+      cardId,
+      'fund',
+      body,
+    );
   }
 
   @Post(':cardId/withdraw')
@@ -457,7 +478,10 @@ export class InvestmentsController {
   }
 
   @Get('orders/:orderId')
-  orderStatus(@ActiveUser() user: ActiveUserData, @Param('orderId') orderId: string) {
+  orderStatus(
+    @ActiveUser() user: ActiveUserData,
+    @Param('orderId') orderId: string,
+  ) {
     return this.vidalpayService.blockGenericOperation(
       user.sub,
       'investment_order_status',
@@ -478,7 +502,10 @@ export class LoansController {
 
   @Get('eligibility')
   eligibility(@ActiveUser() user: ActiveUserData) {
-    return this.vidalpayService.loanUnavailable(user.sub, 'usd_loan_eligibility');
+    return this.vidalpayService.loanUnavailable(
+      user.sub,
+      'usd_loan_eligibility',
+    );
   }
 
   @Get('offers')
@@ -516,7 +543,11 @@ export class LoansController {
     @Param('loanId') loanId: string,
     @Body() body: AnyRecord,
   ) {
-    return this.vidalpayService.blockLoanOperation(user.sub, { ...body, loanId }, 'loan_accept');
+    return this.vidalpayService.blockLoanOperation(
+      user.sub,
+      { ...body, loanId },
+      'loan_accept',
+    );
   }
 
   @Get(':loanId/repayment-schedule')
@@ -538,7 +569,11 @@ export class LoansController {
     @Param('loanId') loanId: string,
     @Body() body: AnyRecord,
   ) {
-    return this.vidalpayService.blockLoanOperation(user.sub, { ...body, loanId }, 'loan_repay');
+    return this.vidalpayService.blockLoanOperation(
+      user.sub,
+      { ...body, loanId },
+      'loan_repay',
+    );
   }
 }
 
@@ -665,7 +700,10 @@ export class MoneyRequestsController {
   }
 
   @Post(':requestId/decline')
-  decline(@ActiveUser() user: ActiveUserData, @Param('requestId') requestId: string) {
+  decline(
+    @ActiveUser() user: ActiveUserData,
+    @Param('requestId') requestId: string,
+  ) {
     return this.vidalpayService.blockGenericOperation(
       user.sub,
       'money_request_decline',
@@ -683,12 +721,13 @@ export class WebhooksController {
   @Post('kyc/metamap')
   kyc(
     @Body() body: AnyRecord,
+    @Headers('x-signature') signature?: string,
     @Headers('x-metamap-signature') metamapSignature?: string,
     @Headers('x-webhook-signature') webhookSignature?: string,
   ) {
     return this.vidalpayService.handleKycWebhook(
       body,
-      metamapSignature ?? webhookSignature,
+      signature ?? metamapSignature ?? webhookSignature,
     );
   }
 

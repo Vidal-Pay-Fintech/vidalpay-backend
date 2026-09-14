@@ -515,6 +515,35 @@ to show a feature, disable it, or explain missing provider setup.
 
 ## KYC review and push delivery
 
+### Account progress levels and regulatory limits
+
+`GET /user/account-level` returns `level` and `rank` from 1 through 4:
+
+- Level 1 `ACCOUNT_CREATED`: account exists; KYC has not started.
+- Level 2 `KYC_STARTED`: the MetaMap flow has started.
+- Level 3 `KYC_DOCUMENTS_SUBMITTED`: at least one required section has been
+  submitted or the complete profile is under review.
+- Level 4 `KYC_VERIFIED`: the complete KYC decision is verified.
+
+These are VidalPay onboarding progress levels, not CBN KYC tiers. The limits
+response includes the three-tier CBN mobile-money reference ceilings, while
+effective provider transactions remain gated until BVN/NIN and KYC evidence are
+verified and the applicable provider and compliance controls enforce the limit.
+Starting a form does not by itself grant a higher financial limit.
+
+If the connected legacy database does not contain `financial_transaction`,
+`beneficiary`, or `notification`, their list endpoints return structured
+`FEATURE_STORAGE_UNAVAILABLE` responses. They do not return fabricated empty
+history and do not delete or modify legacy records. A schema inventory is
+required before a read-only adapter can safely expose records held under older
+table names.
+
+MetaMap must send webhooks to `POST /api/v1/webhooks/kyc/metamap` with its
+official `x-signature` header. Legacy signature header aliases remain accepted.
+MetaMap results update backend KYC status, capabilities, and limits; final
+VidalPay admin approval updates the same source of truth and creates a KYC
+notification when the required backend storage tables exist.
+
 - `GET /api/v1/admin/kyc` and `GET /api/v1/admin/kyc/:userId` read the same
   `kyc_profile` and user state used by the mobile app.
 - `POST /api/v1/admin/kyc/:userId/approve`, `/reject`, and

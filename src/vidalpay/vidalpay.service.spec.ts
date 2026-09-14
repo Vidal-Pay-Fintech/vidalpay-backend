@@ -141,6 +141,47 @@ describe('VidalpayService', () => {
     expect(wallet.provider).toBe('Unit.co');
   });
 
+  it.each([
+    ['transactions', 'financial_transaction'],
+    ['beneficiaries', 'beneficiary'],
+    ['notifications', 'notification'],
+  ])(
+    'reports %s storage as unavailable instead of returning fake empty data',
+    async (feature, tableName) => {
+      const missingTable = Object.assign(
+        new Error(`relation "${tableName}" does not exist`),
+        { code: '42P01' },
+      );
+
+      if (feature === 'transactions') {
+        const transactionRepository = (service as any).transactionRepository;
+        transactionRepository.find.mockRejectedValue(missingTable);
+        await expect(service.getTransactions('user-1')).rejects.toMatchObject({
+          response: expect.objectContaining({
+            code: 'FEATURE_STORAGE_UNAVAILABLE',
+          }),
+        });
+      } else if (feature === 'beneficiaries') {
+        const beneficiaryRepository = (service as any).beneficiaryRepository;
+        beneficiaryRepository.find.mockRejectedValue(missingTable);
+        await expect(service.getBeneficiaries('user-1')).rejects.toMatchObject({
+          response: expect.objectContaining({
+            code: 'FEATURE_STORAGE_UNAVAILABLE',
+          }),
+        });
+      } else {
+        notificationRepository.find.mockRejectedValue(missingTable);
+        await expect(service.listNotifications('user-1')).rejects.toMatchObject(
+          {
+            response: expect.objectContaining({
+              code: 'FEATURE_STORAGE_UNAVAILABLE',
+            }),
+          },
+        );
+      }
+    },
+  );
+
   it('creates only real local wallet records and marks provider account details unprovisioned', async () => {
     userRepository.findOne.mockResolvedValue({ id: 'user-1' });
     walletRepository.find.mockResolvedValueOnce([]).mockResolvedValueOnce([
@@ -437,7 +478,8 @@ describe('VidalpayService', () => {
 
     await expect(service.getAccountLevel('user-1')).resolves.toEqual(
       expect.objectContaining({
-        code: 'EMAIL_VERIFIED',
+        code: 'ACCOUNT_CREATED',
+        level: 1,
         requirements: expect.arrayContaining(['VERIFY_PHONE', 'COMPLETE_KYC']),
       }),
     );
@@ -451,6 +493,42 @@ describe('VidalpayService', () => {
       }),
     );
   });
+
+  it.each([
+    ['IN_PROGRESS', [], 2, 'KYC_STARTED'],
+    [
+      'IN_PROGRESS',
+      [{ section: 'GOVERNMENT_ID', status: 'SUBMITTED' }],
+      3,
+      'KYC_DOCUMENTS_SUBMITTED',
+    ],
+    ['VERIFIED', [], 4, 'KYC_VERIFIED'],
+  ])(
+    'maps KYC status %s and submitted sections to its onboarding level',
+    async (kycStatus, sections, expectedLevel, expectedCode) => {
+      userRepository.findOne.mockResolvedValue({
+        id: 'user-1',
+        isVerified: true,
+        isPhoneVerified: true,
+        kycStatus,
+      });
+      kycProfileRepository.findOne.mockResolvedValue({
+        id: 'kyc-1',
+        userId: 'user-1',
+        status: kycStatus,
+        sections,
+        limits: null,
+      });
+
+      await expect(service.getAccountLevel('user-1')).resolves.toEqual(
+        expect.objectContaining({
+          code: expectedCode,
+          level: expectedLevel,
+          rank: expectedLevel,
+        }),
+      );
+    },
+  );
 
   it('maps a MetaMap webhook to KYC state and deduplicates the event', async () => {
     userRepository.findOne.mockResolvedValue({ id: 'user-1' });
@@ -488,6 +566,13 @@ describe('VidalpayService', () => {
     expect(userRepository.update).toHaveBeenCalledWith('user-1', {
       kycStatus: 'VERIFIED',
     });
+    expect(kycProfileRepository.save).toHaveBeenCalledWith(
+      expect.objectContaining({
+        status: 'VERIFIED',
+        capabilities: expect.objectContaining({ canTransfer: true }),
+        limits: expect.objectContaining({ accountProgressLevel: 4 }),
+      }),
+    );
     expect(providerOperationRepository.save).toHaveBeenCalledWith(
       expect.objectContaining({
         type: 'kyc_webhook',

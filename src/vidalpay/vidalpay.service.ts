@@ -116,13 +116,13 @@ export class VidalpayService {
 
   async getAccountLevel(userId: string) {
     const user = await this.findUser(userId);
-    const kyc = await this.getOrCreateKycProfile(user);
+    const kyc = await this.getKycProfileForSession(user);
     return this.buildAccountLevel(user, kyc);
   }
 
   async getAccountLimits(userId: string) {
     const user = await this.findUser(userId);
-    const kyc = await this.getOrCreateKycProfile(user);
+    const kyc = await this.getKycProfileForSession(user);
     const accountLevel = this.buildAccountLevel(user, kyc);
     return {
       accountLevel,
@@ -734,11 +734,15 @@ export class VidalpayService {
   }
 
   async getBeneficiaries(userId: string) {
-    const beneficiaries = await this.beneficiaryRepository.find({
-      where: { userId },
-      order: { createdAt: 'DESC' },
-    });
-    return { beneficiaries };
+    try {
+      const beneficiaries = await this.beneficiaryRepository.find({
+        where: { userId },
+        order: { createdAt: 'DESC' },
+      });
+      return { beneficiaries };
+    } catch (error) {
+      this.throwMissingFeatureStorage(error, 'beneficiaries', 'beneficiary');
+    }
   }
 
   async resolveBeneficiary(tagId: string) {
@@ -760,11 +764,19 @@ export class VidalpayService {
 
   async getTransactions(userId: string, currency?: Currency) {
     const where = currency ? { userId, currency } : { userId };
-    const transactions = await this.transactionRepository.find({
-      where,
-      order: { createdAt: 'DESC' },
-    });
-    return { transactions };
+    try {
+      const transactions = await this.transactionRepository.find({
+        where,
+        order: { createdAt: 'DESC' },
+      });
+      return { transactions };
+    } catch (error) {
+      this.throwMissingFeatureStorage(
+        error,
+        'transaction_history',
+        'financial_transaction',
+      );
+    }
   }
 
   async getTransaction(userId: string, id: string) {
@@ -1096,6 +1108,8 @@ export class VidalpayService {
     profile.status = status;
     profile.statusMessage = this.asString(payload.message) ?? null;
     profile.rejectionReason = this.asString(payload.rejectionReason) ?? null;
+    profile.capabilities = this.capabilitiesForKycStatus(status);
+    profile.limits = this.defaultLimits(status);
     profile.providerReference =
       this.asString(payload.verificationId) ??
       this.asString(payload.id) ??
@@ -1230,11 +1244,15 @@ export class VidalpayService {
   }
 
   async listNotifications(userId: string) {
-    const notifications = await this.notificationRepository.find({
-      where: { userId },
-      order: { createdAt: 'DESC' },
-    });
-    return { notifications };
+    try {
+      const notifications = await this.notificationRepository.find({
+        where: { userId },
+        order: { createdAt: 'DESC' },
+      });
+      return { notifications };
+    } catch (error) {
+      this.throwMissingFeatureStorage(error, 'notifications', 'notification');
+    }
   }
 
   async sendNotificationToUser(
@@ -2072,6 +2090,31 @@ export class VidalpayService {
     );
   }
 
+  private throwMissingFeatureStorage(
+    error: unknown,
+    feature: string,
+    tableName: string,
+  ): never {
+    if (!this.isMissingTable(error, tableName)) {
+      throw error;
+    }
+
+    throw new ServiceUnavailableException(
+      createBlockedResponse({
+        code: 'FEATURE_STORAGE_UNAVAILABLE',
+        feature,
+        capability:
+          feature === 'notifications' ? 'notifications' : 'bank_transfer',
+        provider: 'VidalPay',
+        reason: `${feature} storage is not present in the connected legacy database. No existing records were deleted by this request.`,
+        missingRequirements: [
+          `${tableName} table or a verified legacy-data adapter`,
+        ],
+        retryable: false,
+      }),
+    );
+  }
+
   private normalizeAdminUser(user?: User) {
     if (!user) {
       return null;
@@ -2173,19 +2216,26 @@ export class VidalpayService {
     const emailVerified = Boolean(user.isVerified);
     const phoneVerified = Boolean(user.isPhoneVerified);
     const verified = kycStatus === 'VERIFIED';
-    const level = verified
-      ? 'KYC_VERIFIED'
-      : emailVerified && phoneVerified
-        ? 'CONTACT_VERIFIED'
-        : emailVerified
-          ? 'EMAIL_VERIFIED'
-          : 'BASIC';
-    const rankByLevel: Record<string, number> = {
-      BASIC: 0,
-      EMAIL_VERIFIED: 1,
-      CONTACT_VERIFIED: 2,
-      KYC_VERIFIED: 3,
+    const submittedSections = (kyc.sections ?? []).filter((section) =>
+      ['SUBMITTED', 'UNDER_REVIEW', 'VERIFIED'].includes(
+        String(section.status).toUpperCase(),
+      ),
+    ).length;
+    const rank = verified
+      ? 4
+      : submittedSections > 0 ||
+          ['SUBMITTED', 'UNDER_REVIEW', 'MANUAL_REVIEW'].includes(kycStatus)
+        ? 3
+        : kycStatus === 'IN_PROGRESS'
+          ? 2
+          : 1;
+    const codeByRank: Record<number, string> = {
+      1: 'ACCOUNT_CREATED',
+      2: 'KYC_STARTED',
+      3: 'KYC_DOCUMENTS_SUBMITTED',
+      4: 'KYC_VERIFIED',
     };
+    const level = codeByRank[rank];
     const requirements: string[] = [];
 
     if (!emailVerified) {
@@ -2200,7 +2250,8 @@ export class VidalpayService {
 
     return {
       code: level,
-      rank: rankByLevel[level],
+      rank,
+      level: rank,
       status: verified ? 'ACTIVE' : 'LIMITED',
       title: level
         .split('_')
@@ -2685,10 +2736,28 @@ export class VidalpayService {
 
   private defaultLimits(status = 'NOT_STARTED') {
     const verified = status === 'VERIFIED';
+    const progressLevel = verified
+      ? 4
+      : ['SUBMITTED', 'UNDER_REVIEW', 'MANUAL_REVIEW'].includes(status)
+        ? 3
+        : status === 'IN_PROGRESS'
+          ? 2
+          : 1;
     return {
-      version: '2026-09-13',
+      version: '2026-09-14',
       source: 'BACKEND_POLICY',
       currency: 'MIXED',
+      accountProgressLevel: progressLevel,
+      regulatoryReference: {
+        jurisdiction: 'NG',
+        framework: 'CBN_MOBILE_MONEY_THREE_TIER_KYC',
+        note: 'VidalPay account progress levels are not CBN KYC tiers. Effective limits require verified BVN or NIN, provider provisioning, and compliance approval.',
+        tiers: [
+          { tier: 1, dailyOutflow: 50000, balance: 300000 },
+          { tier: 2, dailyOutflow: 200000, balance: 500000 },
+          { tier: 3, dailyOutflow: 5000000, balance: null },
+        ],
+      },
       enforcement: {
         kycGatesEnforced: true,
         amountLimitsEnforced: false,
