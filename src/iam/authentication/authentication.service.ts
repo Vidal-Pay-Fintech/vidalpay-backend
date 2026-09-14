@@ -1148,10 +1148,10 @@ export class AuthenticationService {
       capability: 'password_reset_email_otp',
       reason: this.serviceUnavailableReason(
         error,
-        'SMTP email delivery failed or is not configured.',
+        'Email delivery failed or is not configured.',
       ),
       missingRequirements: this.missingEmailConfiguration(),
-      provider: 'SMTP',
+      provider: this.emailProviderName(),
       retryable: this.missingEmailConfiguration().length === 0,
     });
   }
@@ -1183,6 +1183,28 @@ export class AuthenticationService {
   }
 
   private missingEmailConfiguration() {
+    if (this.firstEnv(['RESEND_API_KEY'])) {
+      const missing: string[] = [];
+
+      if (
+        !this.firstEnv([
+          'RESEND_FROM_EMAIL',
+          'SMTP_FROM_EMAIL',
+          'SMTP_MAIL_FROM',
+          'MAIL_FROM',
+          'EMAIL_FROM',
+          'FROM_EMAIL',
+          'SENDGRID_FROM_EMAIL',
+        ])
+      ) {
+        missing.push(
+          'RESEND_FROM_EMAIL or SMTP_MAIL_FROM or EMAIL_FROM or FROM_EMAIL',
+        );
+      }
+
+      return missing;
+    }
+
     const missing: string[] = [];
     const host = this.firstEnv([
       'SMTP_MAIL_HOST',
@@ -1237,6 +1259,10 @@ export class AuthenticationService {
     }
 
     return missing;
+  }
+
+  private emailProviderName() {
+    return this.firstEnv(['RESEND_API_KEY']) ? 'Resend' : 'SMTP';
   }
 
   private firstEnv(names: string[]) {

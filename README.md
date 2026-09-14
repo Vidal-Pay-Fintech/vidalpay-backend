@@ -46,8 +46,19 @@ database. The repository's compatibility script is a no-op so an old Render
 command cannot run migrations, but changing the dashboard Start Command to
 `npm run start:prod` is the intended configuration.
 
-For OTP and password-reset email delivery, set these Render environment
-variables with the SMTP provider's actual values:
+For OTP and password-reset email delivery with Resend, set these Render
+environment variables:
+
+```text
+RESEND_API_KEY=re_...
+RESEND_FROM_EMAIL=VidalPay <no-reply@your-verified-domain.com>
+```
+
+The backend calls Resend's HTTPS email endpoint when `RESEND_API_KEY` is
+present. Keep this key only in Render; never put it in the mobile app. Resend
+requires a valid sender address from a verified domain for production mail.
+
+SMTP remains available as a fallback when Resend is not configured:
 
 ```text
 SMTP_MAIL_HOST=smtp.example.com
@@ -58,7 +69,8 @@ SMTP_MAIL_FROM=verified-sender@example.com
 ```
 
 The backend also accepts `SMTP_HOST`, `SMTP_PORT`, `SMTP_USER`, and
-`SMTP_PASS`, but the `SMTP_MAIL_*` names are the canonical deployment names.
+`SMTP_PASS`, but the `SMTP_MAIL_*` names are the canonical SMTP deployment
+names. Resend takes priority when both providers are configured.
 Do not set the host to `localhost` or `127.0.0.1`; Render has no local SMTP
 server. Gmail requires an app password, and a transactional provider such as
 SendGrid requires its SMTP relay hostname and credentials.
