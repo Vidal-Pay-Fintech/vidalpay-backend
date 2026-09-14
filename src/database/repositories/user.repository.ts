@@ -128,36 +128,39 @@ export class UserRepository extends AbstractRepository<User> {
   }
 
   async findUserByEmail(email: string): Promise<User | null> {
-    this.logger.log(`Fetching user with email: ${email}`);
-    return await this.findOne({
-      where: { email },
-    });
+    this.logger.log('Fetching user by email');
+    const normalizedEmail = email.trim();
+    if (!normalizedEmail) return null;
+
+    return this.userEntityRepository
+      .createQueryBuilder('user')
+      .where('LOWER(user.email) = LOWER(:email)', { email: normalizedEmail })
+      .getOne();
   }
 
   async findUserByPhone(phoneNumber: string): Promise<User | null> {
-    this.logger.log(`Fetching user with phoneNumber: ${phoneNumber}`);
+    this.logger.log('Fetching user by phone number');
     return await this.findOne({
       where: { phoneNumber },
     });
   }
 
   async findUserByEmailOrPhone(value: string): Promise<User | null> {
-    this.logger.log(`Fetching user with email or phone: ${value}`);
+    this.logger.log('Fetching user by email or phone number');
+    const normalizedValue = value.trim();
 
     const user = await this.userEntityRepository
       .createQueryBuilder('user')
-      .where('user.email = :value', { value })
+      .where('LOWER(user.email) = LOWER(:value)', { value: normalizedValue })
       .getOne();
 
     if (!user) {
+      const phoneValue = normalizedValue.startsWith('0')
+        ? normalizedValue.replace(/^0/, '+234')
+        : normalizedValue;
       return await this.userEntityRepository
         .createQueryBuilder('user')
-        .orWhere((qb) => {
-          if (value.startsWith('0')) {
-            value = value.replace(/^0/, '+234');
-          }
-          qb.where('user.phoneNumber = :value', { value });
-        })
+        .where('user.phoneNumber = :value', { value: phoneValue })
         .getOne();
     }
 
@@ -186,10 +189,8 @@ export class UserRepository extends AbstractRepository<User> {
   }
 
   async checkUserExistByEmail(email: string): Promise<boolean> {
-    this.logger.log(`Checking if user with email: ${email} exists`);
-    const user = await this.findOne({
-      where: { email: email },
-    });
+    this.logger.log('Checking whether an email is already registered');
+    const user = await this.findUserByEmail(email);
     if (user) {
       throw new UnprocessableEntityException(API_MESSAGES.EMAIL_ALREADY_EXISTS);
     }
@@ -197,9 +198,7 @@ export class UserRepository extends AbstractRepository<User> {
   }
 
   async checkUserExistByPhone(phoneNumber: string): Promise<boolean> {
-    this.logger.log(
-      `Checking if user with phone number: ${phoneNumber} exists`,
-    );
+    this.logger.log('Checking whether a phone number is already registered');
     const user = await this.findOne({
       where: { phoneNumber: phoneNumber },
     });

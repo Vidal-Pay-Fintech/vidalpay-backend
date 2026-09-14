@@ -52,6 +52,8 @@ environment variables:
 ```text
 RESEND_API_KEY=re_...
 RESEND_FROM_EMAIL=VidalPay <no-reply@your-verified-domain.com>
+# Optional when RESEND_FROM_EMAIL contains only the email address:
+RESEND_FROM_NAME=VidalPay
 ```
 
 The backend calls Resend's HTTPS email endpoint when `RESEND_API_KEY` is

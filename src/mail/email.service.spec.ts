@@ -55,6 +55,7 @@ describe('EmailService', () => {
     'SMTP_ALLOW_LOCALHOST',
     'RESEND_API_KEY',
     'RESEND_FROM_EMAIL',
+    'RESEND_FROM_NAME',
     'RESEND_BASE_URL',
     'RESEND_TIMEOUT_MS',
   ];
@@ -182,6 +183,26 @@ describe('EmailService', () => {
           'Content-Type': 'application/json',
         },
       }),
+    );
+  });
+
+  it('combines the configured Resend sender name with a plain sender email', async () => {
+    process.env.RESEND_API_KEY = 're_test_key';
+    process.env.RESEND_FROM_EMAIL = 'no-reply@example.com';
+    process.env.RESEND_FROM_NAME = 'VidalPay';
+
+    const service = new EmailService();
+
+    await service.sendMail({
+      email: 'user@example.com',
+      subject: 'Password reset',
+      template: null,
+    });
+
+    expect(axiosPostMock).toHaveBeenCalledWith(
+      'https://api.resend.com/emails',
+      expect.objectContaining({ from: 'VidalPay <no-reply@example.com>' }),
+      expect.any(Object),
     );
   });
 

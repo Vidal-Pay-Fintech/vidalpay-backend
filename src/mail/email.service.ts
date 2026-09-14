@@ -413,18 +413,24 @@ export class EmailService {
   }
 
   private readResendConfig(): ResendConfig {
+    const fromAddress =
+      this.firstEnv([
+        'RESEND_FROM_EMAIL',
+        'SMTP_FROM_EMAIL',
+        'SMTP_MAIL_FROM',
+        'MAIL_FROM',
+        'EMAIL_FROM',
+        'FROM_EMAIL',
+        'SENDGRID_FROM_EMAIL',
+      ]) ?? null;
+    const fromName = this.firstEnv(['RESEND_FROM_NAME']);
+
     return {
       apiKey: this.firstEnv(['RESEND_API_KEY']),
       fromAddress:
-        this.firstEnv([
-          'RESEND_FROM_EMAIL',
-          'SMTP_FROM_EMAIL',
-          'SMTP_MAIL_FROM',
-          'MAIL_FROM',
-          'EMAIL_FROM',
-          'FROM_EMAIL',
-          'SENDGRID_FROM_EMAIL',
-        ]) ?? null,
+        fromAddress && fromName && !fromAddress.includes('<')
+          ? `${fromName} <${fromAddress}>`
+          : fromAddress,
       baseUrl: (
         this.firstEnv(['RESEND_BASE_URL']) ?? 'https://api.resend.com'
       ).replace(/\/$/, ''),

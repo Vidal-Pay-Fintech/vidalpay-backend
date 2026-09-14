@@ -189,8 +189,8 @@ Provider status item example:
 - JWT: `JWT_SECRET`, `JWT_TOKEN_AUDIENCE`, `JWT_TOKEN_ISSUER`,
   `JWT_ACCESS_TOKEN_TTL`, `JWT_REFRESH_TOKEN_TTL`. The legacy
   `JWT_ACCESS_TOKEN_TtL` spelling is still accepted as a fallback.
-- Email/SMS: Resend uses `RESEND_API_KEY` and `RESEND_FROM_EMAIL` through the
-  backend HTTPS API. The official send endpoint is
+- Email/SMS: Resend uses `RESEND_API_KEY`, `RESEND_FROM_EMAIL`, and optional
+  `RESEND_FROM_NAME` through the backend HTTPS API. The official send endpoint is
   `https://api.resend.com/emails`; a Resend sending-access key and a verified
   sender/domain are recommended. SMTP remains the fallback through
   `SMTP_MAIL_HOST`, `SMTP_MAIL_PORT`, `SMTP_MAIL_USERNAME`,
