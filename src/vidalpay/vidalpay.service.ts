@@ -37,6 +37,7 @@ import {
   ProviderCapability,
 } from './contracts';
 import { ProviderStatusService } from './provider-status.service';
+import { SandboxProviderService } from './sandbox-provider.service';
 
 type AnyRecord = Record<string, unknown>;
 
@@ -76,6 +77,7 @@ export class VidalpayService {
     @InjectRepository(Dispute)
     private readonly disputeRepository: Repository<Dispute>,
     private readonly providerStatusService: ProviderStatusService,
+    private readonly sandboxProviderService: SandboxProviderService,
     private readonly configService: ConfigService,
     private readonly mailService: MailService,
     private readonly dataSource: DataSource,
@@ -474,6 +476,30 @@ export class VidalpayService {
       utilities: 'utilities_catalog',
     };
     const status = this.providerStatusService.getStatus(capabilityByKind[kind]);
+    if (
+      this.configService.get<string>('RELOADLY_CLIENT_ID') &&
+      this.configService.get<string>('RELOADLY_CLIENT_SECRET')
+    ) {
+      try {
+        const catalog =
+          await this.sandboxProviderService.getReloadlyCatalog(kind);
+        return {
+          region: 'NG',
+          provider: 'Reloadly',
+          source: 'PROVIDER_SANDBOX',
+          catalog,
+        };
+      } catch (error) {
+        return {
+          region: 'NG',
+          provider: 'Reloadly',
+          source: 'PROVIDER_SANDBOX_ERROR',
+          message: this.providerErrorMessage(error),
+          ...(kind === 'utilities' ? { categories: [] } : { networks: [] }),
+        };
+      }
+    }
+
     const base = {
       region: 'NG',
       provider: status.provider,
@@ -502,6 +528,30 @@ export class VidalpayService {
         reason:
           'Utility validation is available only for Nigeria-based accounts.',
       });
+    }
+    if (
+      this.configService.get<string>('RELOADLY_CLIENT_ID') &&
+      this.configService.get<string>('RELOADLY_CLIENT_SECRET')
+    ) {
+      try {
+        return {
+          provider: 'Reloadly',
+          status: 'VALIDATED',
+          result:
+            await this.sandboxProviderService.validateReloadlyUtility(payload),
+        };
+      } catch (error) {
+        throw new ServiceUnavailableException(
+          createBlockedResponse({
+            code: 'PROVIDER_REQUEST_FAILED',
+            feature: 'Utility customer validation',
+            capability: 'utilities_validate',
+            provider: 'Reloadly',
+            reason: this.providerErrorMessage(error),
+            retryable: true,
+          }),
+        );
+      }
     }
     this.throwProviderUnavailable({
       feature: 'Utility customer validation',
@@ -541,6 +591,74 @@ export class VidalpayService {
       throw new BadRequestException(
         'Airtime, data, and bill payments must use the NGN wallet',
       );
+    }
+    const pin = this.asString(payload.transactionPin ?? payload.pin);
+    if (!pin) throw new BadRequestException('transactionPin is required');
+    await this.assertTransactionPin(userId, pin);
+    const idempotencyKey =
+      this.asString(payload.idempotencyKey) ?? this.asString(payload.reference);
+    if (!idempotencyKey) {
+      throw new BadRequestException('idempotencyKey is required');
+    }
+    const existing = await this.providerOperationRepository.findOne({
+      where: { userId, type, idempotencyKey },
+    });
+    if (existing) return this.normalizeOperation(existing);
+
+    if (
+      this.configService.get<string>('RELOADLY_CLIENT_ID') &&
+      this.configService.get<string>('RELOADLY_CLIENT_SECRET')
+    ) {
+      const requestPayload = this.redactPayload(payload);
+      const operation = await this.providerOperationRepository.save(
+        this.providerOperationRepository.create({
+          userId,
+          type,
+          idempotencyKey,
+          reference: idempotencyKey,
+          status: 'PENDING',
+          amount: this.normalizeAmount(payload.amount),
+          currency: Currency.NGN,
+          provider: 'Reloadly',
+          requestPayload,
+          responsePayload: null,
+          errorCode: null,
+          failureReason: null,
+          metadata: { sandbox: true },
+        }),
+      );
+      try {
+        const providerPayload = { ...payload };
+        delete providerPayload.transactionPin;
+        delete providerPayload.pin;
+        const response = await this.sandboxProviderService.purchaseReloadly(
+          type,
+          providerPayload,
+        );
+        operation.status = 'SUBMITTED';
+        operation.providerReference =
+          this.asString(response.transactionId) ??
+          this.asString(response.id) ??
+          null;
+        operation.responsePayload = this.redactPayload(response);
+        await this.providerOperationRepository.save(operation);
+        return this.normalizeOperation(operation);
+      } catch (error) {
+        operation.status = 'FAILED';
+        operation.errorCode = 'PROVIDER_REQUEST_FAILED';
+        operation.failureReason = this.providerErrorMessage(error);
+        await this.providerOperationRepository.save(operation);
+        throw new ServiceUnavailableException(
+          createBlockedResponse({
+            code: operation.errorCode,
+            feature: type,
+            capability: capabilityByKind[type],
+            provider: 'Reloadly',
+            reason: operation.failureReason,
+            retryable: true,
+          }),
+        );
+      }
     }
     await this.recordBlockedOperation(userId, type, payload, {
       provider: 'PayVessel',
@@ -1200,8 +1318,104 @@ export class VidalpayService {
           ? 'ngn_virtual_card'
           : 'ngn_physical_card';
 
+    if (
+      currency === Currency.NGN &&
+      this.providerStatusService.isCapabilityEnabled(capability)
+    ) {
+      const pin = this.asString(payload.transactionPin ?? payload.pin);
+      if (!pin) throw new BadRequestException('transactionPin is required');
+      await this.assertTransactionPin(userId, pin);
+      const idempotencyKey =
+        this.asString(payload.idempotencyKey) ??
+        this.asString(payload.reference);
+      if (!idempotencyKey)
+        throw new BadRequestException('idempotencyKey is required');
+      const cardholderId = this.asString(payload.cardholderId);
+      const fundingSourceId = this.asString(payload.fundingSourceId);
+      if (!cardholderId || !fundingSourceId) {
+        throw new BadRequestException(
+          'cardholderId and fundingSourceId are required',
+        );
+      }
+      const existing = await this.providerOperationRepository.findOne({
+        where: { userId, type: `${type}_card_create`, idempotencyKey },
+      });
+      if (existing) return this.normalizeOperation(existing);
+      const operation = await this.providerOperationRepository.save(
+        this.providerOperationRepository.create({
+          userId,
+          type: `${type}_card_create`,
+          idempotencyKey,
+          reference: idempotencyKey,
+          status: 'PENDING',
+          amount: null,
+          currency,
+          provider: 'Sudo',
+          requestPayload: this.redactPayload(payload),
+          responsePayload: null,
+          errorCode: null,
+          failureReason: null,
+          metadata: { sandbox: true },
+        }),
+      );
+      try {
+        const response = await this.sandboxProviderService.createSudoCard({
+          type,
+          cardholderId,
+          fundingSourceId,
+          cardProgramId: this.asString(payload.cardProgramId) ?? undefined,
+          metadata: { userId, idempotencyKey },
+        });
+        const providerCard = (response.data ?? response) as AnyRecord;
+        const providerCardId =
+          this.asString(providerCard._id) ?? this.asString(providerCard.id);
+        if (!providerCardId)
+          throw new Error('Sudo response did not include a card ID');
+        const card = await this.cardRepository.save(
+          this.cardRepository.create({
+            userId,
+            type,
+            currency,
+            status: this.asString(providerCard.status) ?? 'PENDING',
+            maskedPan: this.asString(providerCard.maskedPan) ?? null,
+            last4: this.asString(providerCard.last4) ?? null,
+            expiryMonth: this.asString(providerCard.expiryMonth) ?? null,
+            expiryYear: this.asString(providerCard.expiryYear) ?? null,
+            cardholderName: this.asString(providerCard.cardholderName) ?? null,
+            balance: 0,
+            availableBalance: 0,
+            limits: null,
+            billingAddress: (payload.billingAddress as AnyRecord) ?? null,
+            provider: 'Sudo',
+            providerCardId,
+            providerStatus: this.asString(providerCard.status) ?? 'PENDING',
+          }),
+        );
+        operation.status = 'SUBMITTED';
+        operation.providerReference = providerCardId;
+        operation.responsePayload = this.redactPayload(response);
+        operation.metadata = { ...operation.metadata, cardId: card.id };
+        await this.providerOperationRepository.save(operation);
+        return this.normalizeCard(card);
+      } catch (error) {
+        operation.status = 'FAILED';
+        operation.errorCode = 'PROVIDER_REQUEST_FAILED';
+        operation.failureReason = this.providerErrorMessage(error);
+        await this.providerOperationRepository.save(operation);
+        throw new ServiceUnavailableException(
+          createBlockedResponse({
+            code: operation.errorCode,
+            feature: `${type}_card_create`,
+            capability,
+            provider: 'Sudo',
+            reason: operation.failureReason,
+            retryable: true,
+          }),
+        );
+      }
+    }
     await this.recordBlockedOperation(userId, `${type}_card_create`, payload, {
-      provider: currency === Currency.USD ? 'Unit.co' : 'PayVessel',
+      provider: currency === Currency.USD ? 'Unit.co' : 'Sudo',
       capability,
       reason:
         'Card creation requires a provider customer/account mapping and live-tested card issuing credentials.',
@@ -2440,6 +2654,19 @@ export class VidalpayService {
     if (!valid) {
       throw new PreconditionFailedException('Invalid transaction pin');
     }
+  }
+
+  private providerErrorMessage(error: unknown): string {
+    if (axios.isAxiosError(error)) {
+      const data = error.response?.data as AnyRecord | string | undefined;
+      if (typeof data === 'string') return data.slice(0, 300);
+      return (
+        this.asString(data?.message) ??
+        this.asString(data?.error) ??
+        `Provider request failed with status ${error.response?.status ?? 'unknown'}`
+      );
+    }
+    return error instanceof Error ? error.message : 'Provider request failed';
   }
 
   private async recordBlockedOperation(

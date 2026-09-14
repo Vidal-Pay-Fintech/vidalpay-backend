@@ -46,6 +46,12 @@ describe('VidalpayService', () => {
   let notificationPreferenceRepository: ReturnType<typeof repo>;
   let notificationDeviceRepository: ReturnType<typeof repo>;
   let cardRepository: ReturnType<typeof repo>;
+  let sandboxProviderService: {
+    createSudoCard: jest.Mock;
+    getReloadlyCatalog: jest.Mock;
+    validateReloadlyUtility: jest.Mock;
+    purchaseReloadly: jest.Mock;
+  };
   let providerStatusService: jest.Mocked<
     Pick<
       ProviderStatusService,
@@ -82,6 +88,12 @@ describe('VidalpayService', () => {
       getStatuses: jest.fn().mockReturnValue([status()]),
       isCapabilityEnabled: jest.fn().mockReturnValue(false),
     };
+    sandboxProviderService = {
+      createSudoCard: jest.fn(),
+      getReloadlyCatalog: jest.fn(),
+      validateReloadlyUtility: jest.fn(),
+      purchaseReloadly: jest.fn(),
+    };
 
     service = new VidalpayService(
       userRepository as any,
@@ -100,6 +112,7 @@ describe('VidalpayService', () => {
       tokenRepository as any,
       disputeRepository as any,
       providerStatusService as any,
+      sandboxProviderService as any,
       { get: jest.fn() } as unknown as ConfigService,
       {} as any,
       {} as DataSource,
@@ -297,19 +310,26 @@ describe('VidalpayService', () => {
       ),
     );
     notificationDeviceRepository.find.mockRejectedValue(
-      Object.assign(new Error('relation "notification_device" does not exist'), {
-        code: '42P01',
-      }),
+      Object.assign(
+        new Error('relation "notification_device" does not exist'),
+        {
+          code: '42P01',
+        },
+      ),
     );
 
-    await expect(service.getNotificationPreferences('legacy-user')).resolves.toEqual(
+    await expect(
+      service.getNotificationPreferences('legacy-user'),
+    ).resolves.toEqual(
       expect.objectContaining({
         push: true,
         persistent: false,
         storageStatus: 'LEGACY_FALLBACK',
       }),
     );
-    await expect(service.listNotificationDevices('legacy-user')).resolves.toEqual(
+    await expect(
+      service.listNotificationDevices('legacy-user'),
+    ).resolves.toEqual(
       expect.objectContaining({
         devices: [],
         persistent: false,
@@ -697,5 +717,71 @@ describe('VidalpayService', () => {
         }),
       }),
     );
+  });
+
+  it('creates and persists a Sudo NGN card with PIN and idempotency checks', async () => {
+    const pin = await hash('1234', 4);
+    userRepository.findOne.mockResolvedValue({
+      id: 'user-1',
+      country: 'Nigeria',
+      pin,
+    });
+    providerStatusService.isCapabilityEnabled.mockReturnValue(true);
+    providerOperationRepository.findOne.mockResolvedValue(null);
+    sandboxProviderService.createSudoCard.mockResolvedValue({
+      data: { id: 'sudo-card-1', status: 'active', last4: '1234' },
+    });
+
+    const result = await service.createCard('user-1', 'virtual', {
+      currency: 'NGN',
+      transactionPin: '1234',
+      idempotencyKey: 'card-request-1',
+      cardholderId: 'holder-1',
+      fundingSourceId: 'funding-1',
+    });
+
+    expect(sandboxProviderService.createSudoCard).toHaveBeenCalledTimes(1);
+    expect(cardRepository.save).toHaveBeenCalledWith(
+      expect.objectContaining({
+        provider: 'Sudo',
+        providerCardId: 'sudo-card-1',
+        currency: Currency.NGN,
+      }),
+    );
+    expect(result).toEqual(
+      expect.objectContaining({ providerCardId: 'sudo-card-1' }),
+    );
+  });
+
+  it('returns an existing bill operation without repeating a Reloadly purchase', async () => {
+    const pin = await hash('1234', 4);
+    userRepository.findOne.mockResolvedValue({
+      id: 'user-1',
+      country: 'Nigeria',
+      pin,
+    });
+    providerOperationRepository.findOne.mockResolvedValue({
+      reference: 'airtime-request-1',
+      status: 'SUBMITTED',
+      amount: 1000,
+      currency: Currency.NGN,
+      provider: 'Reloadly',
+      providerReference: 'reloadly-1',
+      metadata: {},
+    });
+
+    await expect(
+      service.purchaseService('user-1', 'airtime', {
+        currency: 'NGN',
+        transactionPin: '1234',
+        idempotencyKey: 'airtime-request-1',
+      }),
+    ).resolves.toEqual(
+      expect.objectContaining({
+        reference: 'airtime-request-1',
+        status: 'SUBMITTED',
+      }),
+    );
+    expect(sandboxProviderService.purchaseReloadly).not.toHaveBeenCalled();
   });
 });

@@ -6,6 +6,24 @@ import axios, { AxiosInstance } from 'axios';
 export class ProviderHttpService {
   constructor(private readonly configService: ConfigService) {}
 
+  private timeout(): number {
+    return Number(
+      this.configService.get<string>('PROVIDER_TIMEOUT_MS') ?? 15000,
+    );
+  }
+
+  private baseUrl(envVar: string, fallback: string): string {
+    const configured = this.configService.get<string>(envVar)?.trim();
+    if (!configured) return fallback;
+    try {
+      const url = new URL(configured);
+      if (url.protocol !== 'https:') throw new Error('HTTPS is required');
+      return url.toString().replace(/\/$/, '');
+    } catch {
+      return fallback;
+    }
+  }
+
   unitClient(): AxiosInstance {
     return axios.create({
       baseURL:
@@ -15,7 +33,7 @@ export class ProviderHttpService {
         Authorization: `Bearer ${this.configService.get<string>('UNIT_API_TOKEN')}`,
         'Content-Type': 'application/vnd.api+json',
       },
-      timeout: Number(this.configService.get<string>('PROVIDER_TIMEOUT_MS') ?? 15000),
+      timeout: this.timeout(),
     });
   }
 
@@ -33,7 +51,57 @@ export class ProviderHttpService {
         'api-secret': apiSecret,
         'Content-Type': 'application/json',
       },
-      timeout: Number(this.configService.get<string>('PROVIDER_TIMEOUT_MS') ?? 15000),
+      timeout: this.timeout(),
+    });
+  }
+
+  sudoClient(): AxiosInstance {
+    return axios.create({
+      baseURL: this.baseUrl('SUDO_BASE_URL', 'https://api.sandbox.sudo.africa'),
+      auth: {
+        username: this.configService.get<string>('SUDO_API_KEY') ?? '',
+        password: '',
+      },
+      headers: { 'Content-Type': 'application/json' },
+      timeout: this.timeout(),
+    });
+  }
+
+  reloadlyAirtimeClient(accessToken: string): AxiosInstance {
+    return axios.create({
+      baseURL: this.baseUrl(
+        'RELOADLY_AIRTIME_BASE_URL',
+        'https://topups-sandbox.reloadly.com',
+      ),
+      headers: {
+        Authorization: `Bearer ${accessToken}`,
+        Accept: 'application/com.reloadly.topups-v1+json',
+        'Content-Type': 'application/json',
+      },
+      timeout: this.timeout(),
+    });
+  }
+
+  reloadlyUtilitiesClient(accessToken: string): AxiosInstance {
+    return axios.create({
+      baseURL: this.baseUrl(
+        'RELOADLY_UTILITIES_BASE_URL',
+        'https://utilities-sandbox.reloadly.com',
+      ),
+      headers: {
+        Authorization: `Bearer ${accessToken}`,
+        Accept: 'application/com.reloadly.utilities-v1+json',
+        'Content-Type': 'application/json',
+      },
+      timeout: this.timeout(),
+    });
+  }
+
+  reloadlyAuthClient(): AxiosInstance {
+    return axios.create({
+      baseURL: this.baseUrl('RELOADLY_AUTH_URL', 'https://auth.reloadly.com'),
+      headers: { 'Content-Type': 'application/json' },
+      timeout: this.timeout(),
     });
   }
 }

@@ -41,6 +41,7 @@ import {
 } from './vidalpay.controller';
 import { ProviderHttpService } from './provider-http.service';
 import { ProviderStatusService } from './provider-status.service';
+import { SandboxProviderService } from './sandbox-provider.service';
 import { VidalpayService } from './vidalpay.service';
 
 @Global()
@@ -91,6 +92,7 @@ import { VidalpayService } from './vidalpay.service';
     ConfigService,
     ProviderHttpService,
     ProviderStatusService,
+    SandboxProviderService,
     VidalpayService,
   ],
   exports: [ProviderStatusService, VidalpayService],
