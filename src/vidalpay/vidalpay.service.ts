@@ -31,6 +31,7 @@ import { Wallet } from 'src/database/entities/wallet.entity';
 import { TokenType } from 'src/common/enum/token-type.enum';
 import { MailService } from 'src/mail/mail.service';
 import { Currency } from 'src/utils/enums/wallet.enum';
+import { TagIdGenerator } from 'src/utils/tagIdGenerator';
 import {
   BlockedResponse,
   createBlockedResponse,
@@ -91,6 +92,7 @@ export class VidalpayService {
 
   async getCurrentUser(userId: string) {
     const user = await this.findUser(userId);
+    await this.ensureLegacyUserTag(user);
     await this.ensureCustomerWallets(user.id);
     const [wallets, kyc] = await Promise.all([
       this.walletRepository.find({
@@ -726,7 +728,7 @@ export class VidalpayService {
       const operations = manager.getRepository(ProviderOperation);
       const transactions = manager.getRepository(FinancialTransaction);
 
-      const recipient = await users.findOne({ where: { tagId: recipientTag } });
+      const recipient = await this.findUserByTag(users, recipientTag);
       if (!recipient) {
         throw new NotFoundException('Recipient tag was not found');
       }
@@ -864,7 +866,7 @@ export class VidalpayService {
   }
 
   async resolveBeneficiary(tagId: string) {
-    const user = await this.userRepository.findOne({ where: { tagId } });
+    const user = await this.findUserByTag(this.userRepository, tagId);
     if (!user) {
       return { recipient: null, beneficiary: null };
     }
@@ -2237,6 +2239,32 @@ export class VidalpayService {
     return user;
   }
 
+  private normalizeTagLookup(tagId: string): string {
+    return tagId.trim().replace(/^[@$]+/, '').toLowerCase();
+  }
+
+  private async findUserByTag(
+    repository: Repository<User>,
+    tagId: string,
+  ): Promise<User | null> {
+    const normalized = this.normalizeTagLookup(tagId);
+    if (!normalized) return null;
+    return repository
+      .createQueryBuilder('tag_user')
+      .where(
+        `LOWER(REGEXP_REPLACE(TRIM("tag_user"."tagId"), '^[@$]+', '')) = :normalized`,
+        { normalized },
+      )
+      .getOne();
+  }
+
+  private async ensureLegacyUserTag(user: User) {
+    if (this.asString(user.tagId)) return;
+    const tagId = await TagIdGenerator.generateUniqueTagId(this.userRepository);
+    await this.userRepository.update(user.id, { tagId });
+    user.tagId = tagId;
+  }
+
   private async getOrCreateKycProfile(user: User) {
     const existing = await this.kycProfileRepository.findOne({
       where: { userId: user.id },
@@ -2382,9 +2410,8 @@ export class VidalpayService {
     const message = `${candidate?.message ?? ''} ${candidate?.driverError?.message ?? ''}`;
     return (
       code === '42P01' &&
-      new RegExp(`relation ["']?${tableName}["']? does not exist`, 'i').test(
-        message,
-      )
+      message.toLowerCase().includes(tableName.toLowerCase()) &&
+      /relation .* does not exist/i.test(message)
     );
   }
 
