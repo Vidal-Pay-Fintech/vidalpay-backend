@@ -487,7 +487,7 @@ export class VidalpayService {
           region: 'NG',
           provider: 'Reloadly',
           source: 'PROVIDER_SANDBOX',
-          catalog,
+          ...this.normalizeReloadlyCatalog(kind, catalog),
         };
       } catch (error) {
         return {
@@ -1003,7 +1003,7 @@ export class VidalpayService {
   ) {
     await this.findUser(adminUserId);
     const user = await this.findUser(userId);
-    const profile = await this.getOrCreateKycProfile(user);
+    const profile = await this.getKycProfileForSession(user);
     const normalizedReason = this.asString(reason);
 
     profile.status = decision;
@@ -1011,54 +1011,67 @@ export class VidalpayService {
     profile.rejectionReason = decision === 'REJECTED' ? normalizedReason : null;
     profile.capabilities = this.capabilitiesForKycStatus(decision);
     profile.limits = this.defaultLimits(decision);
-    await this.kycProfileRepository.save(profile);
+    if (profile.id) {
+      await this.kycProfileRepository.save(profile);
+    }
     user.kycStatus = decision;
     await this.userRepository.update(userId, { kycStatus: decision });
 
     const auditReference = `kyc_review_${randomUUID()}`;
-    await this.providerOperationRepository.save(
-      this.providerOperationRepository.create({
-        userId,
-        type: 'kyc_admin_review',
-        idempotencyKey: auditReference,
-        reference: auditReference,
-        status: 'APPLIED',
-        provider: 'VidalPay',
-        requestPayload: {
-          decision,
-          reason: normalizedReason,
-          reviewedBy: adminUserId,
-        },
-        metadata: { audit: true, adminUserId, decision },
-      }),
-    );
+    try {
+      await this.providerOperationRepository.save(
+        this.providerOperationRepository.create({
+          userId,
+          type: 'kyc_admin_review',
+          idempotencyKey: auditReference,
+          reference: auditReference,
+          status: 'APPLIED',
+          provider: 'VidalPay',
+          requestPayload: {
+            decision,
+            reason: normalizedReason,
+            reviewedBy: adminUserId,
+          },
+          metadata: { audit: true, adminUserId, decision },
+        }),
+      );
+    } catch (error) {
+      if (!this.isMissingTable(error, 'provider_operation')) throw error;
+    }
 
-    const notification = await this.sendNotificationToUser(userId, {
-      title:
-        decision === 'VERIFIED'
-          ? 'Account verification approved'
-          : decision === 'REJECTED'
-            ? 'More KYC information is required'
-            : 'KYC review update',
-      body:
-        normalizedReason ??
-        (decision === 'VERIFIED'
-          ? 'Your account verification was approved.'
-          : 'Please review your KYC checklist and submit the remaining information.'),
-      category: 'KYC',
-      metadata: { status: decision, reviewedBy: adminUserId },
-    });
+    let notification: AnyRecord = { status: 'STORAGE_UNAVAILABLE' };
+    try {
+      notification = (
+        await this.sendNotificationToUser(userId, {
+          title:
+            decision === 'VERIFIED'
+              ? 'Account verification approved'
+              : decision === 'REJECTED'
+                ? 'More KYC information is required'
+                : 'KYC review update',
+          body:
+            normalizedReason ??
+            (decision === 'VERIFIED'
+              ? 'Your account verification was approved.'
+              : 'Please review your KYC checklist and submit the remaining information.'),
+          category: 'KYC',
+          metadata: { status: decision, reviewedBy: adminUserId },
+        })
+      ).push;
+    } catch (error) {
+      if (!this.isMissingTable(error, 'notification')) throw error;
+    }
 
     return {
       user: this.normalizeAdminUser(user),
       kyc: this.normalizeKycProfile(profile),
-      notification: notification.push,
+      notification,
     };
   }
 
   async startKyc(userId: string) {
     const user = await this.findUser(userId);
-    const profile = await this.getOrCreateKycProfile(user);
+    const profile = await this.getKycProfileForSession(user);
     const region = profile.region ?? this.inferRegion(user);
 
     if (!region) {
@@ -1113,14 +1126,17 @@ export class VidalpayService {
     profile.provider = 'METAMAP';
     profile.status =
       profile.status === 'NOT_STARTED' ? 'IN_PROGRESS' : profile.status;
-    await this.kycProfileRepository.save(profile);
+    if (profile.id) {
+      await this.kycProfileRepository.save(profile);
+    }
+    await this.userRepository.update(userId, { kycStatus: profile.status });
 
     return {
       clientId,
       workflowId,
       metadata: {
         userId,
-        profileId: profile.id,
+        profileId: profile.id ?? null,
         region,
         provider: 'METAMAP',
       },
@@ -1197,9 +1213,14 @@ export class VidalpayService {
         .update(JSON.stringify(payload))
         .digest('hex')}`;
 
-    const existingOperation = await this.providerOperationRepository.findOne({
-      where: { type: 'kyc_webhook', idempotencyKey },
-    });
+    let existingOperation: ProviderOperation | null = null;
+    try {
+      existingOperation = await this.providerOperationRepository.findOne({
+        where: { type: 'kyc_webhook', idempotencyKey },
+      });
+    } catch (error) {
+      if (!this.isMissingTable(error, 'provider_operation')) throw error;
+    }
     if (existingOperation) {
       return {
         received: true,
@@ -1227,7 +1248,7 @@ export class VidalpayService {
     }
 
     const user = await this.findUser(userId);
-    const profile = await this.getOrCreateKycProfile(user);
+    const profile = await this.getKycProfileForSession(user);
     profile.status = status;
     profile.statusMessage = this.asString(payload.message) ?? null;
     profile.rejectionReason = this.asString(payload.rejectionReason) ?? null;
@@ -1237,7 +1258,9 @@ export class VidalpayService {
       this.asString(payload.verificationId) ??
       this.asString(payload.id) ??
       null;
-    await this.kycProfileRepository.save(profile);
+    if (profile.id) {
+      await this.kycProfileRepository.save(profile);
+    }
     await this.userRepository.update(userId, {
       kycStatus: status,
     });
@@ -1245,38 +1268,49 @@ export class VidalpayService {
     const reference = `kyc_webhook_${createHash('sha256')
       .update(idempotencyKey)
       .digest('hex')}`;
-    await this.providerOperationRepository.save(
-      this.providerOperationRepository.create({
-        userId,
-        type: 'kyc_webhook',
-        idempotencyKey,
-        reference,
-        status: 'APPLIED',
-        provider: 'MetaMap',
-        providerReference: profile.providerReference,
-        requestPayload: this.redactPayload(payload),
-        responsePayload: { status, userId },
-        metadata: { status, eventId: eventId ?? null },
-      }),
-    );
+    try {
+      await this.providerOperationRepository.save(
+        this.providerOperationRepository.create({
+          userId,
+          type: 'kyc_webhook',
+          idempotencyKey,
+          reference,
+          status: 'APPLIED',
+          provider: 'MetaMap',
+          providerReference: profile.providerReference,
+          requestPayload: this.redactPayload(payload),
+          responsePayload: { status, userId },
+          metadata: { status, eventId: eventId ?? null },
+        }),
+      );
+    } catch (error) {
+      if (!this.isMissingTable(error, 'provider_operation')) throw error;
+    }
 
-    const notification = await this.sendNotificationToUser(userId, {
-      title: 'KYC status updated',
-      body:
-        status === 'VERIFIED'
-          ? 'Your identity verification was approved.'
-          : status === 'REJECTED' || status === 'FAILED'
-            ? 'Your identity verification needs attention. Review the details and submit the missing information.'
-            : 'Your identity verification is being reviewed.',
-      category: 'KYC',
-      metadata: { kycStatus: status },
-    });
+    let notification: AnyRecord = { status: 'STORAGE_UNAVAILABLE' };
+    try {
+      notification = (
+        await this.sendNotificationToUser(userId, {
+          title: 'KYC status updated',
+          body:
+            status === 'VERIFIED'
+              ? 'Your identity verification was approved.'
+              : status === 'REJECTED' || status === 'FAILED'
+                ? 'Your identity verification needs attention. Review the details and submit the missing information.'
+                : 'Your identity verification is being reviewed.',
+          category: 'KYC',
+          metadata: { kycStatus: status },
+        })
+      ).push;
+    } catch (error) {
+      if (!this.isMissingTable(error, 'notification')) throw error;
+    }
 
     return {
       received: true,
       updated: true,
       status,
-      notification: notification.push,
+      notification,
     };
   }
 
@@ -2667,6 +2701,77 @@ export class VidalpayService {
       );
     }
     return error instanceof Error ? error.message : 'Provider request failed';
+  }
+
+  private normalizeReloadlyCatalog(
+    kind: 'airtime' | 'data' | 'utilities',
+    response: AnyRecord,
+  ) {
+    const content = Array.isArray(response.content)
+      ? response.content
+      : Array.isArray(response.data)
+        ? response.data
+        : [];
+
+    if (kind !== 'utilities') {
+      return {
+        networks: content.map((entry, index) => {
+          const item = this.asRecord(entry) ?? {};
+          return {
+            id: this.asString(item.id) ?? String(item.operatorId ?? index + 1),
+            code:
+              this.asString(item.operatorCode) ??
+              this.asString(item.name) ??
+              `operator-${index + 1}`,
+            name: this.asString(item.name) ?? `Operator ${index + 1}`,
+            countryCode: this.asString(item.countryCode) ?? 'NG',
+            denominationType: this.asString(item.denominationType),
+            minAmount: item.minAmount ?? item.minAmountLocal ?? null,
+            maxAmount: item.maxAmount ?? item.maxAmountLocal ?? null,
+            bundles:
+              kind === 'data' && Array.isArray(item.fixedAmountsDescriptions)
+                ? item.fixedAmountsDescriptions
+                : Array.isArray(item.bundles)
+                  ? item.bundles
+                  : [],
+            metadata: this.redactPayload(item),
+          };
+        }),
+      };
+    }
+
+    const categories = new Map<string, AnyRecord>();
+    content.forEach((entry, index) => {
+      const biller = this.asRecord(entry) ?? {};
+      const categoryRecord = this.asRecord(biller.category) ?? {};
+      const categoryCode =
+        this.asString(categoryRecord.code) ??
+        this.asString(categoryRecord.name) ??
+        this.asString(biller.type) ??
+        'utilities';
+      const existing = categories.get(categoryCode) ?? {
+        id: categoryCode,
+        code: categoryCode,
+        title:
+          this.asString(categoryRecord.name) ??
+          this.asString(biller.type) ??
+          'Utilities',
+        description: '',
+        providers: [],
+      };
+      (existing.providers as AnyRecord[]).push({
+        id: this.asString(biller.id) ?? String(index + 1),
+        code:
+          this.asString(biller.serviceType) ??
+          this.asString(biller.id) ??
+          String(index + 1),
+        name: this.asString(biller.name) ?? `Biller ${index + 1}`,
+        title: this.asString(biller.name) ?? `Biller ${index + 1}`,
+        metadata: this.redactPayload(biller),
+      });
+      categories.set(categoryCode, existing);
+    });
+    return { categories: [...categories.values()] };
   }
 
   private async recordBlockedOperation(

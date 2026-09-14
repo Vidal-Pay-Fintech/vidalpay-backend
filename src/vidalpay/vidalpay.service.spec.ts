@@ -52,6 +52,7 @@ describe('VidalpayService', () => {
     validateReloadlyUtility: jest.Mock;
     purchaseReloadly: jest.Mock;
   };
+  let configService: { get: jest.Mock };
   let providerStatusService: jest.Mocked<
     Pick<
       ProviderStatusService,
@@ -94,6 +95,7 @@ describe('VidalpayService', () => {
       validateReloadlyUtility: jest.fn(),
       purchaseReloadly: jest.fn(),
     };
+    configService = { get: jest.fn() };
 
     service = new VidalpayService(
       userRepository as any,
@@ -113,7 +115,7 @@ describe('VidalpayService', () => {
       disputeRepository as any,
       providerStatusService as any,
       sandboxProviderService as any,
-      { get: jest.fn() } as unknown as ConfigService,
+      configService as unknown as ConfigService,
       {} as any,
       {} as DataSource,
     );
@@ -283,6 +285,76 @@ describe('VidalpayService', () => {
         region: 'NG',
         storageStatus: 'LEGACY_FALLBACK',
         persistent: false,
+      }),
+    );
+  });
+
+  it('starts MetaMap using the existing user record when KYC profile storage is absent', async () => {
+    userRepository.findOne.mockResolvedValue({
+      id: 'legacy-user',
+      kycStatus: 'NOT_STARTED',
+      countryCode: 'NG',
+    });
+    kycProfileRepository.findOne.mockRejectedValue(
+      Object.assign(new Error('relation "kyc_profile" does not exist'), {
+        code: '42P01',
+      }),
+    );
+    configService.get.mockImplementation(
+      (key: string) =>
+        ({
+          METAMAP_CLIENT_ID: 'metamap-client',
+          METAMAP_WORKFLOW_ID: 'metamap-workflow',
+        })[key],
+    );
+
+    await expect(service.startKyc('legacy-user')).resolves.toEqual(
+      expect.objectContaining({
+        clientId: 'metamap-client',
+        workflowId: 'metamap-workflow',
+        metadata: expect.objectContaining({
+          userId: 'legacy-user',
+          profileId: null,
+          region: 'NG',
+        }),
+      }),
+    );
+    expect(userRepository.update).toHaveBeenCalledWith('legacy-user', {
+      kycStatus: 'IN_PROGRESS',
+    });
+    expect(kycProfileRepository.save).not.toHaveBeenCalled();
+  });
+
+  it('normalizes Reloadly utility billers into mobile categories', async () => {
+    userRepository.findOne.mockResolvedValue({
+      id: 'user-1',
+      countryCode: 'NG',
+    });
+    configService.get.mockImplementation((key: string) =>
+      key === 'RELOADLY_CLIENT_ID' || key === 'RELOADLY_CLIENT_SECRET'
+        ? 'configured'
+        : undefined,
+    );
+    sandboxProviderService.getReloadlyCatalog.mockResolvedValue({
+      content: [
+        {
+          id: 44,
+          name: 'Test Electricity',
+          serviceType: 'electricity-test',
+          category: { name: 'Electricity', code: 'electricity' },
+        },
+      ],
+    });
+
+    await expect(service.getCatalog('user-1', 'utilities')).resolves.toEqual(
+      expect.objectContaining({
+        provider: 'Reloadly',
+        categories: [
+          expect.objectContaining({
+            code: 'electricity',
+            providers: [expect.objectContaining({ code: 'electricity-test' })],
+          }),
+        ],
       }),
     );
   });
