@@ -37,9 +37,33 @@ Use the inventory to identify the actual source tables for users, wallets, trans
 
 The merge script must default to dry-run mode and report source rows, insertable rows, duplicates, unresolved users or wallets, currency conflicts, and invalid references. It must not overwrite a current record when an identifier or provider reference conflicts.
 
+Create a reviewed mapping file from the template:
+
+```sh
+cp docs/legacy-restore-mapping.example.json legacy-restore-mapping.json
+```
+
+Edit `legacy-restore-mapping.json` so each `sourceTable` and `columnMap` matches the actual tables shown in `legacy-restore-plan.json`.
+
+Run a dry-run restore report:
+
+```sh
+npm run db:restore-legacy -- --mapping legacy-restore-mapping.json > legacy-restore-dry-run.json
+```
+
+The dry run reports source rows, candidate rows, already-existing rows, validation errors, and unresolved user IDs. It does not write data.
+
 ## 4. Apply safely
 
 Before applying the reviewed mapping, create a Render PostgreSQL backup or recovery point. Execute the merge in one database transaction with an advisory lock and idempotent conflict handling. Preserve legacy identifiers and source-table provenance where the current schema permits it.
+
+After the dry run has no validation errors and no unresolved users, apply the restore:
+
+```sh
+npm run db:restore-legacy -- --mapping legacy-restore-mapping.json --apply > legacy-restore-apply.json
+```
+
+The apply mode inserts history records with `ON CONFLICT DO NOTHING`. It does not recompute wallet balances or overwrite existing current records.
 
 ## 5. Reconcile
 

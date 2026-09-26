@@ -16,6 +16,7 @@
     "db:migrate": "node -e \"console.log('Production database migrations are intentionally skipped; start the existing database with npm run start:prod.')\"",
     "db:audit-legacy": "node scripts/audit-legacy-data.js",
     "db:plan-legacy-restore": "node scripts/plan-legacy-restore.js",
+    "db:restore-legacy": "node scripts/restore-legacy-data.js",
     "lint": "eslint \"{src,apps,libs,test}/**/*.ts\" --fix",
     "test": "jest",
     "test:watch": "jest --watch",
