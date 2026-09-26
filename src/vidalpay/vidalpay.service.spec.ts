@@ -6,6 +6,7 @@ import { AccountStatus } from 'src/database/entities/user.entity';
 import { VidalpayService } from './vidalpay.service';
 import { ProviderStatusService } from './provider-status.service';
 import { Currency } from 'src/utils/enums/wallet.enum';
+import { TagIdGenerator } from 'src/utils/tagIdGenerator';
 
 const repo = () => ({
   find: jest.fn(),
@@ -245,6 +246,7 @@ describe('VidalpayService', () => {
       isPhoneVerified: false,
       kycStatus: 'NOT_STARTED',
       countryCode: 'US',
+      tagId: '$LEGACY001',
     });
     walletRepository.find.mockResolvedValue([]);
     kycProfileRepository.findOne.mockRejectedValue(
@@ -323,6 +325,110 @@ describe('VidalpayService', () => {
       kycStatus: 'IN_PROGRESS',
     });
     expect(kycProfileRepository.save).not.toHaveBeenCalled();
+  });
+
+  it('starts MetaMap when Postgres reports a schema-qualified missing KYC table', async () => {
+    userRepository.findOne.mockResolvedValue({
+      id: 'legacy-user',
+      kycStatus: 'NOT_STARTED',
+      countryCode: 'NG',
+    });
+    kycProfileRepository.findOne.mockRejectedValue(
+      Object.assign(new Error('relation "public.kyc_profile" does not exist'), {
+        code: '42P01',
+      }),
+    );
+    configService.get.mockImplementation(
+      (key: string) =>
+        ({
+          METAMAP_CLIENT_ID: 'metamap-client',
+          METAMAP_WORKFLOW_ID: 'metamap-workflow',
+        })[key],
+    );
+
+    await expect(service.startKyc('legacy-user')).resolves.toEqual(
+      expect.objectContaining({
+        metadata: expect.objectContaining({
+          userId: 'legacy-user',
+          profileId: null,
+          region: 'NG',
+        }),
+      }),
+    );
+    expect(kycProfileRepository.save).not.toHaveBeenCalled();
+  });
+
+  it('assigns a missing TAG to an existing user during session restoration', async () => {
+    const tagSpy = jest
+      .spyOn(TagIdGenerator, 'generateUniqueTagId')
+      .mockResolvedValue('$ABC123456');
+    userRepository.findOne.mockResolvedValue({
+      id: 'legacy-user',
+      email: 'legacy@example.com',
+      kycStatus: 'NOT_STARTED',
+      countryCode: 'NG',
+    });
+    walletRepository.find.mockResolvedValue([]);
+    kycProfileRepository.findOne.mockRejectedValue(
+      Object.assign(new Error('relation "kyc_profile" does not exist'), {
+        code: '42P01',
+      }),
+    );
+
+    await expect(service.getCurrentUser('legacy-user')).resolves.toEqual(
+      expect.objectContaining({ tagId: '$ABC123456' }),
+    );
+    expect(userRepository.update).toHaveBeenCalledWith('legacy-user', {
+      tagId: '$ABC123456',
+    });
+    tagSpy.mockRestore();
+  });
+
+  it('resolves TAG beneficiaries regardless of mobile @/$ prefixes or case', async () => {
+    const where = jest.fn().mockReturnThis();
+    const getOne = jest.fn().mockResolvedValue({
+      id: 'recipient-1',
+      firstName: 'Ada',
+      lastName: 'Lovelace',
+      tagId: '$AbC123456',
+    });
+    userRepository.createQueryBuilder.mockReturnValue({ where, getOne });
+
+    await expect(service.resolveBeneficiary('@$abc123456')).resolves.toEqual(
+      expect.objectContaining({
+        recipient: expect.objectContaining({
+          id: 'recipient-1',
+          tagId: '$AbC123456',
+        }),
+      }),
+    );
+    expect(where).toHaveBeenCalledWith(expect.any(String), {
+      normalized: 'abc123456',
+    });
+  });
+
+  it('reports internal transfer storage unavailable when operation storage is absent', async () => {
+    providerOperationRepository.findOne.mockRejectedValue(
+      Object.assign(
+        new Error('relation "public.provider_operation" does not exist'),
+        { code: '42P01' },
+      ),
+    );
+
+    await expect(
+      service.internalTransfer('user-1', {
+        currency: Currency.NGN,
+        amount: 100,
+        recipientTag: '@$abc123456',
+        idempotencyKey: 'transfer-1',
+        pin: '1234',
+      }),
+    ).rejects.toMatchObject({
+      response: expect.objectContaining({
+        code: 'FEATURE_STORAGE_UNAVAILABLE',
+        feature: 'internal transfers',
+      }),
+    });
   });
 
   it('normalizes Reloadly utility billers into mobile categories', async () => {
@@ -655,6 +761,7 @@ describe('VidalpayService', () => {
 
   it.each([
     ['IN_PROGRESS', [], 2, 'KYC_STARTED'],
+    ['RETRY_REQUIRED', [], 2, 'KYC_ACTION_REQUIRED'],
     [
       'IN_PROGRESS',
       [{ section: 'GOVERNMENT_ID', status: 'SUBMITTED' }],
@@ -786,6 +893,75 @@ describe('VidalpayService', () => {
         metadata: expect.objectContaining({
           adminUserId: 'admin-1',
           decision: 'VERIFIED',
+        }),
+      }),
+    );
+  });
+
+  it('lets admins request more KYC information and exposes action-required status to mobile', async () => {
+    const targetUser = { id: 'user-1', kycStatus: 'UNDER_REVIEW' };
+    userRepository.findOne
+      .mockResolvedValueOnce({ id: 'admin-1' })
+      .mockResolvedValue(targetUser);
+    kycProfileRepository.findOne.mockResolvedValue({
+      id: 'kyc-1',
+      userId: 'user-1',
+      status: 'UNDER_REVIEW',
+      region: 'NG',
+      capabilities: {},
+      limits: {},
+      sections: [
+        { section: 'GOVERNMENT_ID', status: 'SUBMITTED', completed: true },
+        { section: 'ADDRESS', status: 'SUBMITTED', completed: true },
+        { section: 'LIVENESS', status: 'SUBMITTED', completed: true },
+      ],
+      identity: {},
+    });
+    notificationPreferenceRepository.findOne.mockResolvedValue({
+      userId: 'user-1',
+      preferences: { push: false },
+    });
+    notificationDeviceRepository.find.mockResolvedValue([]);
+    notificationRepository.find.mockResolvedValue([]);
+
+    const result = await service.requestKycInformation('admin-1', 'user-1', {
+      reason: 'Proof of address is unclear',
+      missingRequirements: ['proof of address', 'liveness-check'],
+      message: 'Please upload a clearer proof of address.',
+    });
+
+    expect(result).toEqual(
+      expect.objectContaining({
+        status: 'ACTION_REQUIRED',
+        kycStatus: 'RETRY_REQUIRED',
+        accountLevel: 2,
+        missingRequirements: ['proof_of_address', 'liveness_check'],
+      }),
+    );
+    expect(userRepository.update).toHaveBeenCalledWith('user-1', {
+      kycStatus: 'RETRY_REQUIRED',
+    });
+    expect(kycProfileRepository.save).toHaveBeenCalledWith(
+      expect.objectContaining({
+        status: 'RETRY_REQUIRED',
+        statusMessage: 'Please upload a clearer proof of address.',
+        rejectionReason: 'Proof of address is unclear',
+        identity: expect.objectContaining({
+          missingRequirements: ['proof_of_address', 'liveness_check'],
+          actionRequired: expect.objectContaining({
+            required: true,
+            status: 'RETRY_REQUIRED',
+          }),
+        }),
+        limits: expect.objectContaining({ accountProgressLevel: 2 }),
+      }),
+    );
+    expect(providerOperationRepository.save).toHaveBeenCalledWith(
+      expect.objectContaining({
+        type: 'kyc_admin_review',
+        requestPayload: expect.objectContaining({
+          decision: 'RETRY_REQUIRED',
+          missingRequirements: ['proof_of_address', 'liveness_check'],
         }),
       }),
     );

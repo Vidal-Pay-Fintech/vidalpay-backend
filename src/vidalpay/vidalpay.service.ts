@@ -713,144 +713,163 @@ export class VidalpayService {
       throw new BadRequestException('pin is required');
     }
 
-    const existing = await this.providerOperationRepository.findOne({
-      where: { userId, type: 'internal_transfer', idempotencyKey },
-    });
+    let existing: ProviderOperation | null = null;
+    try {
+      existing = await this.providerOperationRepository.findOne({
+        where: { userId, type: 'internal_transfer', idempotencyKey },
+      });
+    } catch (error) {
+      this.throwMissingFeatureStorage(
+        error,
+        'internal transfers',
+        'provider_operation',
+      );
+    }
     if (existing) {
       return this.normalizeOperation(existing);
     }
 
     await this.assertTransactionPin(userId, pin);
 
-    return this.dataSource.transaction(async (manager) => {
-      const users = manager.getRepository(User);
-      const wallets = manager.getRepository(Wallet);
-      const operations = manager.getRepository(ProviderOperation);
-      const transactions = manager.getRepository(FinancialTransaction);
+    try {
+      return await this.dataSource.transaction(async (manager) => {
+        const users = manager.getRepository(User);
+        const wallets = manager.getRepository(Wallet);
+        const operations = manager.getRepository(ProviderOperation);
+        const transactions = manager.getRepository(FinancialTransaction);
 
-      const recipient = await this.findUserByTag(users, recipientTag);
-      if (!recipient) {
-        throw new NotFoundException('Recipient tag was not found');
-      }
-      if (recipient.id === userId) {
-        throw new BadRequestException('You cannot transfer to your own tag');
-      }
-
-      // Lock both currency-specific wallet rows in deterministic user-id order.
-      // This prevents concurrent retries/transfers from spending the same
-      // balance and avoids opposite-direction transfers deadlocking each other.
-      const walletOwners = [userId, recipient.id].sort();
-      const lockedWallets = new Map<string, Wallet>();
-      for (const ownerId of walletOwners) {
-        const wallet = await wallets
-          .createQueryBuilder('wallet')
-          .setLock('pessimistic_write')
-          .where('wallet.userId = :ownerId', { ownerId })
-          .andWhere('wallet.currency = :currency', { currency })
-          .getOne();
-        if (wallet) {
-          lockedWallets.set(ownerId, wallet);
+        const recipient = await this.findUserByTag(users, recipientTag);
+        if (!recipient) {
+          throw new NotFoundException('Recipient tag was not found');
         }
-      }
+        if (recipient.id === userId) {
+          throw new BadRequestException('You cannot transfer to your own tag');
+        }
 
-      const operationAfterLock = await operations.findOne({
-        where: { userId, type: 'internal_transfer', idempotencyKey },
-      });
-      if (operationAfterLock) {
-        return this.normalizeOperation(operationAfterLock);
-      }
+        // Lock both currency-specific wallet rows in deterministic user-id order.
+        // This prevents concurrent retries/transfers from spending the same
+        // balance and avoids opposite-direction transfers deadlocking each other.
+        const walletOwners = [userId, recipient.id].sort();
+        const lockedWallets = new Map<string, Wallet>();
+        for (const ownerId of walletOwners) {
+          const wallet = await wallets
+            .createQueryBuilder('wallet')
+            .setLock('pessimistic_write')
+            .where('wallet.userId = :ownerId', { ownerId })
+            .andWhere('wallet.currency = :currency', { currency })
+            .getOne();
+          if (wallet) {
+            lockedWallets.set(ownerId, wallet);
+          }
+        }
 
-      const senderWallet = lockedWallets.get(userId);
-      const recipientWallet = lockedWallets.get(recipient.id);
+        const operationAfterLock = await operations.findOne({
+          where: { userId, type: 'internal_transfer', idempotencyKey },
+        });
+        if (operationAfterLock) {
+          return this.normalizeOperation(operationAfterLock);
+        }
 
-      if (!senderWallet || !recipientWallet) {
-        throw new BadRequestException(
-          `Both users must have a ${currency} wallet`,
+        const senderWallet = lockedWallets.get(userId);
+        const recipientWallet = lockedWallets.get(recipient.id);
+
+        if (!senderWallet || !recipientWallet) {
+          throw new BadRequestException(
+            `Both users must have a ${currency} wallet`,
+          );
+        }
+        if (Number(senderWallet.balance ?? 0) < amount) {
+          throw new PreconditionFailedException('Insufficient wallet balance');
+        }
+
+        const reference = idempotencyKey;
+        const senderBefore = Number(senderWallet.balance ?? 0);
+        const recipientBefore = Number(recipientWallet.balance ?? 0);
+        senderWallet.balance = this.roundMoney(senderBefore - amount);
+        senderWallet.availableBalance = senderWallet.balance;
+        senderWallet.ledgerBalance = senderWallet.balance;
+        recipientWallet.balance = this.roundMoney(recipientBefore + amount);
+        recipientWallet.availableBalance = recipientWallet.balance;
+        recipientWallet.ledgerBalance = recipientWallet.balance;
+
+        await wallets.save([senderWallet, recipientWallet]);
+
+        const operation = await operations.save(
+          operations.create({
+            userId,
+            type: 'internal_transfer',
+            idempotencyKey,
+            reference,
+            status: 'SUCCESS',
+            amount,
+            currency,
+            provider: 'VidalPay',
+            providerReference: reference,
+            requestPayload: this.redactPayload(payload),
+            responsePayload: {
+              senderWalletId: senderWallet.id,
+              recipientWalletId: recipientWallet.id,
+              recipientUserId: recipient.id,
+            },
+            metadata: {
+              recipientTag,
+              note: this.asString(payload.note) ?? null,
+            },
+          }),
         );
-      }
-      if (Number(senderWallet.balance ?? 0) < amount) {
-        throw new PreconditionFailedException('Insufficient wallet balance');
-      }
 
-      const reference = idempotencyKey;
-      const senderBefore = Number(senderWallet.balance ?? 0);
-      const recipientBefore = Number(recipientWallet.balance ?? 0);
-      senderWallet.balance = this.roundMoney(senderBefore - amount);
-      senderWallet.availableBalance = senderWallet.balance;
-      senderWallet.ledgerBalance = senderWallet.balance;
-      recipientWallet.balance = this.roundMoney(recipientBefore + amount);
-      recipientWallet.availableBalance = recipientWallet.balance;
-      recipientWallet.ledgerBalance = recipientWallet.balance;
+        await transactions.save([
+          transactions.create({
+            userId,
+            walletId: senderWallet.id,
+            reference: `${reference}_debit`,
+            operationReference: reference,
+            currency,
+            amount,
+            balanceBefore: senderBefore,
+            balanceAfter: senderWallet.balance,
+            type: 'debit',
+            status: 'SUCCESS',
+            info: 'TAG transfer',
+            description: `Transfer to ${recipientTag}`,
+            tag: 'internal_transfer',
+            provider: 'VidalPay',
+            providerReference: reference,
+            idempotencyKey,
+            metadata: { recipientTag },
+          }),
+          transactions.create({
+            userId: recipient.id,
+            walletId: recipientWallet.id,
+            reference: `${reference}_credit`,
+            operationReference: reference,
+            currency,
+            amount,
+            balanceBefore: recipientBefore,
+            balanceAfter: recipientWallet.balance,
+            type: 'credit',
+            status: 'SUCCESS',
+            info: 'TAG transfer',
+            description: 'Transfer received',
+            tag: 'internal_transfer',
+            provider: 'VidalPay',
+            providerReference: reference,
+            idempotencyKey,
+            metadata: { senderUserId: userId },
+          }),
+        ]);
 
-      await wallets.save([senderWallet, recipientWallet]);
-
-      const operation = await operations.save(
-        operations.create({
-          userId,
-          type: 'internal_transfer',
-          idempotencyKey,
-          reference,
-          status: 'SUCCESS',
-          amount,
-          currency,
-          provider: 'VidalPay',
-          providerReference: reference,
-          requestPayload: this.redactPayload(payload),
-          responsePayload: {
-            senderWalletId: senderWallet.id,
-            recipientWalletId: recipientWallet.id,
-            recipientUserId: recipient.id,
-          },
-          metadata: {
-            recipientTag,
-            note: this.asString(payload.note) ?? null,
-          },
-        }),
+        return this.normalizeOperation(operation);
+      });
+    } catch (error) {
+      this.throwMissingFeatureStorage(
+        error,
+        'internal transfers',
+        this.isMissingTable(error, 'financial_transaction')
+          ? 'financial_transaction'
+          : 'provider_operation',
       );
-
-      await transactions.save([
-        transactions.create({
-          userId,
-          walletId: senderWallet.id,
-          reference: `${reference}_debit`,
-          operationReference: reference,
-          currency,
-          amount,
-          balanceBefore: senderBefore,
-          balanceAfter: senderWallet.balance,
-          type: 'debit',
-          status: 'SUCCESS',
-          info: 'TAG transfer',
-          description: `Transfer to ${recipientTag}`,
-          tag: 'internal_transfer',
-          provider: 'VidalPay',
-          providerReference: reference,
-          idempotencyKey,
-          metadata: { recipientTag },
-        }),
-        transactions.create({
-          userId: recipient.id,
-          walletId: recipientWallet.id,
-          reference: `${reference}_credit`,
-          operationReference: reference,
-          currency,
-          amount,
-          balanceBefore: recipientBefore,
-          balanceAfter: recipientWallet.balance,
-          type: 'credit',
-          status: 'SUCCESS',
-          info: 'TAG transfer',
-          description: 'Transfer received',
-          tag: 'internal_transfer',
-          provider: 'VidalPay',
-          providerReference: reference,
-          idempotencyKey,
-          metadata: { senderUserId: userId },
-        }),
-      ]);
-
-      return this.normalizeOperation(operation);
-    });
+    }
   }
 
   async getBeneficiaries(userId: string) {
@@ -1000,19 +1019,50 @@ export class VidalpayService {
   async reviewKyc(
     adminUserId: string,
     userId: string,
-    decision: 'VERIFIED' | 'REJECTED' | 'IN_PROGRESS',
+    decision: 'VERIFIED' | 'REJECTED' | 'IN_PROGRESS' | 'RETRY_REQUIRED',
     reason?: string,
+    options: {
+      missingRequirements?: string[];
+      message?: string;
+      actionRequired?: boolean;
+    } = {},
   ) {
     await this.findUser(adminUserId);
     const user = await this.findUser(userId);
     const profile = await this.getKycProfileForSession(user);
     const normalizedReason = this.asString(reason);
+    const statusMessage =
+      this.asString(options.message) ??
+      normalizedReason ??
+      (decision === 'RETRY_REQUIRED'
+        ? 'Additional KYC information is required.'
+        : null);
+    const missingRequirements = this.normalizeStringList(
+      options.missingRequirements,
+    );
 
     profile.status = decision;
-    profile.statusMessage = normalizedReason;
-    profile.rejectionReason = decision === 'REJECTED' ? normalizedReason : null;
+    profile.statusMessage = statusMessage;
+    profile.rejectionReason =
+      decision === 'REJECTED' || decision === 'RETRY_REQUIRED'
+        ? (normalizedReason ?? statusMessage)
+        : null;
     profile.capabilities = this.capabilitiesForKycStatus(decision);
     profile.limits = this.defaultLimits(decision);
+    profile.identity = this.mergeKycIdentityAction(profile.identity, {
+      actionRequired: options.actionRequired ?? decision === 'RETRY_REQUIRED',
+      missingRequirements,
+      message: statusMessage,
+      reviewedBy: adminUserId,
+      reviewedAt: new Date().toISOString(),
+      status: decision,
+    });
+    profile.sections = this.markMissingKycSections(
+      profile.sections,
+      profile.region,
+      missingRequirements,
+      decision,
+    );
     if (profile.id) {
       await this.kycProfileRepository.save(profile);
     }
@@ -1032,9 +1082,16 @@ export class VidalpayService {
           requestPayload: {
             decision,
             reason: normalizedReason,
+            message: statusMessage,
+            missingRequirements,
             reviewedBy: adminUserId,
           },
-          metadata: { audit: true, adminUserId, decision },
+          metadata: {
+            audit: true,
+            adminUserId,
+            decision,
+            missingRequirements,
+          },
         }),
       );
     } catch (error) {
@@ -1048,16 +1105,22 @@ export class VidalpayService {
           title:
             decision === 'VERIFIED'
               ? 'Account verification approved'
-              : decision === 'REJECTED'
+              : decision === 'REJECTED' || decision === 'RETRY_REQUIRED'
                 ? 'More KYC information is required'
                 : 'KYC review update',
           body:
-            normalizedReason ??
+            statusMessage ??
             (decision === 'VERIFIED'
               ? 'Your account verification was approved.'
               : 'Please review your KYC checklist and submit the remaining information.'),
           category: 'KYC',
-          metadata: { status: decision, reviewedBy: adminUserId },
+          metadata: {
+            status: decision,
+            reviewedBy: adminUserId,
+            missingRequirements,
+            screen: 'KYC',
+            actionRequired: decision === 'RETRY_REQUIRED',
+          },
         })
       ).push;
     } catch (error) {
@@ -1068,6 +1131,44 @@ export class VidalpayService {
       user: this.normalizeAdminUser(user),
       kyc: this.normalizeKycProfile(profile),
       notification,
+    };
+  }
+
+  async requestKycInformation(
+    adminUserId: string,
+    userId: string,
+    payload: AnyRecord,
+  ) {
+    const reason =
+      this.asString(payload.reason) ??
+      this.asString(payload.message) ??
+      'Additional KYC information is required.';
+    const missingRequirements = this.normalizeStringList(
+      Array.isArray(payload.missingRequirements)
+        ? payload.missingRequirements
+        : Array.isArray(payload.requirements)
+          ? payload.requirements
+          : undefined,
+    );
+    const result = await this.reviewKyc(
+      adminUserId,
+      userId,
+      'RETRY_REQUIRED',
+      reason,
+      {
+        missingRequirements,
+        message: this.asString(payload.message) ?? reason,
+        actionRequired: true,
+      },
+    );
+
+    return {
+      ...result,
+      status: 'ACTION_REQUIRED',
+      kycStatus: 'RETRY_REQUIRED',
+      accountLevel: result.kyc?.limits?.accountProgressLevel ?? 2,
+      message: 'Additional KYC information has been requested.',
+      missingRequirements,
     };
   }
 
@@ -2240,7 +2341,10 @@ export class VidalpayService {
   }
 
   private normalizeTagLookup(tagId: string): string {
-    return tagId.trim().replace(/^[@$]+/, '').toLowerCase();
+    return tagId
+      .trim()
+      .replace(/^[@$]+/, '')
+      .toLowerCase();
   }
 
   private async findUserByTag(
@@ -2249,8 +2353,12 @@ export class VidalpayService {
   ): Promise<User | null> {
     const normalized = this.normalizeTagLookup(tagId);
     if (!normalized) return null;
-    return repository
-      .createQueryBuilder('tag_user')
+    const builder = repository.createQueryBuilder('tag_user');
+    if (typeof builder?.where !== 'function') {
+      return repository.findOne({ where: { tagId } });
+    }
+
+    return builder
       .where(
         `LOWER(REGEXP_REPLACE(TRIM("tag_user"."tagId"), '^[@$]+', '')) = :normalized`,
         { normalized },
@@ -2514,6 +2622,23 @@ export class VidalpayService {
   }
 
   private normalizeKycProfile(profile: KycProfile) {
+    const identity = profile.identity ?? {};
+    const actionRequired =
+      this.asRecord(identity.actionRequired) ??
+      (identity.actionRequired === true
+        ? {
+            required: true,
+            missingRequirements: [],
+            message: profile.statusMessage,
+          }
+        : null);
+    const missingRequirements = this.normalizeStringList(
+      Array.isArray(actionRequired?.missingRequirements)
+        ? actionRequired.missingRequirements
+        : Array.isArray(identity.missingRequirements)
+          ? identity.missingRequirements
+          : [],
+    );
     return {
       id: profile.id,
       region: profile.region,
@@ -2522,6 +2647,8 @@ export class VidalpayService {
       status: profile.status,
       statusMessage: profile.statusMessage,
       rejectionReason: profile.rejectionReason,
+      actionRequired: profile.status === 'RETRY_REQUIRED',
+      missingRequirements,
       sections:
         profile.sections ??
         this.defaultKycSections(profile.region, profile.status),
@@ -2529,7 +2656,7 @@ export class VidalpayService {
       capabilities:
         profile.capabilities ?? this.capabilitiesForKycStatus(profile.status),
       limits: profile.limits ?? this.defaultLimits(profile.status),
-      identity: profile.identity ?? {},
+      identity,
       providerReference: profile.providerReference,
       createdAt: profile.createdAt,
       updatedAt: profile.updatedAt,
@@ -2551,12 +2678,12 @@ export class VidalpayService {
       : submittedSections > 0 ||
           ['SUBMITTED', 'UNDER_REVIEW', 'MANUAL_REVIEW'].includes(kycStatus)
         ? 3
-        : kycStatus === 'IN_PROGRESS'
+        : ['IN_PROGRESS', 'RETRY_REQUIRED'].includes(kycStatus)
           ? 2
           : 1;
     const codeByRank: Record<number, string> = {
       1: 'ACCOUNT_CREATED',
-      2: 'KYC_STARTED',
+      2: kycStatus === 'RETRY_REQUIRED' ? 'KYC_ACTION_REQUIRED' : 'KYC_STARTED',
       3: 'KYC_DOCUMENTS_SUBMITTED',
       4: 'KYC_VERIFIED',
     };
@@ -2572,6 +2699,22 @@ export class VidalpayService {
     if (!verified) {
       requirements.push('COMPLETE_KYC');
     }
+    const normalizedMissingRequirements = this.normalizeStringList(
+      Array.isArray((kyc.identity ?? {}).missingRequirements)
+        ? ((kyc.identity ?? {}).missingRequirements as unknown[])
+        : Array.isArray(
+              this.asRecord((kyc.identity ?? {}).actionRequired)
+                ?.missingRequirements,
+            )
+          ? (this.asRecord((kyc.identity ?? {}).actionRequired)
+              ?.missingRequirements as unknown[])
+          : [],
+    );
+    normalizedMissingRequirements.forEach((requirement) => {
+      if (!requirements.includes(requirement)) {
+        requirements.push(requirement);
+      }
+    });
 
     return {
       code: level,
@@ -2586,11 +2729,16 @@ export class VidalpayService {
       emailVerified,
       phoneVerified,
       requirements,
+      missingRequirements: normalizedMissingRequirements,
+      actionRequired: kycStatus === 'RETRY_REQUIRED',
       capabilities: this.capabilitiesForKycStatus(kycStatus),
       limits: kyc.limits ?? this.defaultLimits(kycStatus),
       message: verified
         ? 'KYC is verified. Provider-specific limits still depend on live provider provisioning.'
-        : 'Complete verification requirements to unlock bank transfers and provider-backed features.',
+        : kycStatus === 'RETRY_REQUIRED'
+          ? (kyc.statusMessage ??
+            'More information is required to continue verification.')
+          : 'Complete verification requirements to unlock bank transfers and provider-backed features.',
     };
   }
 
@@ -2915,6 +3063,92 @@ export class VidalpayService {
       : null;
   }
 
+  private normalizeStringList(values?: unknown[] | null): string[] {
+    if (!Array.isArray(values)) {
+      return [];
+    }
+    return [
+      ...new Set(
+        values
+          .map((value) => this.asString(value))
+          .filter((value): value is string => Boolean(value))
+          .map((value) =>
+            value
+              .trim()
+              .replace(/[\s-]+/g, '_')
+              .replace(/[^a-zA-Z0-9_]/g, '')
+              .toLowerCase(),
+          )
+          .filter(Boolean),
+      ),
+    ];
+  }
+
+  private mergeKycIdentityAction(
+    identity: Record<string, unknown> | null,
+    action: {
+      actionRequired: boolean;
+      missingRequirements: string[];
+      message: string | null;
+      reviewedBy: string;
+      reviewedAt: string;
+      status: string;
+    },
+  ) {
+    const existing = this.asRecord(identity) ?? {};
+    return {
+      ...existing,
+      missingRequirements: action.missingRequirements,
+      actionRequired: {
+        required: action.actionRequired,
+        missingRequirements: action.missingRequirements,
+        message: action.message,
+        reviewedBy: action.reviewedBy,
+        reviewedAt: action.reviewedAt,
+        status: action.status,
+      },
+    };
+  }
+
+  private markMissingKycSections(
+    sections: AnyRecord[] | null,
+    region: string | null,
+    missingRequirements: string[],
+    status: string,
+  ) {
+    const current = sections?.length
+      ? sections
+      : this.defaultKycSections(region, 'NOT_STARTED');
+    if (status !== 'RETRY_REQUIRED' || missingRequirements.length === 0) {
+      return current;
+    }
+
+    return current.map((section) => {
+      const sectionKey = this.asString(section.section)?.toLowerCase();
+      const requested = missingRequirements.some((requirement) => {
+        if (!sectionKey) return false;
+        if (requirement.includes(sectionKey)) return true;
+        return (
+          (sectionKey === 'government_id' &&
+            ['government_id', 'identity', 'id', 'nin', 'bvn', 'ssn'].some(
+              (key) => requirement.includes(key),
+            )) ||
+          (sectionKey === 'address' && requirement.includes('address')) ||
+          (sectionKey === 'liveness' && requirement.includes('liveness'))
+        );
+      });
+
+      return requested
+        ? {
+            ...section,
+            status: 'ACTION_REQUIRED',
+            completed: false,
+            missingRequirements,
+          }
+        : section;
+    });
+  }
+
   private redactPayload(payload: AnyRecord) {
     const redacted = { ...payload };
     ['pin', 'password', 'cvv', 'pan', 'cardNumber', 'secret', 'token'].forEach(
@@ -3149,7 +3383,7 @@ export class VidalpayService {
       ? 4
       : ['SUBMITTED', 'UNDER_REVIEW', 'MANUAL_REVIEW'].includes(status)
         ? 3
-        : status === 'IN_PROGRESS'
+        : ['IN_PROGRESS', 'RETRY_REQUIRED'].includes(status)
           ? 2
           : 1;
     return {

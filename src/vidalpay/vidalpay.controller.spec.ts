@@ -1,4 +1,5 @@
 import {
+  AdminKycController,
   CardsController,
   KycController,
   NotificationsController,
@@ -15,6 +16,7 @@ describe('VidalPay mobile contract controllers', () => {
     getProviderStatuses: jest.fn(),
     startKyc: jest.fn(),
     getKycStatus: jest.fn(),
+    requestKycInformation: jest.fn(),
     internalTransfer: jest.fn(),
     listCards: jest.fn(),
     createCard: jest.fn(),
@@ -52,6 +54,29 @@ describe('VidalPay mobile contract controllers', () => {
 
     expect(service.startKyc).toHaveBeenCalledWith('user-1');
     expect(service.getKycStatus).toHaveBeenCalledWith('user-1');
+  });
+
+  it('routes admin KYC more-info requests through the action-required service contract', () => {
+    const controller = new AdminKycController(service as VidalpayService);
+    const admin = { sub: 'admin-1' } as any;
+    const body = {
+      reason: 'Proof of address is unclear',
+      missingRequirements: ['proof_of_address'],
+    };
+
+    controller.requestMoreInfo(admin, 'user-1', body);
+    controller.requestInformation(admin, 'user-2', body);
+
+    expect(service.requestKycInformation).toHaveBeenCalledWith(
+      'admin-1',
+      'user-1',
+      body,
+    );
+    expect(service.requestKycInformation).toHaveBeenCalledWith(
+      'admin-1',
+      'user-2',
+      body,
+    );
   });
 
   it('routes internal transfers with active-user context for backend PIN/idempotency checks', () => {

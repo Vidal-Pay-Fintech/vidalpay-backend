@@ -16,6 +16,14 @@ Keep the report private because schema details and record counts are operational
 
 ## 2. Map legacy data
 
+Generate a read-only candidate mapping from the audit:
+
+```sh
+npm run db:plan-legacy-restore -- legacy-data-audit.json > legacy-restore-plan.json
+```
+
+The plan groups likely source tables for users, wallets, transactions, beneficiaries, notifications, KYC, rewards, and activity. It does not read customer values and does not merge records.
+
 Use the inventory to identify the actual source tables for users, wallets, transactions, beneficiaries, notifications, KYC, rewards, and referrals. Map each source column to the current table only after checking:
 
 - user and wallet foreign keys;

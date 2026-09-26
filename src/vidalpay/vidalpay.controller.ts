@@ -93,14 +93,16 @@ export class AdminKycController {
     @Param('userId') userId: string,
     @Body() body: AnyRecord,
   ) {
-    return this.vidalpayService.reviewKyc(
-      admin.sub,
-      userId,
-      'IN_PROGRESS',
-      typeof body.reason === 'string'
-        ? body.reason
-        : 'Additional KYC information is required.',
-    );
+    return this.vidalpayService.requestKycInformation(admin.sub, userId, body);
+  }
+
+  @Post(':userId/request-more-info')
+  requestMoreInfo(
+    @ActiveUser() admin: ActiveUserData,
+    @Param('userId') userId: string,
+    @Body() body: AnyRecord,
+  ) {
+    return this.vidalpayService.requestKycInformation(admin.sub, userId, body);
   }
 }
 
