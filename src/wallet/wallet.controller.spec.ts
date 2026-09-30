@@ -11,6 +11,9 @@ describe('Wallet controllers', () => {
     getWallet: jest.fn(),
     getWalletByCurrency: jest.fn(),
     getWalletAccountDetails: jest.fn(),
+    getAvailableWalletProducts: jest.fn(),
+    getWalletEligibility: jest.fn(),
+    activateWalletProduct: jest.fn(),
     getWalletTransactions: jest.fn(),
     getAllTransactions: jest.fn(),
     getBankCatalog: jest.fn(),
@@ -46,6 +49,54 @@ describe('Wallet controllers', () => {
 
     await expect(walletsController.ngn({ sub: 'user-1' } as any)).resolves.toEqual({ currency: Currency.NGN });
     expect(vidalpayService.getWalletByCurrency).toHaveBeenCalledWith('user-1', Currency.NGN);
+  });
+
+  it('routes available wallet products through the backend catalogue service', async () => {
+    vidalpayService.getAvailableWalletProducts.mockResolvedValue({
+      products: [{ currency: 'GBP' }],
+    });
+
+    await expect(
+      walletsController.available({ sub: 'user-1' } as any),
+    ).resolves.toEqual({ products: [{ currency: 'GBP' }] });
+    expect(vidalpayService.getAvailableWalletProducts).toHaveBeenCalledWith(
+      'user-1',
+    );
+  });
+
+  it('routes wallet eligibility and activation by requested currency', async () => {
+    vidalpayService.getWalletEligibility.mockResolvedValue({
+      currency: 'GBP',
+      status: 'REQUIRES_INFORMATION',
+    });
+    vidalpayService.activateWalletProduct.mockResolvedValue({
+      currency: 'GBP',
+      activation: { status: 'PROVIDER_NOT_CONFIGURED' },
+    });
+
+    await expect(
+      walletsController.eligibility({ sub: 'user-1' } as any, 'gbp'),
+    ).resolves.toEqual({
+      currency: 'GBP',
+      status: 'REQUIRES_INFORMATION',
+    });
+    await expect(
+      walletsController.activate({ sub: 'user-1' } as any, 'gbp', {
+        idempotencyKey: 'idem-1',
+      }),
+    ).resolves.toEqual({
+      currency: 'GBP',
+      activation: { status: 'PROVIDER_NOT_CONFIGURED' },
+    });
+    expect(vidalpayService.getWalletEligibility).toHaveBeenCalledWith(
+      'user-1',
+      'gbp',
+    );
+    expect(vidalpayService.activateWalletProduct).toHaveBeenCalledWith(
+      'user-1',
+      'gbp',
+      { idempotencyKey: 'idem-1' },
+    );
   });
 
   it('routes external transfer resolution through the provider-aware service', async () => {

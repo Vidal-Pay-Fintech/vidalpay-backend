@@ -45,4 +45,36 @@ describe('ProviderHttpService', () => {
       expect.objectContaining({ Authorization: 'Bearer access-token' }),
     );
   });
+
+  it('pins the Fincra client to the sandbox host and rejects SSRF-style base URLs', () => {
+    expect(
+      service({ FINCRA_BASE_URL: 'https://sandboxapi.fincra.com' })
+        .fincraClient()
+        .defaults.baseURL,
+    ).toBe('https://sandboxapi.fincra.com');
+    expect(
+      service({ FINCRA_BASE_URL: 'http://127.0.0.1:10000' })
+        .fincraClient()
+        .defaults.baseURL,
+    ).toBe('https://sandboxapi.fincra.com');
+    expect(
+      service({ FINCRA_BASE_URL: 'https://evil.example.com' })
+        .fincraClient()
+        .defaults.baseURL,
+    ).toBe('https://sandboxapi.fincra.com');
+    expect(
+      service({ FINCRA_BASE_URL: 'https://user:pass@sandboxapi.fincra.com' })
+        .fincraClient()
+        .defaults.baseURL,
+    ).toBe('https://sandboxapi.fincra.com');
+  });
+
+  it('keeps the Fincra API key only in backend request headers', () => {
+    const client = service({ FINCRA_API_KEY: 'fincra-secret' }).fincraClient();
+
+    expect(client.defaults.headers).toEqual(
+      expect.objectContaining({ 'api-key': 'fincra-secret' }),
+    );
+    expect(client.defaults.baseURL).not.toContain('fincra-secret');
+  });
 });

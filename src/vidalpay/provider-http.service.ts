@@ -104,4 +104,36 @@ export class ProviderHttpService {
       timeout: this.timeout(),
     });
   }
+
+  fincraClient(): AxiosInstance {
+    return axios.create({
+      baseURL: this.fincraSandboxBaseUrl(),
+      headers: {
+        'api-key': this.configService.get<string>('FINCRA_API_KEY') ?? '',
+        Accept: 'application/json',
+        'Content-Type': 'application/json',
+      },
+      timeout: this.timeout(),
+    });
+  }
+
+  private fincraSandboxBaseUrl(): string {
+    const fallback = 'https://sandboxapi.fincra.com';
+    const configured = this.configService.get<string>('FINCRA_BASE_URL')?.trim();
+    if (!configured) return fallback;
+    try {
+      const url = new URL(configured);
+      if (
+        url.protocol !== 'https:' ||
+        url.username ||
+        url.password ||
+        url.hostname !== 'sandboxapi.fincra.com'
+      ) {
+        return fallback;
+      }
+      return url.origin;
+    } catch {
+      return fallback;
+    }
+  }
 }

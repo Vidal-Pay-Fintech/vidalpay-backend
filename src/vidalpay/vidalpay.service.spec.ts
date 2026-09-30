@@ -5,6 +5,10 @@ import { DataSource } from 'typeorm';
 import { AccountStatus } from 'src/database/entities/user.entity';
 import { VidalpayService } from './vidalpay.service';
 import { ProviderStatusService } from './provider-status.service';
+import { FincraSandboxService } from './fincra-sandbox.service';
+import { JurisdictionService } from './jurisdiction.service';
+import { ProductEligibilityService } from './product-eligibility.service';
+import { WalletProductCatalogService } from './wallet-product-catalog.service';
 import { Currency } from 'src/utils/enums/wallet.enum';
 import { TagIdGenerator } from 'src/utils/tagIdGenerator';
 
@@ -115,6 +119,9 @@ describe('VidalpayService', () => {
       tokenRepository as any,
       disputeRepository as any,
       providerStatusService as any,
+      { probeReadOnly: jest.fn() } as unknown as FincraSandboxService,
+      new ProductEligibilityService(new JurisdictionService()),
+      new WalletProductCatalogService(configService as unknown as ConfigService),
       sandboxProviderService as any,
       configService as unknown as ConfigService,
       {} as any,
@@ -593,13 +600,309 @@ describe('VidalpayService', () => {
   });
 
   it('returns honest disabled portfolio values when crypto has no backend provider', async () => {
-    userRepository.findOne.mockResolvedValue({ id: 'user-1' });
+    userRepository.findOne.mockResolvedValue({
+      id: 'user-1',
+      countryCode: 'US',
+      region: 'US',
+    });
 
     const overview = await service.cryptoOverview('user-1');
 
     expect(overview.enabled).toBe(false);
     expect(overview.portfolio.totalValue).toBeNull();
     expect(overview.portfolio.positions).toEqual([]);
+  });
+
+  it('blocks Nigeria-based users from restricted products even after KYC verification', async () => {
+    userRepository.findOne.mockResolvedValue({
+      id: 'user-1',
+      countryCode: 'NG',
+      region: 'NG',
+      phoneNumber: '+2348012345678',
+      kycStatus: 'VERIFIED',
+    });
+
+    await expect(service.cryptoOverview('user-1')).rejects.toMatchObject({
+      response: expect.objectContaining({
+        code: 'PRODUCT_NOT_AVAILABLE_IN_JURISDICTION',
+        capability: 'crypto',
+      }),
+    });
+    await expect(service.investmentProducts('user-1')).rejects.toMatchObject({
+      response: expect.objectContaining({
+        code: 'PRODUCT_NOT_AVAILABLE_IN_JURISDICTION',
+        capability: 'investments',
+      }),
+    });
+    await expect(service.loanOverview('user-1')).rejects.toMatchObject({
+      response: expect.objectContaining({
+        code: 'PRODUCT_NOT_AVAILABLE_IN_JURISDICTION',
+        capability: 'lending',
+      }),
+    });
+    await expect(service.taxStatus('user-1')).rejects.toMatchObject({
+      response: expect.objectContaining({
+        code: 'PRODUCT_NOT_AVAILABLE_IN_JURISDICTION',
+        capability: 'foreign_tax',
+      }),
+    });
+  });
+
+  it('reports mobile-visible product capabilities without changing transactions', async () => {
+    userRepository.findOne.mockResolvedValue({
+      id: 'user-1',
+      countryCode: 'NG',
+      region: 'NG',
+      phoneNumber: '+2348012345678',
+    });
+
+    const capabilities = await service.getProductCapabilities('user-1');
+
+    expect(capabilities.jurisdiction.jurisdiction).toBe('NG');
+    expect(capabilities.products.wallets.enabled).toBe(true);
+    expect(capabilities.products.utilities.enabled).toBe(true);
+    expect(capabilities.products.crypto.blockedResponse).toEqual(
+      expect.objectContaining({
+        code: 'PRODUCT_NOT_AVAILABLE_IN_JURISDICTION',
+        provider: 'VidalPay Compliance',
+      }),
+    );
+    expect(providerOperationRepository.save).not.toHaveBeenCalled();
+  });
+
+
+
+  it('returns available wallet products excluding active wallets', async () => {
+    userRepository.findOne.mockResolvedValue({ id: 'user-1', region: 'NG' });
+    walletRepository.find.mockResolvedValue([{ id: 'ngn-wallet', userId: 'user-1', currency: Currency.NGN, balance: 0 }]);
+    providerOperationRepository.findOne.mockResolvedValue(null);
+    kycProfileRepository.findOne.mockResolvedValue(null);
+
+    const result = await service.getAvailableWalletProducts('user-1');
+
+    expect(result.products.map((product) => product.currency)).not.toContain('NGN');
+    expect(result.products.map((product) => product.currency)).toEqual(expect.arrayContaining(['USD', 'GBP']));
+    expect(walletRepository.save).not.toHaveBeenCalled();
+  });
+
+  it('excludes wallet products with pending activation requests', async () => {
+    userRepository.findOne.mockResolvedValue({ id: 'user-1', region: 'NG' });
+    walletRepository.find.mockResolvedValue([]);
+    kycProfileRepository.findOne.mockResolvedValue(null);
+    providerOperationRepository.findOne.mockImplementation(async ({ where }: any) =>
+      where?.idempotencyKey === 'wallet_activation:user-1:GBP'
+        ? { id: 'op-1', reference: 'op-1', status: 'PENDING', currency: 'GBP', provider: 'FINCRA' }
+        : null,
+    );
+
+    const result = await service.getAvailableWalletProducts('user-1');
+
+    expect(result.products.map((product) => product.currency)).not.toContain('GBP');
+  });
+
+  it('returns additional enabled Fincra currency products from explicit catalogue config', async () => {
+    (configService.get as jest.Mock).mockImplementation((key: string) =>
+      key === 'FINCRA_WALLET_PRODUCTS_JSON'
+        ? JSON.stringify([
+            {
+              currency: 'EUR',
+              enabled: true,
+              tier: 'ADDITIONAL',
+              supportedJurisdictions: ['NG'],
+              canProvision: false,
+              requirementsConfigured: true,
+              requirements: [],
+            },
+            { currency: 'CAD', enabled: false, tier: 'ADDITIONAL', supportedJurisdictions: ['NG'] },
+          ])
+        : undefined,
+    );
+    userRepository.findOne.mockResolvedValue({ id: 'user-1', region: 'NG' });
+    walletRepository.find.mockResolvedValue([]);
+    providerOperationRepository.findOne.mockResolvedValue(null);
+    kycProfileRepository.findOne.mockResolvedValue(null);
+
+    const result = await service.getAvailableWalletProducts('user-1');
+
+    expect(result.products.map((product) => product.currency)).toContain('EUR');
+    expect(result.products.map((product) => product.currency)).not.toContain('CAD');
+  });
+
+  it('evaluates fully satisfied wallet product requirements individually', async () => {
+    (configService.get as jest.Mock).mockImplementation((key: string) =>
+      key === 'FINCRA_WALLET_PRODUCTS_JSON'
+        ? JSON.stringify([
+            {
+              currency: 'GBP',
+              enabled: true,
+              tier: 'PRIMARY',
+              supportedJurisdictions: ['NG'],
+              canProvision: false,
+              requirementsConfigured: true,
+              requirements: [
+                { key: 'legal_name', label: 'Legal name', source: 'VIDALPAY_PROFILE' },
+                { key: 'date_of_birth', label: 'Date of birth', source: 'VIDALPAY_PROFILE' },
+                { key: 'address', label: 'Address', source: 'METAMAP' },
+                { key: 'government_id', label: 'Government ID', source: 'METAMAP' },
+              ],
+            },
+          ])
+        : undefined,
+    );
+    userRepository.findOne.mockResolvedValue({ id: 'user-1', region: 'NG', firstName: 'Ada', lastName: 'Lovelace', dateOfBirth: '1990-01-01' });
+    walletRepository.find.mockResolvedValue([]);
+    providerOperationRepository.findOne.mockResolvedValue(null);
+    kycProfileRepository.findOne.mockResolvedValue({
+      userId: 'user-1',
+      status: 'VERIFIED',
+      identity: { address: '1 Lagos Street', nin: '12345678901' },
+      uploads: [],
+      sections: [],
+    });
+
+    const result = await service.getWalletEligibility('user-1', 'GBP');
+
+    expect(result.missingRequirements).toEqual([]);
+    expect(result.satisfiedRequirements.map((item) => item.key)).toEqual(
+      expect.arrayContaining(['legal_name', 'date_of_birth', 'address', 'government_id']),
+    );
+  });
+
+  it('returns only missing wallet requirements and does not treat MetaMap VERIFIED as all-satisfied', async () => {
+    (configService.get as jest.Mock).mockImplementation((key: string) =>
+      key === 'FINCRA_WALLET_PRODUCTS_JSON'
+        ? JSON.stringify([
+            {
+              currency: 'GBP',
+              enabled: true,
+              tier: 'PRIMARY',
+              supportedJurisdictions: ['NG'],
+              canProvision: false,
+              requirementsConfigured: true,
+              requirements: [
+                { key: 'legal_name', label: 'Legal name', source: 'VIDALPAY_PROFILE' },
+                { key: 'proof_of_address', label: 'Proof of address', source: 'FINCRA' },
+              ],
+            },
+          ])
+        : undefined,
+    );
+    userRepository.findOne.mockResolvedValue({ id: 'user-1', region: 'NG', firstName: 'Ada', lastName: 'Lovelace', kycStatus: 'VERIFIED' });
+    walletRepository.find.mockResolvedValue([]);
+    providerOperationRepository.findOne.mockResolvedValue(null);
+    kycProfileRepository.findOne.mockResolvedValue({
+      userId: 'user-1',
+      status: 'VERIFIED',
+      identity: {},
+      uploads: [],
+      sections: [],
+    });
+
+    const result = await service.getWalletEligibility('user-1', 'GBP');
+
+    expect(result.status).toBe('REQUIRES_INFORMATION');
+    expect(result.satisfiedRequirements.map((item) => item.key)).toContain('legal_name');
+    expect(result.missingRequirements).toEqual([
+      expect.objectContaining({ key: 'proof_of_address' }),
+    ]);
+  });
+
+  it('rejects unavailable wallet products outside the Fincra-enabled catalogue', async () => {
+    userRepository.findOne.mockResolvedValue({ id: 'user-1', region: 'NG' });
+    walletRepository.find.mockResolvedValue([]);
+
+    const result = await service.getWalletEligibility('user-1', 'CAD');
+
+    expect(result.status).toBe('PRODUCT_UNAVAILABLE');
+    expect(result.eligible).toBe(false);
+  });
+
+  it('does not activate when requirements are incomplete', async () => {
+    (configService.get as jest.Mock).mockImplementation((key: string) =>
+      key === 'FINCRA_WALLET_PRODUCTS_JSON'
+        ? JSON.stringify([
+            {
+              currency: 'GBP',
+              enabled: true,
+              tier: 'PRIMARY',
+              supportedJurisdictions: ['NG'],
+              canProvision: true,
+              providerProductId: 'gbp-product',
+              requirementsConfigured: true,
+              requirements: [{ key: 'proof_of_address', label: 'Proof of address', source: 'FINCRA' }],
+            },
+          ])
+        : 'configured',
+    );
+    userRepository.findOne.mockResolvedValue({ id: 'user-1', region: 'NG' });
+    walletRepository.find.mockResolvedValue([]);
+    providerOperationRepository.findOne.mockResolvedValue(null);
+    kycProfileRepository.findOne.mockResolvedValue({ userId: 'user-1', status: 'VERIFIED', identity: {}, uploads: [], sections: [] });
+
+    const result = await service.activateWalletProduct('user-1', 'GBP', {});
+
+    expect(result.activation.status).toBe('REQUIRES_INFORMATION');
+    expect(walletRepository.save).not.toHaveBeenCalled();
+    expect(providerOperationRepository.save).not.toHaveBeenCalled();
+  });
+
+  it('does not recreate an already-active wallet', async () => {
+    userRepository.findOne.mockResolvedValue({ id: 'user-1', region: 'NG' });
+    walletRepository.find.mockResolvedValue([{ id: 'gbp-wallet', userId: 'user-1', currency: 'GBP', balance: 0 }]);
+    providerOperationRepository.findOne.mockResolvedValue(null);
+    kycProfileRepository.findOne.mockResolvedValue(null);
+
+    const result = await service.activateWalletProduct('user-1', 'GBP', {});
+
+    expect(result.activation.status).toBe('ALREADY_ACTIVE');
+    expect(walletRepository.save).not.toHaveBeenCalled();
+  });
+
+  it('does not create duplicate activation when one is pending', async () => {
+    userRepository.findOne.mockResolvedValue({ id: 'user-1', region: 'NG' });
+    walletRepository.find.mockResolvedValue([]);
+    providerOperationRepository.findOne.mockResolvedValue({ id: 'op-1', reference: 'op-1', status: 'PENDING', currency: 'GBP', provider: 'FINCRA' });
+    kycProfileRepository.findOne.mockResolvedValue(null);
+
+    const result = await service.activateWalletProduct('user-1', 'GBP', {});
+
+    expect(result.activation.status).toBe('PENDING');
+    expect(providerOperationRepository.save).not.toHaveBeenCalled();
+  });
+
+  it('returns honest provider-not-configured activation state without creating a fake account', async () => {
+    userRepository.findOne.mockResolvedValue({ id: 'user-1', region: 'NG' });
+    walletRepository.find.mockResolvedValue([]);
+    providerOperationRepository.findOne.mockResolvedValue(null);
+    kycProfileRepository.findOne.mockResolvedValue(null);
+
+    const result = await service.activateWalletProduct('user-1', 'GBP', {});
+
+    expect(result.status).toBe('PROVIDER_NOT_CONFIGURED');
+    expect(result.activation.status).toBe('PROVIDER_NOT_CONFIGURED');
+    expect(walletRepository.save).not.toHaveBeenCalled();
+  });
+
+  it('keeps Nigerian restrictions after eligibility for foreign-currency wallets', async () => {
+    (configService.get as jest.Mock).mockImplementation((key: string) =>
+      key === 'FINCRA_WALLET_PRODUCTS_JSON'
+        ? JSON.stringify([
+            { currency: 'EUR', enabled: true, tier: 'ADDITIONAL', supportedJurisdictions: ['NG'], canProvision: false, requirementsConfigured: true, requirements: [] },
+          ])
+        : undefined,
+    );
+    userRepository.findOne.mockResolvedValue({ id: 'user-1', region: 'NG', country: 'Nigeria', phoneNumber: '+2348012345678', kycStatus: 'VERIFIED' });
+    walletRepository.find.mockResolvedValue([{ id: 'usd-wallet', userId: 'user-1', currency: Currency.USD, balance: 0 }]);
+    providerOperationRepository.findOne.mockResolvedValue(null);
+    kycProfileRepository.findOne.mockResolvedValue(null);
+
+    await expect(service.getWalletEligibility('user-1', 'EUR')).resolves.toEqual(
+      expect.objectContaining({ currency: 'EUR' }),
+    );
+    await expect(service.cryptoOverview('user-1')).rejects.toMatchObject({ response: expect.objectContaining({ capability: 'crypto' }) });
+    await expect(service.investmentsOverview('user-1')).rejects.toMatchObject({ response: expect.objectContaining({ capability: 'investments' }) });
+    await expect(service.loanOverview('user-1')).rejects.toMatchObject({ response: expect.objectContaining({ capability: 'lending' }) });
+    await expect(service.taxStatus('user-1')).rejects.toMatchObject({ response: expect.objectContaining({ capability: 'foreign_tax' }) });
   });
 
   it('closes accounts by deactivating the real user after backend password verification', async () => {

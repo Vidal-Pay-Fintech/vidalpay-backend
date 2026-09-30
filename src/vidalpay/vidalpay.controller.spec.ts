@@ -2,6 +2,7 @@ import {
   AdminKycController,
   CardsController,
   KycController,
+  MeController,
   NotificationsController,
   ProvidersController,
   ReferralsController,
@@ -10,10 +11,17 @@ import {
   WebhooksController,
 } from './vidalpay.controller';
 import { VidalpayService } from './vidalpay.service';
+import { AUTH_TYPE_KEY } from 'src/iam/authentication/decorators/auth.decorator';
+import { AuthType } from 'src/iam/authentication/enums/auth-type.enum';
+import { ROLES_KEY } from 'src/iam/decorators/roles.decorator';
+import { RolesGuard } from 'src/iam/guards/roles.guard';
+import { Role } from 'src/common/enum/role.enum';
 
 describe('VidalPay mobile contract controllers', () => {
   const service = {
     getProviderStatuses: jest.fn(),
+    probeFincraSandbox: jest.fn(),
+    getProductCapabilities: jest.fn(),
     startKyc: jest.fn(),
     getKycStatus: jest.fn(),
     requestKycInformation: jest.fn(),
@@ -44,6 +52,78 @@ describe('VidalPay mobile contract controllers', () => {
     expect(
       new ProvidersController(service as VidalpayService).status(),
     ).toEqual({ providers: [] });
+  });
+
+  it('routes the admin Fincra sandbox probe through a backend-only service', () => {
+    (service.probeFincraSandbox as jest.Mock).mockResolvedValue({
+      provider: 'FINCRA',
+      environment: 'SANDBOX',
+    });
+
+    new ProvidersController(service as VidalpayService).fincraSandboxProbe();
+
+    expect(service.probeFincraSandbox).toHaveBeenCalled();
+  });
+
+  it('protects the Fincra sandbox probe with Bearer auth and admin roles metadata', () => {
+    const descriptor = Object.getOwnPropertyDescriptor(
+      ProvidersController.prototype,
+      'fincraSandboxProbe',
+    );
+
+    expect(Reflect.getMetadata(AUTH_TYPE_KEY, descriptor?.value)).toEqual([
+      AuthType.Bearer,
+    ]);
+    expect(Reflect.getMetadata(ROLES_KEY, descriptor?.value)).toEqual([
+      Role.ADMIN,
+      Role.SUPER_ADMIN,
+    ]);
+  });
+
+  it('rejects unauthenticated and ordinary users through the real roles guard', async () => {
+    const reflector = {
+      getAllAndOverride: jest.fn().mockReturnValue([
+        Role.ADMIN,
+        Role.SUPER_ADMIN,
+      ]),
+    };
+    const authService = {
+      verifyToken: jest.fn(async (token: string) =>
+        token === 'admin-token'
+          ? { role: Role.ADMIN }
+          : token === 'user-token'
+            ? { role: Role.REGULAR }
+            : null,
+      ),
+    };
+    const guard = new RolesGuard(reflector as any, authService as any);
+    const context = (authorization?: string) =>
+      ({
+        getHandler: jest.fn(),
+        getClass: jest.fn(),
+        switchToHttp: () => ({
+          getRequest: () => ({ headers: { authorization } }),
+        }),
+      }) as any;
+
+    await expect(guard.canActivate(context(''))).resolves.toBe(false);
+    await expect(
+      guard.canActivate(context('Bearer user-token')),
+    ).resolves.toBe(false);
+    await expect(
+      guard.canActivate(context('Bearer admin-token')),
+    ).resolves.toBe(true);
+  });
+
+  it('exposes account product capabilities for mobile feature gating', () => {
+    (service.getProductCapabilities as jest.Mock).mockReturnValue({
+      products: {},
+    });
+
+    expect(new MeController(service as VidalpayService).capabilities(user)).toEqual(
+      { products: {} },
+    );
+    expect(service.getProductCapabilities).toHaveBeenCalledWith('user-1');
   });
 
   it('routes KYC start/status through the backend KYC source of truth', () => {

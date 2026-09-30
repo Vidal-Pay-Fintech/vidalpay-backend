@@ -101,6 +101,11 @@ export class WalletsController {
     return this.vidalpayService.getWallets(user.sub);
   }
 
+  @Get('available')
+  available(@ActiveUser() user: ActiveUserData) {
+    return this.vidalpayService.getAvailableWalletProducts(user.sub);
+  }
+
   @Get('ngn')
   ngn(@ActiveUser() user: ActiveUserData) {
     return this.vidalpayService.getWalletByCurrency(user.sub, Currency.NGN);
@@ -134,5 +139,26 @@ export class WalletsController {
   @Get('usd/transactions')
   usdTransactions(@ActiveUser() user: ActiveUserData) {
     return this.vidalpayService.getTransactions(user.sub, Currency.USD);
+  }
+
+  @Get(':currency/eligibility')
+  eligibility(
+    @ActiveUser() user: ActiveUserData,
+    @Param('currency') currency: string,
+  ) {
+    return this.vidalpayService.getWalletEligibility(user.sub, currency);
+  }
+
+  @Post(':currency/activate')
+  activate(
+    @ActiveUser() user: ActiveUserData,
+    @Param('currency') currency: string,
+    @Body() body: Record<string, unknown>,
+  ) {
+    return this.vidalpayService.activateWalletProduct(
+      user.sub,
+      currency,
+      body,
+    );
   }
 }

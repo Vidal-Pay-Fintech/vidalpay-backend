@@ -38,7 +38,17 @@ import {
   ProviderCapability,
 } from './contracts';
 import { ProviderStatusService } from './provider-status.service';
+import { FincraSandboxService } from './fincra-sandbox.service';
+import {
+  ProductCode,
+  ProductEligibilityService,
+} from './product-eligibility.service';
 import { SandboxProviderService } from './sandbox-provider.service';
+import {
+  WalletProduct,
+  WalletProductCatalogService,
+  WalletProductRequirement,
+} from './wallet-product-catalog.service';
 
 type AnyRecord = Record<string, unknown>;
 
@@ -78,6 +88,9 @@ export class VidalpayService {
     @InjectRepository(Dispute)
     private readonly disputeRepository: Repository<Dispute>,
     private readonly providerStatusService: ProviderStatusService,
+    private readonly fincraSandboxService: FincraSandboxService,
+    private readonly productEligibilityService: ProductEligibilityService,
+    private readonly walletProductCatalogService: WalletProductCatalogService,
     private readonly sandboxProviderService: SandboxProviderService,
     private readonly configService: ConfigService,
     private readonly mailService: MailService,
@@ -88,6 +101,15 @@ export class VidalpayService {
     return {
       providers: this.providerStatusService.getStatuses(),
     };
+  }
+
+  async probeFincraSandbox() {
+    return this.fincraSandboxService.probeReadOnly();
+  }
+
+  async getProductCapabilities(userId: string) {
+    const user = await this.findUser(userId);
+    return this.productEligibilityService.capabilities(user);
   }
 
   async getCurrentUser(userId: string) {
@@ -120,7 +142,7 @@ export class VidalpayService {
 
   async getAccountLevel(userId: string) {
     const user = await this.findUser(userId);
-    const kyc = await this.getKycProfileForSession(user);
+    const kyc = await this.getKycProfileSnapshot(user);
     return this.buildAccountLevel(user, kyc);
   }
 
@@ -337,6 +359,182 @@ export class VidalpayService {
     const orderedWallets = this.orderWalletsByDefault(wallets, defaultCurrency);
     return {
       wallets: orderedWallets.map((wallet) => this.normalizeWallet(wallet)),
+    };
+  }
+
+  async getAvailableWalletProducts(userId: string) {
+    const user = await this.findUser(userId);
+    const jurisdiction = this.productEligibilityService.capabilities(user)
+      .jurisdiction;
+    const [wallets, products] = await Promise.all([
+      this.walletRepository.find({ where: { userId } }),
+      Promise.resolve(
+        this.walletProductCatalogService.compatibleProducts(
+          jurisdiction.jurisdiction,
+        ),
+      ),
+    ]);
+
+    const available = await Promise.all(
+      products.map(async (product) => {
+        const eligibility = await this.evaluateWalletEligibility(
+          user,
+          product.currency,
+          wallets,
+        );
+        return eligibility.available && eligibility.canRequest
+          ? eligibility.product
+          : null;
+      }),
+    );
+
+    return {
+      jurisdiction,
+      products: available.filter(
+        (product): product is NonNullable<typeof product> => Boolean(product),
+      ),
+    };
+  }
+
+  async getWalletEligibility(userId: string, currency: string) {
+    const user = await this.findUser(userId);
+    return this.evaluateWalletEligibility(user, currency);
+  }
+
+  async activateWalletProduct(
+    userId: string,
+    currency: string,
+    payload: AnyRecord = {},
+  ) {
+    const user = await this.findUser(userId);
+    const eligibility = await this.evaluateWalletEligibility(user, currency);
+    const activationKey = this.walletActivationIdempotencyKey(
+      userId,
+      eligibility.currency,
+    );
+
+    if (eligibility.status === 'ACTIVE') {
+      return {
+        ...eligibility,
+        activation: {
+          status: 'ALREADY_ACTIVE',
+          reference: null,
+          message: 'This wallet is already active for the customer.',
+        },
+      };
+    }
+
+    if (eligibility.status === 'PENDING') {
+      return {
+        ...eligibility,
+        activation: {
+          status: 'PENDING',
+          reference: eligibility.pendingActivation?.reference ?? null,
+          message:
+            'A wallet activation request is already pending for this currency.',
+        },
+      };
+    }
+
+    if (!eligibility.eligible) {
+      return {
+        ...eligibility,
+        activation: {
+          status: eligibility.status,
+          reference: null,
+          message: eligibility.reason,
+        },
+      };
+    }
+
+    const rawProduct = this.walletProductCatalogService.find(
+      eligibility.currency,
+    );
+    if (!rawProduct) {
+      return {
+        ...eligibility,
+        activation: {
+          status: eligibility.status,
+          reference: null,
+          message: eligibility.reason,
+        },
+      };
+    }
+
+    const provider =
+      this.walletProductCatalogService.providerConfigured(rawProduct);
+    const existing = await this.providerOperationRepository.findOne({
+      where: {
+        userId,
+        type: 'wallet_activation',
+        idempotencyKey: activationKey,
+      },
+    });
+    if (existing) {
+      return {
+        ...eligibility,
+        status: existing.status === 'PENDING' ? 'PENDING' : eligibility.status,
+        activation: {
+          status: existing.status,
+          reference: existing.reference,
+          message:
+            existing.status === 'PENDING'
+              ? 'A wallet activation request is already pending for this currency.'
+              : existing.failureReason,
+        },
+      };
+    }
+
+    if (!provider.configured) {
+      const blocked = provider.blockedResponse;
+      const operation = await this.providerOperationRepository.save(
+        this.providerOperationRepository.create({
+          userId,
+          type: 'wallet_activation',
+          idempotencyKey: activationKey,
+          reference: activationKey,
+          status: 'BLOCKED',
+          amount: null,
+          currency: eligibility.currency,
+          provider: 'FINCRA',
+          requestPayload: this.redactPayload(payload),
+          responsePayload: null,
+          errorCode: blocked.code,
+          failureReason: blocked.message,
+          metadata: { blocked, product: eligibility.product },
+        }),
+      );
+      return {
+        ...eligibility,
+        available: true,
+        eligible: false,
+        status: 'PROVIDER_NOT_CONFIGURED',
+        reason: blocked.reason,
+        missingRequirements: [
+          ...eligibility.missingRequirements,
+          ...provider.missingRequirements,
+        ],
+        activation: {
+          status: operation.status,
+          reference: operation.reference,
+          message: blocked.message,
+        },
+      };
+    }
+
+    return {
+      ...eligibility,
+      available: true,
+      eligible: false,
+      status: 'PROVIDER_NOT_CONFIGURED',
+      reason:
+        'The Fincra provider adapter is not implemented in this backend build.',
+      activation: {
+        status: 'NOT_STARTED',
+        reference: null,
+        message:
+          'Wallet activation will proceed only after the backend Fincra adapter is implemented and live-tested.',
+      },
     };
   }
 
@@ -1937,7 +2135,7 @@ export class VidalpayService {
   }
 
   async cryptoOverview(userId: string) {
-    await this.findUser(userId);
+    await this.assertProductAccess(userId, 'crypto');
     return {
       enabled: false,
       comingSoon: true,
@@ -1967,12 +2165,12 @@ export class VidalpayService {
   }
 
   async cryptoAssets(userId: string) {
-    await this.findUser(userId);
+    await this.assertProductAccess(userId, 'crypto');
     return { assets: [] };
   }
 
   async investmentsOverview(userId: string) {
-    await this.findUser(userId);
+    await this.assertProductAccess(userId, 'investments');
     return {
       enabled: false,
       provider: null,
@@ -1984,7 +2182,7 @@ export class VidalpayService {
   }
 
   async investmentsPortfolio(userId: string) {
-    await this.findUser(userId);
+    await this.assertProductAccess(userId, 'investments');
     return {
       enabled: false,
       provider: null,
@@ -1997,7 +2195,7 @@ export class VidalpayService {
   }
 
   async investmentProducts(userId: string) {
-    await this.findUser(userId);
+    await this.assertProductAccess(userId, 'investments');
     return { products: [], items: [] };
   }
 
@@ -2006,6 +2204,7 @@ export class VidalpayService {
     payload: AnyRecord,
     type: string,
   ) {
+    await this.assertProductAccess(userId, 'investments');
     await this.recordBlockedOperation(userId, type, payload, {
       provider: 'Investment provider',
       capability:
@@ -2018,7 +2217,7 @@ export class VidalpayService {
   }
 
   async taxStatus(userId: string) {
-    await this.findUser(userId);
+    await this.assertProductAccess(userId, 'foreign_tax');
     return {
       enabled: false,
       status: 'UNAVAILABLE',
@@ -2029,7 +2228,7 @@ export class VidalpayService {
   }
 
   async taxOverview(userId: string) {
-    await this.findUser(userId);
+    await this.assertProductAccess(userId, 'foreign_tax');
     return {
       enabled: false,
       provider: null,
@@ -2045,6 +2244,7 @@ export class VidalpayService {
   }
 
   async blockTaxOperation(userId: string, payload: AnyRecord, type: string) {
+    await this.assertProductAccess(userId, 'foreign_tax');
     await this.recordBlockedOperation(userId, type, payload, {
       provider: 'Tax provider',
       capability: 'tax',
@@ -2053,6 +2253,7 @@ export class VidalpayService {
   }
 
   async blockLoanOperation(userId: string, payload: AnyRecord, type: string) {
+    await this.assertProductAccess(userId, 'lending');
     await this.recordBlockedOperation(userId, type, payload, {
       provider: 'Unit.co',
       capability: 'usd_loan_application',
@@ -2062,7 +2263,7 @@ export class VidalpayService {
   }
 
   async loanOverview(userId: string) {
-    await this.findUser(userId);
+    await this.assertProductAccess(userId, 'lending');
     return {
       enabled: false,
       provider: 'Unit.co',
@@ -2073,7 +2274,7 @@ export class VidalpayService {
   }
 
   async loanUnavailable(userId: string, capability: ProviderCapability) {
-    await this.findUser(userId);
+    await this.assertProductAccess(userId, 'lending');
     this.throwProviderUnavailable({
       feature: 'Loans',
       capability,
@@ -2248,6 +2449,7 @@ export class VidalpayService {
     capability: ProviderCapability,
     payload: AnyRecord = {},
   ) {
+    await this.assertCapabilityProductAccess(userId, capability);
     await this.recordBlockedOperation(userId, type, payload, {
       provider: this.providerStatusService.getStatus(capability).provider,
       capability,
@@ -2327,6 +2529,342 @@ export class VidalpayService {
       throw new NotFoundException(`${currency} wallet not found`);
     }
     return wallet;
+  }
+
+  private async evaluateWalletEligibility(
+    user: User,
+    currency: string,
+    knownWallets?: Wallet[],
+  ) {
+    const normalizedCurrency =
+      this.walletProductCatalogService.normalizeCurrency(currency);
+    const product = this.walletProductCatalogService.find(normalizedCurrency);
+    const jurisdiction = this.productEligibilityService.capabilities(user)
+      .jurisdiction;
+    const wallets =
+      knownWallets ?? (await this.walletRepository.find({ where: { userId: user.id } }));
+    const activeWallet =
+      wallets.find((wallet) => wallet.currency === normalizedCurrency) ?? null;
+    const pendingActivation = await this.findWalletActivationOperation(
+      user.id,
+      normalizedCurrency,
+    );
+
+    if (!product) {
+      return {
+        currency: normalizedCurrency,
+        available: false,
+        eligible: false,
+        canRequest: false,
+        status: 'PRODUCT_UNAVAILABLE',
+        reason:
+          'This currency is not in the Vidal Pay Fincra-enabled wallet product catalogue.',
+        jurisdiction,
+        product: null,
+        activeWallet: null,
+        pendingActivation: null,
+        satisfiedRequirements: [],
+        missingRequirements: ['ENABLED_WALLET_PRODUCT'],
+      };
+    }
+
+    if (!product.enabled) {
+      return {
+        currency: normalizedCurrency,
+        available: false,
+        eligible: false,
+        canRequest: false,
+        status: 'PRODUCT_DISABLED',
+        reason: `${normalizedCurrency} wallet product is disabled for Vidal Pay.`,
+        jurisdiction,
+        product: this.normalizeWalletProduct(product),
+        activeWallet: null,
+        pendingActivation: null,
+        satisfiedRequirements: [],
+        missingRequirements: ['ENABLED_WALLET_PRODUCT'],
+      };
+    }
+
+    if (!product.supportedJurisdictions.includes(jurisdiction.jurisdiction)) {
+      return {
+        currency: normalizedCurrency,
+        available: false,
+        eligible: false,
+        canRequest: false,
+        status: 'JURISDICTION_NOT_SUPPORTED',
+        reason: `${normalizedCurrency} wallet is not enabled for this account jurisdiction.`,
+        jurisdiction,
+        product: this.normalizeWalletProduct(product),
+        activeWallet: null,
+        pendingActivation: null,
+        satisfiedRequirements: [],
+        missingRequirements: ['SUPPORTED_ACCOUNT_JURISDICTION'],
+      };
+    }
+
+    const requirementEvaluation = await this.evaluateWalletRequirements(
+      user,
+      product,
+    );
+
+    if (activeWallet) {
+      return {
+        currency: normalizedCurrency,
+        available: false,
+        eligible: false,
+        canRequest: false,
+        status: 'ACTIVE',
+        reason: 'The customer already has an active wallet for this currency.',
+        jurisdiction,
+        product: this.normalizeWalletProduct(product),
+        activeWallet: this.normalizeWallet(activeWallet),
+        pendingActivation: null,
+        ...requirementEvaluation,
+      };
+    }
+
+    if (pendingActivation?.status === 'PENDING') {
+      return {
+        currency: normalizedCurrency,
+        available: false,
+        eligible: false,
+        canRequest: false,
+        status: 'PENDING',
+        reason: 'A wallet activation request is already pending.',
+        jurisdiction,
+        product: this.normalizeWalletProduct(product),
+        activeWallet: null,
+        pendingActivation: this.normalizeProviderOperation(pendingActivation),
+        ...requirementEvaluation,
+      };
+    }
+
+    if (requirementEvaluation.missingRequirements.length > 0) {
+      return {
+        currency: normalizedCurrency,
+        available: true,
+        eligible: false,
+        canRequest: true,
+        status: 'REQUIRES_INFORMATION',
+        reason: 'Additional information is required before activation.',
+        jurisdiction,
+        product: this.normalizeWalletProduct(product),
+        activeWallet: null,
+        pendingActivation: pendingActivation
+          ? this.normalizeProviderOperation(pendingActivation)
+          : null,
+        ...requirementEvaluation,
+      };
+    }
+
+    const provider = this.walletProductCatalogService.providerConfigured(product);
+
+    return {
+      currency: normalizedCurrency,
+      available: true,
+      eligible: provider.configured,
+      canRequest: true,
+      status: provider.configured ? 'ELIGIBLE' : 'PROVIDER_NOT_CONFIGURED',
+      reason: provider.configured
+        ? 'All configured requirements are satisfied.'
+        : provider.blockedResponse.reason,
+      jurisdiction,
+      product: this.normalizeWalletProduct(product),
+      activeWallet: null,
+      pendingActivation: pendingActivation
+        ? this.normalizeProviderOperation(pendingActivation)
+        : null,
+      ...requirementEvaluation,
+      providerReadiness: {
+        provider: 'FINCRA',
+        configured: provider.configured,
+        missingRequirements: provider.missingRequirements,
+      },
+    };
+  }
+
+  private async evaluateWalletRequirements(
+    user: User,
+    product: WalletProduct,
+  ) {
+    const kyc = await this.getKycProfileForSession(user);
+    const satisfiedRequirements: Array<{
+      key: string;
+      label: string;
+      source: string;
+    }> = [];
+    const missingRequirements: Array<{
+      key: string;
+      label: string;
+      source: string;
+      providerReference?: string | null;
+    }> = [];
+
+    for (const requirement of product.requirements) {
+      if (this.isWalletRequirementSatisfied(requirement, user, kyc)) {
+        satisfiedRequirements.push({
+          key: requirement.key,
+          label: requirement.label,
+          source: requirement.source,
+        });
+      } else {
+        missingRequirements.push({
+          key: requirement.key,
+          label: requirement.label,
+          source: requirement.source,
+          providerReference: requirement.providerReference ?? null,
+        });
+      }
+    }
+
+    return {
+      requirementsConfigured: product.requirementsConfigured,
+      satisfiedRequirements,
+      missingRequirements,
+    };
+  }
+
+  private isWalletRequirementSatisfied(
+    requirement: WalletProductRequirement,
+    user: User,
+    kyc: KycProfile,
+  ) {
+    const identity = this.asRecord(kyc.identity) ?? {};
+    const sections = Array.isArray(kyc.sections) ? kyc.sections : [];
+    const uploads = Array.isArray(kyc.uploads) ? kyc.uploads : [];
+    const key = requirement.key.toLowerCase();
+
+    if (key === 'legal_name') {
+      return Boolean(
+        (this.asString(user.firstName) && this.asString(user.lastName)) ||
+          this.asString(identity.legalName) ||
+          this.asString(identity.fullName),
+      );
+    }
+    if (key === 'date_of_birth') {
+      return Boolean(
+        this.asString(user.dateOfBirth) || this.asString(identity.dateOfBirth),
+      );
+    }
+    if (key === 'address') {
+      return Boolean(
+        this.asString(identity.address) ||
+          this.asString(identity.residentialAddress) ||
+          sections.some(
+            (section) =>
+              this.asString(section.section)?.toUpperCase() === 'ADDRESS' &&
+              ['SUBMITTED', 'UNDER_REVIEW', 'VERIFIED'].includes(
+                String(section.status),
+              ),
+          ),
+      );
+    }
+    if (key === 'government_id') {
+      return Boolean(
+        this.asString(identity.nin) ||
+          this.asString(identity.bvn) ||
+          this.asString(identity.idNumber) ||
+          this.asString(identity.documentNumber) ||
+          sections.some(
+            (section) =>
+              this.asString(section.section)?.toUpperCase() ===
+                'GOVERNMENT_ID' &&
+              ['SUBMITTED', 'UNDER_REVIEW', 'VERIFIED'].includes(
+                String(section.status),
+              ),
+          ),
+      );
+    }
+    if (key === 'proof_of_address') {
+      return uploads.some((upload) => {
+        const type = this.asString(upload.type)?.toLowerCase();
+        const section = this.asString(upload.section)?.toLowerCase();
+        return (
+          type === 'proof_of_address' ||
+          type === 'address' ||
+          section === 'address'
+        );
+      });
+    }
+
+    return Boolean(identity[key]);
+  }
+
+  private findWalletActivationOperation(userId: string, currency: string) {
+    return this.providerOperationRepository.findOne({
+      where: {
+        userId,
+        type: 'wallet_activation',
+        idempotencyKey: this.walletActivationIdempotencyKey(userId, currency),
+      },
+    });
+  }
+
+  private walletActivationIdempotencyKey(userId: string, currency: string) {
+    return `wallet_activation:${userId}:${currency}`;
+  }
+
+  private async getKycProfileSnapshot(user: User): Promise<KycProfile> {
+    try {
+      const existing = await this.kycProfileRepository.findOne({
+        where: { userId: user.id },
+      });
+      if (existing) return existing;
+    } catch (error) {
+      if (!this.isMissingTable(error, 'kyc_profile')) {
+        throw error;
+      }
+    }
+
+    const status = user.kycStatus ?? 'NOT_STARTED';
+    const region = this.inferRegion(user);
+    return this.kycProfileRepository.create({
+      userId: user.id,
+      region,
+      provider: null,
+      status,
+      statusMessage: null,
+      rejectionReason: null,
+      providerReference: null,
+      sections: this.defaultKycSections(region, status),
+      uploads: [],
+      identity: {},
+      capabilities: this.capabilitiesForKycStatus(status),
+      limits: this.defaultLimits(status),
+    });
+  }
+
+  private normalizeWalletProduct(product: WalletProduct) {
+    return {
+      currency: product.currency,
+      provider: product.provider,
+      enabled: product.enabled,
+      accountType: product.accountType,
+      tier: product.tier,
+      primary: product.tier === 'PRIMARY',
+      additional: product.tier === 'ADDITIONAL',
+      supportedJurisdictions: product.supportedJurisdictions,
+      canProvision: product.canProvision,
+      requirementsConfigured: product.requirementsConfigured,
+      requirements: product.requirements,
+      providerProductId: product.providerProductId,
+      providerMetadata: product.providerMetadata,
+    };
+  }
+
+  private normalizeProviderOperation(operation: ProviderOperation) {
+    return {
+      id: operation.id,
+      reference: operation.reference,
+      status: operation.status,
+      currency: operation.currency,
+      provider: operation.provider,
+      providerReference: operation.providerReference,
+      errorCode: operation.errorCode,
+      failureReason: operation.failureReason,
+      createdAt: operation.createdAt,
+      updatedAt: operation.updatedAt,
+    };
   }
 
   private async findUser(userId: string) {
@@ -3002,6 +3540,43 @@ export class VidalpayService {
     }
 
     throw new ServiceUnavailableException(blocked);
+  }
+
+  private async assertCapabilityProductAccess(
+    userId: string,
+    capability: ProviderCapability,
+  ) {
+    const product = this.productForCapability(capability);
+    if (product) {
+      await this.assertProductAccess(userId, product);
+      return;
+    }
+    await this.findUser(userId);
+  }
+
+  private async assertProductAccess(userId: string, product: ProductCode) {
+    const user = await this.findUser(userId);
+    const eligibility = this.productEligibilityService.evaluate(user, product);
+    if (
+      !eligibility.enabled &&
+      eligibility.blockedResponse &&
+      eligibility.status !== 'PROVIDER_NOT_CONFIGURED'
+    ) {
+      throw new ServiceUnavailableException(eligibility.blockedResponse);
+    }
+    return { user, eligibility };
+  }
+
+  private productForCapability(
+    capability: ProviderCapability,
+  ): ProductCode | null {
+    if (capability.startsWith('crypto_')) return 'crypto';
+    if (capability.startsWith('investments_')) return 'investments';
+    if (capability.startsWith('usd_loan') || capability === 'usd_loans') {
+      return 'lending';
+    }
+    if (capability === 'tax') return 'foreign_tax';
+    return null;
   }
 
   private throwProviderUnavailable(input: {

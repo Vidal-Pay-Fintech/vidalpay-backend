@@ -18,6 +18,16 @@ import { VidalpayService } from './vidalpay.service';
 
 type AnyRecord = Record<string, unknown>;
 
+@Controller('me')
+export class MeController {
+  constructor(private readonly vidalpayService: VidalpayService) {}
+
+  @Get('capabilities')
+  capabilities(@ActiveUser() user: ActiveUserData) {
+    return this.vidalpayService.getProductCapabilities(user.sub);
+  }
+}
+
 @Controller('providers')
 export class ProvidersController {
   constructor(private readonly vidalpayService: VidalpayService) {}
@@ -25,6 +35,13 @@ export class ProvidersController {
   @Get('status')
   status() {
     return this.vidalpayService.getProviderStatuses();
+  }
+
+  @Auth(AuthType.Bearer)
+  @Roles(Role.ADMIN, Role.SUPER_ADMIN)
+  @Get('fincra/sandbox-probe')
+  fincraSandboxProbe() {
+    return this.vidalpayService.probeFincraSandbox();
   }
 }
 

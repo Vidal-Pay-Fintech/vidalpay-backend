@@ -27,6 +27,7 @@ import {
   AdminKycController,
   LegalController,
   LoansController,
+  MeController,
   MoneyRequestsController,
   NotificationsController,
   ProvidersController,
@@ -41,8 +42,12 @@ import {
 } from './vidalpay.controller';
 import { ProviderHttpService } from './provider-http.service';
 import { ProviderStatusService } from './provider-status.service';
+import { FincraSandboxService } from './fincra-sandbox.service';
+import { ProductEligibilityService } from './product-eligibility.service';
+import { JurisdictionService } from './jurisdiction.service';
 import { SandboxProviderService } from './sandbox-provider.service';
 import { VidalpayService } from './vidalpay.service';
+import { WalletProductCatalogService } from './wallet-product-catalog.service';
 
 @Global()
 @Module({
@@ -76,6 +81,7 @@ import { VidalpayService } from './vidalpay.service';
     AdminKycController,
     LegalController,
     LoansController,
+    MeController,
     MoneyRequestsController,
     NotificationsController,
     ProvidersController,
@@ -90,8 +96,12 @@ import { VidalpayService } from './vidalpay.service';
   ],
   providers: [
     ConfigService,
+    FincraSandboxService,
     ProviderHttpService,
     ProviderStatusService,
+    ProductEligibilityService,
+    JurisdictionService,
+    WalletProductCatalogService,
     SandboxProviderService,
     VidalpayService,
   ],
