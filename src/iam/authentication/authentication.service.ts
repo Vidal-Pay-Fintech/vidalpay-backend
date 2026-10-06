@@ -292,7 +292,8 @@ export class AuthenticationService {
       throw new BadRequestException(API_MESSAGES.USER_NOT_FOUND);
     }
 
-    if (admin.role !== UserRole.ADMIN) {
+    const allowedAdminRoles = [UserRole.ADMIN, UserRole.SUPER_ADMIN];
+    if (!allowedAdminRoles.includes(admin.role)) {
       throw new UnauthorizedException(API_MESSAGES.UNAUTHORIZED_ACCESS);
     }
 

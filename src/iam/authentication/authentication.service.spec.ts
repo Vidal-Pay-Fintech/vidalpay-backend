@@ -119,6 +119,55 @@ describe('AuthenticationService', () => {
     service = module.get<AuthenticationService>(AuthenticationService);
   });
 
+  it('allows super admins to use the admin login endpoint', async () => {
+    const admin = {
+      id: 'admin-1',
+      email: 'admin@example.com',
+      password: 'hashed-password',
+      role: UserRole.SUPER_ADMIN,
+      status: AccountStatus.ACTIVE,
+    } as User;
+    userRepository.findUserByEmail.mockResolvedValue(admin);
+    hashingService.compare.mockResolvedValue(true);
+    jwtService.signAsync
+      .mockResolvedValueOnce('access-token')
+      .mockResolvedValueOnce('refresh-token');
+
+    await expect(
+      service.adminSignIn({ email: admin.email, password: 'secret' } as any),
+    ).resolves.toEqual(
+      expect.objectContaining({
+        accessToken: 'access-token',
+        refreshToken: 'refresh-token',
+        admin: expect.objectContaining({
+          id: 'admin-1',
+          role: UserRole.SUPER_ADMIN,
+        }),
+      }),
+    );
+    expect(hashingService.compare).toHaveBeenCalledWith(
+      'secret',
+      'hashed-password',
+    );
+  });
+
+  it('still rejects customer accounts from the admin login endpoint', async () => {
+    userRepository.findUserByEmail.mockResolvedValue({
+      id: 'user-1',
+      email: 'user@example.com',
+      password: 'hashed-password',
+      role: UserRole.CUSTOMER,
+    } as User);
+
+    await expect(
+      service.adminSignIn({
+        email: 'user@example.com',
+        password: 'secret',
+      } as any),
+    ).rejects.toBeInstanceOf(UnauthorizedException);
+    expect(hashingService.compare).not.toHaveBeenCalled();
+  });
+
   it('validates transaction PINs through backend-side hashing', async () => {
     userRepository.findUserById.mockResolvedValue({
       id: 'user-1',
