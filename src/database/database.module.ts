@@ -4,6 +4,8 @@ import { TypeOrmModule } from '@nestjs/typeorm';
 import { DataSource } from 'typeorm';
 import {
   addTransactionalDataSource,
+  deleteDataSourceByName,
+  getDataSourceByName,
   initializeTransactionalContext,
   StorageDriver,
 } from 'typeorm-transactional';
@@ -55,7 +57,20 @@ import { buildDatabaseDataSourceOptions } from './database.config';
         initializeTransactionalContext({
           storageDriver: StorageDriver.ASYNC_LOCAL_STORAGE,
         });
-        return await addTransactionalDataSource(new DataSource(options));
+
+        // Render/Nest startup can load this module in a process where
+        // typeorm-transactional already has a default DataSource registered.
+        // The registry is in-memory only; clearing the stale entry prevents
+        // startup from failing with `DataSource with name \"default\" has already added`
+        // without touching the production database, schema, balances, or records.
+        if (getDataSourceByName('default')) {
+          deleteDataSourceByName('default');
+        }
+
+        return await addTransactionalDataSource({
+          name: 'default',
+          dataSource: new DataSource(options),
+        });
       },
       inject: [ConfigService],
     }),
