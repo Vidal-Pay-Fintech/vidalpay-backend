@@ -364,8 +364,8 @@ export class VidalpayService {
 
   async getAvailableWalletProducts(userId: string) {
     const user = await this.findUser(userId);
-    const jurisdiction = this.productEligibilityService.capabilities(user)
-      .jurisdiction;
+    const jurisdiction =
+      this.productEligibilityService.capabilities(user).jurisdiction;
     const [wallets, products] = await Promise.all([
       this.walletRepository.find({ where: { userId } }),
       Promise.resolve(
@@ -1173,6 +1173,274 @@ export class VidalpayService {
         generatedAt: new Date().toISOString(),
         transactions,
       },
+    };
+  }
+
+  async listAdminUsers(params: AnyRecord) {
+    const page = Math.max(Number(params.page ?? 1) || 1, 1);
+    const limit = Math.min(Math.max(Number(params.limit ?? 50) || 50, 1), 100);
+    const query = this.userRepository.createQueryBuilder('user');
+
+    const search = this.asString(params.search);
+    if (search) {
+      const normalizedSearch = `%${search.toLowerCase()}%`;
+      query.andWhere(
+        `(LOWER(user.email) LIKE :search OR LOWER(user.firstName) LIKE :search OR LOWER(user.lastName) LIKE :search OR LOWER(user.phoneNumber) LIKE :search OR LOWER(user.tagId) LIKE :search OR LOWER(user.id) LIKE :search)`,
+        { search: normalizedSearch },
+      );
+    }
+
+    const status = this.asString(params.status);
+    if (status) {
+      query.andWhere('user.status = :status', { status });
+    }
+
+    const role = this.asString(params.role);
+    if (role) {
+      query.andWhere('user.role = :role', { role });
+    }
+
+    const kycStatus = this.asString(params.kycStatus);
+    if (kycStatus) {
+      query.andWhere('user.kycStatus = :kycStatus', { kycStatus });
+    }
+
+    const [users, total] = await query
+      .orderBy('user.createdAt', 'DESC')
+      .skip((page - 1) * limit)
+      .take(limit)
+      .getManyAndCount();
+
+    return {
+      items: users.map((user) => this.normalizeAdminDirectoryUser(user)),
+      meta: {
+        total,
+        page,
+        limit,
+        pages: Math.ceil(total / limit),
+      },
+    };
+  }
+
+  async getAdminUser(userId: string) {
+    const user = await this.userRepository.findOne({ where: { id: userId } });
+    if (!user) {
+      throw new NotFoundException('User not found');
+    }
+
+    const [wallets, kyc, actions] = await Promise.all([
+      this.walletRepository.find({
+        where: { userId },
+        order: { createdAt: 'ASC' },
+      }),
+      this.kycProfileRepository
+        .findOne({ where: { userId } })
+        .catch((error) => {
+          if (this.isMissingTable(error, 'kyc_profile')) return null;
+          throw error;
+        }),
+      this.providerOperationRepository
+        .find({
+          where: { userId, type: 'kyc_admin_review' },
+          order: { createdAt: 'DESC' },
+          take: 50,
+        })
+        .catch((error) => {
+          if (this.isMissingTable(error, 'provider_operation')) return [];
+          throw error;
+        }),
+    ]);
+
+    return {
+      user: this.normalizeAdminDirectoryUser(user),
+      wallets: wallets.map((wallet) => this.normalizeWallet(wallet)),
+      kyc: kyc ? this.normalizeKycProfile(kyc) : null,
+      documents: this.adminKycDocuments(kyc),
+      actions: actions.map((action) => this.normalizeAdminAction(action)),
+    };
+  }
+
+  async getAdminFinanceOverview() {
+    const [ledgerEntries, providerOperations, recentProviderOperations] =
+      await Promise.all([
+        this.transactionRepository.count().catch((error) => {
+          this.throwMissingFeatureStorage(
+            error,
+            'transaction_history',
+            'financial_transaction',
+          );
+        }),
+        this.providerOperationRepository.count().catch((error) => {
+          if (this.isMissingTable(error, 'provider_operation')) return 0;
+          throw error;
+        }),
+        this.providerOperationRepository
+          .find({ order: { createdAt: 'DESC' }, take: 8 })
+          .catch((error) => {
+            if (this.isMissingTable(error, 'provider_operation')) return [];
+            throw error;
+          }),
+      ]);
+
+    return {
+      counts: {
+        ledgerEntries: ledgerEntries ?? 0,
+        providerOperations,
+        reconciliationRuns: 0,
+      },
+      recent: {
+        providerOperations: recentProviderOperations.map((operation) => ({
+          id: operation.id,
+          provider: operation.provider,
+          operationType: operation.type,
+          status: operation.status,
+          createdAt: operation.createdAt,
+        })),
+      },
+    };
+  }
+
+  async listAdminMoneyEvents(params: AnyRecord) {
+    const page = Math.max(Number(params.page ?? 1) || 1, 1);
+    const limit = Math.min(
+      Math.max(Number(params.limit ?? params.take ?? 50) || 50, 1),
+      100,
+    );
+    const query = this.transactionRepository.createQueryBuilder('transaction');
+
+    const search = this.asString(params.search);
+    if (search) {
+      const normalizedSearch = `%${search.toLowerCase()}%`;
+      query.andWhere(
+        `(LOWER(transaction.id) LIKE :search OR LOWER(transaction.reference) LIKE :search OR LOWER(transaction.userId) LIKE :search OR LOWER(transaction.providerReference) LIKE :search OR LOWER(transaction.operationReference) LIKE :search)`,
+        { search: normalizedSearch },
+      );
+    }
+
+    const currency = this.asString(params.currency)?.toUpperCase();
+    if (currency) {
+      query.andWhere('transaction.currency = :currency', { currency });
+    }
+
+    const status = this.asString(params.status);
+    if (status) {
+      query.andWhere('transaction.status = :status', { status });
+    }
+
+    const [transactions, total] = await query
+      .orderBy('transaction.createdAt', 'DESC')
+      .skip((page - 1) * limit)
+      .take(limit)
+      .getManyAndCount()
+      .catch((error) => {
+        this.throwMissingFeatureStorage(
+          error,
+          'transaction_history',
+          'financial_transaction',
+        );
+      });
+
+    return {
+      items: transactions.map((transaction) =>
+        this.normalizeAdminMoneyEvent(transaction),
+      ),
+      meta: {
+        total,
+        page,
+        limit,
+        pages: Math.ceil(total / limit),
+      },
+    };
+  }
+
+  async getAdminMoneyEvent(id: string) {
+    const transaction = await this.transactionRepository.findOne({
+      where: [{ id }, { reference: id }, { operationReference: id }],
+    });
+    if (!transaction) {
+      throw new NotFoundException('Money event not found');
+    }
+    return {
+      moneyEvent: this.normalizeAdminMoneyEvent(transaction),
+      ledgerEntry: this.normalizeAdminMoneyEvent(transaction),
+    };
+  }
+
+  async listAdminProviderOperations(params: AnyRecord) {
+    const page = Math.max(Number(params.page ?? 1) || 1, 1);
+    const limit = Math.min(
+      Math.max(Number(params.limit ?? params.take ?? 50) || 50, 1),
+      100,
+    );
+    const query =
+      this.providerOperationRepository.createQueryBuilder('operation');
+
+    const search = this.asString(params.search);
+    if (search) {
+      const normalizedSearch = `%${search.toLowerCase()}%`;
+      query.andWhere(
+        `(LOWER(operation.id) LIKE :search OR LOWER(operation.reference) LIKE :search OR LOWER(operation.userId) LIKE :search OR LOWER(operation.providerReference) LIKE :search)`,
+        { search: normalizedSearch },
+      );
+    }
+
+    const status = this.asString(params.status);
+    if (status) {
+      query.andWhere('operation.status = :status', { status });
+    }
+
+    const [operations, total] = await query
+      .orderBy('operation.createdAt', 'DESC')
+      .skip((page - 1) * limit)
+      .take(limit)
+      .getManyAndCount()
+      .catch((error): [ProviderOperation[], number] => {
+        if (this.isMissingTable(error, 'provider_operation')) return [[], 0];
+        throw error;
+      });
+
+    return {
+      items: operations.map((operation) =>
+        this.normalizeAdminProviderOperation(operation),
+      ),
+      meta: {
+        total,
+        page,
+        limit,
+        pages: Math.ceil(total / limit),
+      },
+    };
+  }
+
+  async getAdminProviderOperation(id: string) {
+    const operation = await this.providerOperationRepository.findOne({
+      where: [{ id }, { reference: id }, { providerReference: id }],
+    });
+    if (!operation) {
+      throw new NotFoundException('Provider operation not found');
+    }
+    const linkedTransactions = await this.transactionRepository
+      .find({
+        where: [
+          { operationReference: operation.reference },
+          { providerReference: operation.providerReference ?? '' },
+        ],
+        order: { createdAt: 'DESC' },
+      })
+      .catch((error) => {
+        if (this.isMissingTable(error, 'financial_transaction')) return [];
+        throw error;
+      });
+
+    return {
+      operation: this.normalizeAdminProviderOperation(operation),
+      providerOperation: this.normalizeAdminProviderOperation(operation),
+      moneyEvent: linkedTransactions[0]
+        ? this.normalizeAdminMoneyEvent(linkedTransactions[0])
+        : null,
+      ledgerEntries: linkedTransactions.map((transaction) =>
+        this.normalizeAdminMoneyEvent(transaction),
+      ),
     };
   }
 
@@ -2539,10 +2807,11 @@ export class VidalpayService {
     const normalizedCurrency =
       this.walletProductCatalogService.normalizeCurrency(currency);
     const product = this.walletProductCatalogService.find(normalizedCurrency);
-    const jurisdiction = this.productEligibilityService.capabilities(user)
-      .jurisdiction;
+    const jurisdiction =
+      this.productEligibilityService.capabilities(user).jurisdiction;
     const wallets =
-      knownWallets ?? (await this.walletRepository.find({ where: { userId: user.id } }));
+      knownWallets ??
+      (await this.walletRepository.find({ where: { userId: user.id } }));
     const activeWallet =
       wallets.find((wallet) => wallet.currency === normalizedCurrency) ?? null;
     const pendingActivation = await this.findWalletActivationOperation(
@@ -2657,7 +2926,8 @@ export class VidalpayService {
       };
     }
 
-    const provider = this.walletProductCatalogService.providerConfigured(product);
+    const provider =
+      this.walletProductCatalogService.providerConfigured(product);
 
     return {
       currency: normalizedCurrency,
@@ -2683,10 +2953,7 @@ export class VidalpayService {
     };
   }
 
-  private async evaluateWalletRequirements(
-    user: User,
-    product: WalletProduct,
-  ) {
+  private async evaluateWalletRequirements(user: User, product: WalletProduct) {
     const kyc = await this.getKycProfileForSession(user);
     const satisfiedRequirements: Array<{
       key: string;
@@ -2737,8 +3004,8 @@ export class VidalpayService {
     if (key === 'legal_name') {
       return Boolean(
         (this.asString(user.firstName) && this.asString(user.lastName)) ||
-          this.asString(identity.legalName) ||
-          this.asString(identity.fullName),
+        this.asString(identity.legalName) ||
+        this.asString(identity.fullName),
       );
     }
     if (key === 'date_of_birth') {
@@ -2749,30 +3016,29 @@ export class VidalpayService {
     if (key === 'address') {
       return Boolean(
         this.asString(identity.address) ||
-          this.asString(identity.residentialAddress) ||
-          sections.some(
-            (section) =>
-              this.asString(section.section)?.toUpperCase() === 'ADDRESS' &&
-              ['SUBMITTED', 'UNDER_REVIEW', 'VERIFIED'].includes(
-                String(section.status),
-              ),
-          ),
+        this.asString(identity.residentialAddress) ||
+        sections.some(
+          (section) =>
+            this.asString(section.section)?.toUpperCase() === 'ADDRESS' &&
+            ['SUBMITTED', 'UNDER_REVIEW', 'VERIFIED'].includes(
+              String(section.status),
+            ),
+        ),
       );
     }
     if (key === 'government_id') {
       return Boolean(
         this.asString(identity.nin) ||
-          this.asString(identity.bvn) ||
-          this.asString(identity.idNumber) ||
-          this.asString(identity.documentNumber) ||
-          sections.some(
-            (section) =>
-              this.asString(section.section)?.toUpperCase() ===
-                'GOVERNMENT_ID' &&
-              ['SUBMITTED', 'UNDER_REVIEW', 'VERIFIED'].includes(
-                String(section.status),
-              ),
-          ),
+        this.asString(identity.bvn) ||
+        this.asString(identity.idNumber) ||
+        this.asString(identity.documentNumber) ||
+        sections.some(
+          (section) =>
+            this.asString(section.section)?.toUpperCase() === 'GOVERNMENT_ID' &&
+            ['SUBMITTED', 'UNDER_REVIEW', 'VERIFIED'].includes(
+              String(section.status),
+            ),
+        ),
       );
     }
     if (key === 'proof_of_address') {
@@ -3084,6 +3350,128 @@ export class VidalpayService {
         retryable: false,
       }),
     );
+  }
+
+  private normalizeAdminDirectoryUser(user: User) {
+    return {
+      id: user.id,
+      email: user.email,
+      firstName: user.firstName ?? null,
+      lastName: user.lastName ?? null,
+      phoneNumber: user.phoneNumber ?? null,
+      tagId: user.tagId ?? null,
+      role: user.role,
+      status: user.status,
+      accountStatus: user.accountStatus ?? null,
+      isVerified: user.isVerified,
+      isPhoneVerified: user.isPhoneVerified,
+      kycStatus: user.kycStatus ?? 'NOT_STARTED',
+      kycProvider: null,
+      signupRegion: this.inferRegion(user),
+      defaultWalletCurrency:
+        this.inferRegion(user) === 'NG'
+          ? Currency.NGN
+          : this.inferRegion(user) === 'US'
+            ? Currency.USD
+            : null,
+      country: user.country ?? null,
+      profilePicture: user.profilePicture ?? null,
+      lastLogin: user.lastLogin ?? null,
+      createdAt: user.createdAt,
+      updatedAt: user.updatedAt,
+    };
+  }
+
+  private adminKycDocuments(kyc: KycProfile | null) {
+    const uploads = Array.isArray(kyc?.uploads) ? kyc.uploads : [];
+    return uploads.map((upload, index) => ({
+      id: this.asString(upload.id) ?? `${kyc?.id ?? 'kyc'}-${index + 1}`,
+      originalFileName:
+        this.asString(upload.originalFileName) ??
+        this.asString(upload.fileName) ??
+        this.asString(upload.name) ??
+        null,
+      documentType:
+        this.asString(upload.documentType) ??
+        this.asString(upload.type) ??
+        null,
+      category: this.asString(upload.category) ?? null,
+      stage:
+        this.asString(upload.stage) ?? this.asString(upload.section) ?? null,
+      storage: this.asString(upload.storage) ?? 'backend',
+      sizeBytes: Number(upload.sizeBytes ?? upload.size ?? 0) || 0,
+      uploadedAt:
+        this.asString(upload.uploadedAt) ??
+        this.asString(upload.createdAt) ??
+        kyc?.updatedAt ??
+        null,
+      contentAccess: 'RESTRICTED',
+    }));
+  }
+
+  private normalizeAdminAction(operation: ProviderOperation) {
+    return {
+      id: operation.id,
+      action: operation.type,
+      targetUserId: operation.userId,
+      actorId: this.asString(operation.metadata?.adminUserId) ?? null,
+      reason:
+        this.asString(operation.metadata?.reason) ??
+        operation.failureReason ??
+        'No reason recorded',
+      previousState: operation.requestPayload ?? null,
+      newState: operation.responsePayload ?? null,
+      createdAt: operation.createdAt,
+    };
+  }
+
+  private normalizeAdminMoneyEvent(transaction: FinancialTransaction) {
+    return {
+      id: transaction.id,
+      userId: transaction.userId,
+      walletId: transaction.walletId,
+      reference: transaction.reference,
+      operationReference: transaction.operationReference,
+      currency: transaction.currency,
+      amount: transaction.amount,
+      balanceBefore: transaction.balanceBefore,
+      balanceAfter: transaction.balanceAfter,
+      type: transaction.type,
+      direction: transaction.type,
+      status: transaction.status,
+      info: transaction.info,
+      description: transaction.description,
+      tag: transaction.tag,
+      provider: transaction.provider,
+      providerReference: transaction.providerReference,
+      idempotencyKey: transaction.idempotencyKey,
+      metadata: transaction.metadata,
+      createdAt: transaction.createdAt,
+      updatedAt: transaction.updatedAt,
+    };
+  }
+
+  private normalizeAdminProviderOperation(operation: ProviderOperation) {
+    return {
+      id: operation.id,
+      userId: operation.userId,
+      type: operation.type,
+      operationType: operation.type,
+      idempotencyKey: operation.idempotencyKey,
+      reference: operation.reference,
+      status: operation.status,
+      amount: operation.amount,
+      currency: operation.currency,
+      provider: operation.provider,
+      providerReference: operation.providerReference,
+      requestPayload: operation.requestPayload,
+      responsePayload: operation.responsePayload,
+      errorCode: operation.errorCode,
+      failureReason: operation.failureReason,
+      metadata: operation.metadata,
+      createdAt: operation.createdAt,
+      updatedAt: operation.updatedAt,
+    };
   }
 
   private normalizeAdminUser(user?: User) {

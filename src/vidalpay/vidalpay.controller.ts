@@ -62,6 +62,58 @@ export class KycController {
 
 @Auth(AuthType.Bearer)
 @Roles(Role.ADMIN, Role.SUPER_ADMIN)
+@Controller('admin')
+export class AdminController {
+  constructor(private readonly vidalpayService: VidalpayService) {}
+
+  @Get('users')
+  users(@Query() query: AnyRecord) {
+    return this.vidalpayService.listAdminUsers(query);
+  }
+
+  @Get('users/:userId')
+  user(@Param('userId') userId: string) {
+    return this.vidalpayService.getAdminUser(userId);
+  }
+
+  @Get('finance/overview')
+  financeOverview() {
+    return this.vidalpayService.getAdminFinanceOverview();
+  }
+
+  @Get('finance/money-events')
+  moneyEvents(@Query() query: AnyRecord) {
+    return this.vidalpayService.listAdminMoneyEvents(query);
+  }
+
+  @Get('finance/money-events/:id')
+  moneyEvent(@Param('id') id: string) {
+    return this.vidalpayService.getAdminMoneyEvent(id);
+  }
+
+  @Get('finance/ledger-entries')
+  ledgerEntries(@Query() query: AnyRecord) {
+    return this.vidalpayService.listAdminMoneyEvents(query);
+  }
+
+  @Get('finance/ledger-entries/:id')
+  ledgerEntry(@Param('id') id: string) {
+    return this.vidalpayService.getAdminMoneyEvent(id);
+  }
+
+  @Get('provider-operations')
+  providerOperations(@Query() query: AnyRecord) {
+    return this.vidalpayService.listAdminProviderOperations(query);
+  }
+
+  @Get('provider-operations/:id')
+  providerOperation(@Param('id') id: string) {
+    return this.vidalpayService.getAdminProviderOperation(id);
+  }
+}
+
+@Auth(AuthType.Bearer)
+@Roles(Role.ADMIN, Role.SUPER_ADMIN)
 @Controller('admin/kyc')
 export class AdminKycController {
   constructor(private readonly vidalpayService: VidalpayService) {}

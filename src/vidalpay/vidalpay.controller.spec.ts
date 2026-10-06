@@ -1,4 +1,5 @@
 import {
+  AdminController,
   AdminKycController,
   CardsController,
   KycController,
@@ -21,6 +22,13 @@ describe('VidalPay mobile contract controllers', () => {
   const service = {
     getProviderStatuses: jest.fn(),
     probeFincraSandbox: jest.fn(),
+    listAdminUsers: jest.fn(),
+    getAdminUser: jest.fn(),
+    getAdminFinanceOverview: jest.fn(),
+    listAdminMoneyEvents: jest.fn(),
+    getAdminMoneyEvent: jest.fn(),
+    listAdminProviderOperations: jest.fn(),
+    getAdminProviderOperation: jest.fn(),
     getProductCapabilities: jest.fn(),
     startKyc: jest.fn(),
     getKycStatus: jest.fn(),
@@ -82,10 +90,9 @@ describe('VidalPay mobile contract controllers', () => {
 
   it('rejects unauthenticated and ordinary users through the real roles guard', async () => {
     const reflector = {
-      getAllAndOverride: jest.fn().mockReturnValue([
-        Role.ADMIN,
-        Role.SUPER_ADMIN,
-      ]),
+      getAllAndOverride: jest
+        .fn()
+        .mockReturnValue([Role.ADMIN, Role.SUPER_ADMIN]),
     };
     const authService = {
       verifyToken: jest.fn(async (token: string) =>
@@ -107,12 +114,46 @@ describe('VidalPay mobile contract controllers', () => {
       }) as any;
 
     await expect(guard.canActivate(context(''))).resolves.toBe(false);
-    await expect(
-      guard.canActivate(context('Bearer user-token')),
-    ).resolves.toBe(false);
+    await expect(guard.canActivate(context('Bearer user-token'))).resolves.toBe(
+      false,
+    );
     await expect(
       guard.canActivate(context('Bearer admin-token')),
     ).resolves.toBe(true);
+  });
+
+  it('routes admin dashboard users and finance views to real backend readers', () => {
+    const controller = new AdminController(service as VidalpayService);
+    const query = { page: '1', limit: '50' } as any;
+
+    controller.users(query);
+    controller.user('user-1');
+    controller.financeOverview();
+    controller.moneyEvents(query);
+    controller.moneyEvent('txn-1');
+    controller.ledgerEntries(query);
+    controller.ledgerEntry('txn-2');
+    controller.providerOperations(query);
+    controller.providerOperation('op-1');
+
+    expect(service.listAdminUsers).toHaveBeenCalledWith(query);
+    expect(service.getAdminUser).toHaveBeenCalledWith('user-1');
+    expect(service.getAdminFinanceOverview).toHaveBeenCalled();
+    expect(service.listAdminMoneyEvents).toHaveBeenCalledTimes(2);
+    expect(service.getAdminMoneyEvent).toHaveBeenCalledWith('txn-1');
+    expect(service.getAdminMoneyEvent).toHaveBeenCalledWith('txn-2');
+    expect(service.listAdminProviderOperations).toHaveBeenCalledWith(query);
+    expect(service.getAdminProviderOperation).toHaveBeenCalledWith('op-1');
+  });
+
+  it('protects admin dashboard readers with Bearer auth and admin roles metadata', () => {
+    expect(Reflect.getMetadata(AUTH_TYPE_KEY, AdminController)).toEqual([
+      AuthType.Bearer,
+    ]);
+    expect(Reflect.getMetadata(ROLES_KEY, AdminController)).toEqual([
+      Role.ADMIN,
+      Role.SUPER_ADMIN,
+    ]);
   });
 
   it('exposes account product capabilities for mobile feature gating', () => {
@@ -120,9 +161,9 @@ describe('VidalPay mobile contract controllers', () => {
       products: {},
     });
 
-    expect(new MeController(service as VidalpayService).capabilities(user)).toEqual(
-      { products: {} },
-    );
+    expect(
+      new MeController(service as VidalpayService).capabilities(user),
+    ).toEqual({ products: {} });
     expect(service.getProductCapabilities).toHaveBeenCalledWith('user-1');
   });
 
