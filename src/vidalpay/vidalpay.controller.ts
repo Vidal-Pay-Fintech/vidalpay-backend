@@ -110,6 +110,26 @@ export class AdminController {
   providerOperation(@Param('id') id: string) {
     return this.vidalpayService.getAdminProviderOperation(id);
   }
+
+  @Get('support/tickets')
+  supportTickets(@Query() query: AnyRecord) {
+    return this.vidalpayService.listAdminSupportTickets(query);
+  }
+
+  @Get('support/tickets/:id')
+  supportTicket(@Param('id') id: string) {
+    return this.vidalpayService.getAdminSupportTicket(id);
+  }
+
+  @Get('support/whatsapp-conversations')
+  whatsappConversations(@Query() query: AnyRecord) {
+    return this.vidalpayService.listAdminWhatsAppConversations(query);
+  }
+
+  @Get('vtu/operations')
+  vtuOperations(@Query() query: AnyRecord) {
+    return this.vidalpayService.listAdminVtuOperations(query);
+  }
 }
 
 @Auth(AuthType.Bearer)
@@ -825,6 +845,47 @@ export class WebhooksController {
       'PayVessel',
       body,
       payVesselSignature ?? signature,
+    );
+  }
+
+  @Get('whatsapp')
+  whatsappVerify(@Query() query: AnyRecord) {
+    return this.vidalpayService.verifyWhatsAppWebhook(query);
+  }
+
+  @Post('whatsapp')
+  whatsapp(
+    @Body() body: AnyRecord,
+    @Headers('x-hub-signature-256') hubSignature?: string,
+    @Headers('x-signature') signature?: string,
+  ) {
+    return this.vidalpayService.handleWhatsAppWebhook(
+      body,
+      hubSignature ?? signature,
+    );
+  }
+
+  @Post('zendesk')
+  zendesk(
+    @Body() body: AnyRecord,
+    @Headers('x-zendesk-webhook-signature') zendeskSignature?: string,
+    @Headers('x-signature') signature?: string,
+  ) {
+    return this.vidalpayService.handleZendeskWebhook(
+      body,
+      zendeskSignature ?? signature,
+    );
+  }
+
+  @Post('vtu')
+  vtu(
+    @Body() body: AnyRecord,
+    @Headers('x-vtu-signature') vtuSignature?: string,
+    @Headers('x-signature') signature?: string,
+  ) {
+    return this.vidalpayService.handleVtuWebhook(
+      body,
+      vtuSignature ?? signature,
     );
   }
 }

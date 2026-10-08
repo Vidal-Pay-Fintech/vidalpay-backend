@@ -29,6 +29,10 @@ describe('VidalPay mobile contract controllers', () => {
     getAdminMoneyEvent: jest.fn(),
     listAdminProviderOperations: jest.fn(),
     getAdminProviderOperation: jest.fn(),
+    listAdminSupportTickets: jest.fn(),
+    getAdminSupportTicket: jest.fn(),
+    listAdminWhatsAppConversations: jest.fn(),
+    listAdminVtuOperations: jest.fn(),
     getProductCapabilities: jest.fn(),
     startKyc: jest.fn(),
     getKycStatus: jest.fn(),
@@ -135,6 +139,10 @@ describe('VidalPay mobile contract controllers', () => {
     controller.ledgerEntry('txn-2');
     controller.providerOperations(query);
     controller.providerOperation('op-1');
+    controller.supportTickets(query);
+    controller.supportTicket('ticket-1');
+    controller.whatsappConversations(query);
+    controller.vtuOperations(query);
 
     expect(service.listAdminUsers).toHaveBeenCalledWith(query);
     expect(service.getAdminUser).toHaveBeenCalledWith('user-1');
@@ -144,6 +152,10 @@ describe('VidalPay mobile contract controllers', () => {
     expect(service.getAdminMoneyEvent).toHaveBeenCalledWith('txn-2');
     expect(service.listAdminProviderOperations).toHaveBeenCalledWith(query);
     expect(service.getAdminProviderOperation).toHaveBeenCalledWith('op-1');
+    expect(service.listAdminSupportTickets).toHaveBeenCalledWith(query);
+    expect(service.getAdminSupportTicket).toHaveBeenCalledWith('ticket-1');
+    expect(service.listAdminWhatsAppConversations).toHaveBeenCalledWith(query);
+    expect(service.listAdminVtuOperations).toHaveBeenCalledWith(query);
   });
 
   it('protects admin dashboard readers with Bearer auth and admin roles metadata', () => {
@@ -296,6 +308,35 @@ describe('VidalPay mobile contract controllers', () => {
     expect(service.handleKycWebhook).toHaveBeenCalledWith(
       { eventId: 'event-1', status: 'VERIFIED' },
       'sha256=signature',
+    );
+  });
+
+  it('routes Zendesk, WhatsApp, and VTU webhooks without auth metadata', () => {
+    const controller = new WebhooksController(service as VidalpayService);
+    (service as any).verifyWhatsAppWebhook = jest.fn();
+    (service as any).handleWhatsAppWebhook = jest.fn();
+    (service as any).handleZendeskWebhook = jest.fn();
+    (service as any).handleVtuWebhook = jest.fn();
+
+    controller.whatsappVerify({ 'hub.challenge': 'challenge' });
+    controller.whatsapp({ entry: [] }, 'sha256=wa', undefined);
+    controller.zendesk({ ticket_id: '1' }, 'sha256=zd', undefined);
+    controller.vtu({ reference: 'vtu-1' }, 'sha256=vtu', undefined);
+
+    expect((service as any).verifyWhatsAppWebhook).toHaveBeenCalledWith({
+      'hub.challenge': 'challenge',
+    });
+    expect((service as any).handleWhatsAppWebhook).toHaveBeenCalledWith(
+      { entry: [] },
+      'sha256=wa',
+    );
+    expect((service as any).handleZendeskWebhook).toHaveBeenCalledWith(
+      { ticket_id: '1' },
+      'sha256=zd',
+    );
+    expect((service as any).handleVtuWebhook).toHaveBeenCalledWith(
+      { reference: 'vtu-1' },
+      'sha256=vtu',
     );
   });
 });

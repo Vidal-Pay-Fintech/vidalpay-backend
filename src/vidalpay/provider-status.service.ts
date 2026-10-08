@@ -298,6 +298,46 @@ export class ProviderStatusService {
       service: 'VidalPay support tickets',
       envVars: [],
     },
+    zendesk_support: {
+      provider: 'Zendesk',
+      providerType: 'SUPPORT',
+      service: 'Zendesk ticket sync and ticket-status webhooks',
+      envVars: ['ZENDESK_SUBDOMAIN', 'ZENDESK_OAUTH_TOKEN'],
+    },
+    whatsapp_support: {
+      provider: 'WhatsApp Cloud API',
+      providerType: 'SUPPORT_CHAT',
+      service: 'WhatsApp live support conversations and webhooks',
+      envVars: [
+        'WHATSAPP_PHONE_NUMBER_ID',
+        'WHATSAPP_ACCESS_TOKEN',
+        'WHATSAPP_WEBHOOK_VERIFY_TOKEN',
+      ],
+    },
+    vtu_catalog: {
+      provider: 'VTU provider',
+      providerType: 'BILLS',
+      service: 'VTU airtime/data/utility catalog',
+      envVars: ['VTU_PROVIDER', 'VTU_BASE_URL', 'VTU_API_KEY'],
+    },
+    vtu_validate: {
+      provider: 'VTU provider',
+      providerType: 'BILLS',
+      service: 'VTU utility customer validation',
+      envVars: ['VTU_PROVIDER', 'VTU_BASE_URL', 'VTU_API_KEY'],
+    },
+    vtu_purchase: {
+      provider: 'VTU provider',
+      providerType: 'BILLS',
+      service: 'VTU airtime/data/utility purchase',
+      envVars: ['VTU_PROVIDER', 'VTU_BASE_URL', 'VTU_API_KEY'],
+    },
+    vtu_requery: {
+      provider: 'VTU provider',
+      providerType: 'BILLS',
+      service: 'VTU transaction status requery',
+      envVars: ['VTU_PROVIDER', 'VTU_BASE_URL', 'VTU_API_KEY'],
+    },
     disputes: {
       provider: 'VidalPay',
       providerType: 'INTERNAL',

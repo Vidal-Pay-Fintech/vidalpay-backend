@@ -675,6 +675,25 @@ export class VidalpayService {
       data: 'data_catalog',
       utilities: 'utilities_catalog',
     };
+    const vtuCapabilityByKind: Record<typeof kind, ProviderCapability> = {
+      airtime: 'vtu_catalog',
+      data: 'vtu_catalog',
+      utilities: 'vtu_catalog',
+    };
+    const vtuStatus = this.providerStatusService.getStatus(
+      vtuCapabilityByKind[kind],
+    );
+    if (vtuStatus.enabled) {
+      return {
+        region: 'NG',
+        provider: vtuStatus.provider,
+        source: 'PROVIDER_CONFIGURED_NOT_LIVE_TESTED',
+        message:
+          'VTU provider credentials are configured, but the exact provider catalog contract has not been implemented and live-tested yet.',
+        ...(kind === 'utilities' ? { categories: [] } : { networks: [] }),
+      };
+    }
+
     const status = this.providerStatusService.getStatus(capabilityByKind[kind]);
     if (
       this.configService.get<string>('RELOADLY_CLIENT_ID') &&
@@ -729,6 +748,21 @@ export class VidalpayService {
           'Utility validation is available only for Nigeria-based accounts.',
       });
     }
+    const vtuStatus = this.providerStatusService.getStatus('vtu_validate');
+    if (vtuStatus.enabled) {
+      throw new ServiceUnavailableException(
+        createBlockedResponse({
+          code: 'VTU_ADAPTER_NOT_IMPLEMENTED',
+          feature: 'Utility customer validation',
+          capability: 'vtu_validate',
+          provider: vtuStatus.provider,
+          reason:
+            'VTU credentials are configured, but the exact provider validation request and response contract has not been implemented and live-tested yet.',
+          missingRequirements: ['VTU_PROVIDER_API_DOCUMENTATION'],
+          retryable: false,
+        }),
+      );
+    }
     if (
       this.configService.get<string>('RELOADLY_CLIENT_ID') &&
       this.configService.get<string>('RELOADLY_CLIENT_SECRET')
@@ -775,6 +809,7 @@ export class VidalpayService {
       data: 'data_purchase',
       utilities: 'utilities_payment',
     };
+    const vtuCapability: ProviderCapability = 'vtu_purchase';
     const user = await this.findUser(userId);
     if (this.inferRegion(user) !== 'NG') {
       await this.recordBlockedOperation(userId, type, payload, {
@@ -804,6 +839,16 @@ export class VidalpayService {
       where: { userId, type, idempotencyKey },
     });
     if (existing) return this.normalizeOperation(existing);
+
+    const vtuStatus = this.providerStatusService.getStatus(vtuCapability);
+    if (vtuStatus.enabled) {
+      await this.recordBlockedOperation(userId, type, payload, {
+        provider: vtuStatus.provider,
+        capability: vtuCapability,
+        reason:
+          'VTU credentials are configured, but production recharge/bill payment remains blocked until the exact provider API contract, requery flow, wallet hold, ledger finalization, and reversal behavior are implemented and tested.',
+      });
+    }
 
     if (
       this.configService.get<string>('RELOADLY_CLIENT_ID') &&
@@ -1387,6 +1432,156 @@ export class VidalpayService {
     const status = this.asString(params.status);
     if (status) {
       query.andWhere('operation.status = :status', { status });
+    }
+
+    const type = this.asString(params.type ?? params.operationType);
+    if (type) {
+      query.andWhere('operation.type = :type', { type });
+    }
+
+    const provider = this.asString(params.provider);
+    if (provider) {
+      query.andWhere('LOWER(operation.provider) = :provider', {
+        provider: provider.toLowerCase(),
+      });
+    }
+
+    const userId = this.asString(params.userId);
+    if (userId) {
+      query.andWhere('operation.userId = :userId', { userId });
+    }
+
+    const [operations, total] = await query
+      .orderBy('operation.createdAt', 'DESC')
+      .skip((page - 1) * limit)
+      .take(limit)
+      .getManyAndCount()
+      .catch((error): [ProviderOperation[], number] => {
+        if (this.isMissingTable(error, 'provider_operation')) return [[], 0];
+        throw error;
+      });
+
+    return {
+      items: operations.map((operation) =>
+        this.normalizeAdminProviderOperation(operation),
+      ),
+      meta: {
+        total,
+        page,
+        limit,
+        pages: Math.ceil(total / limit),
+      },
+    };
+  }
+
+  async listAdminSupportTickets(params: AnyRecord) {
+    const page = Math.max(Number(params.page ?? 1) || 1, 1);
+    const limit = Math.min(
+      Math.max(Number(params.limit ?? params.take ?? 50) || 50, 1),
+      100,
+    );
+    const query = this.supportTicketRepository.createQueryBuilder('ticket');
+
+    const search = this.asString(params.search);
+    if (search) {
+      const normalizedSearch = `%${search.toLowerCase()}%`;
+      query.andWhere(
+        `(LOWER(ticket.id) LIKE :search OR LOWER(ticket.userId) LIKE :search OR LOWER(ticket.subject) LIKE :search OR LOWER(ticket.category) LIKE :search)`,
+        { search: normalizedSearch },
+      );
+    }
+
+    const status = this.asString(params.status);
+    if (status) {
+      query.andWhere('ticket.status = :status', { status });
+    }
+
+    const category = this.asString(params.category);
+    if (category) {
+      query.andWhere('LOWER(ticket.category) = :category', {
+        category: category.toLowerCase(),
+      });
+    }
+
+    const userId = this.asString(params.userId);
+    if (userId) {
+      query.andWhere('ticket.userId = :userId', { userId });
+    }
+
+    const [tickets, total] = await query
+      .orderBy('ticket.createdAt', 'DESC')
+      .skip((page - 1) * limit)
+      .take(limit)
+      .getManyAndCount()
+      .catch((error): [SupportTicket[], number] => {
+        if (this.isMissingTable(error, 'support_ticket')) return [[], 0];
+        throw error;
+      });
+
+    return {
+      items: tickets.map((ticket) => this.normalizeAdminSupportTicket(ticket)),
+      meta: {
+        total,
+        page,
+        limit,
+        pages: Math.ceil(total / limit),
+      },
+    };
+  }
+
+  async getAdminSupportTicket(id: string) {
+    const ticket = await this.supportTicketRepository.findOne({
+      where: { id },
+    });
+    if (!ticket) {
+      throw new NotFoundException('Support ticket not found');
+    }
+    return {
+      ticket: this.normalizeAdminSupportTicket(ticket),
+    };
+  }
+
+  async listAdminWhatsAppConversations(params: AnyRecord) {
+    return this.listAdminProviderOperations({
+      ...params,
+      type: 'whatsapp_webhook',
+    });
+  }
+
+  async listAdminVtuOperations(params: AnyRecord) {
+    const page = Math.max(Number(params.page ?? 1) || 1, 1);
+    const limit = Math.min(
+      Math.max(Number(params.limit ?? params.take ?? 50) || 50, 1),
+      100,
+    );
+    const query =
+      this.providerOperationRepository.createQueryBuilder('operation');
+
+    query.andWhere(
+      `(operation.type IN (:...types) OR LOWER(operation.provider) LIKE :provider)`,
+      {
+        types: ['airtime', 'data', 'utilities', 'vtu_webhook'],
+        provider: '%vtu%',
+      },
+    );
+
+    const search = this.asString(params.search);
+    if (search) {
+      const normalizedSearch = `%${search.toLowerCase()}%`;
+      query.andWhere(
+        `(LOWER(operation.id) LIKE :search OR LOWER(operation.reference) LIKE :search OR LOWER(operation.userId) LIKE :search OR LOWER(operation.providerReference) LIKE :search)`,
+        { search: normalizedSearch },
+      );
+    }
+
+    const status = this.asString(params.status);
+    if (status) {
+      query.andWhere('operation.status = :status', { status });
+    }
+
+    const userId = this.asString(params.userId);
+    if (userId) {
+      query.andWhere('operation.userId = :userId', { userId });
     }
 
     const [operations, total] = await query
@@ -2339,6 +2534,17 @@ export class VidalpayService {
   }
 
   async createSupportTicket(userId: string, payload: AnyRecord) {
+    const zendeskStatus = this.providerStatusService.getStatus(
+      'zendesk_support',
+    );
+    const metadata = this.redactPayload({
+      ...(this.asRecord(payload.metadata) ?? {}),
+      zendesk: {
+        syncStatus: zendeskStatus.enabled ? 'PENDING' : 'NOT_CONFIGURED',
+        readinessStatus: zendeskStatus.readinessStatus,
+        missingEnvVars: zendeskStatus.missingEnvVars,
+      },
+    });
     const ticket = await this.supportTicketRepository.save(
       this.supportTicketRepository.create({
         userId,
@@ -2347,10 +2553,32 @@ export class VidalpayService {
         message: this.asString(payload.message) ?? '',
         priority: this.asString(payload.priority) ?? 'NORMAL',
         preferredChannel: this.asString(payload.preferredChannel) ?? null,
-        metadata: this.asRecord(payload.metadata),
+        metadata,
       }),
     );
-    return { ticket };
+    if (!zendeskStatus.enabled) {
+      return {
+        ticket,
+        providerSync: {
+          provider: 'Zendesk',
+          status: 'NOT_CONFIGURED',
+          missingRequirements: zendeskStatus.missingEnvVars,
+          message:
+            'The local support ticket was saved. Zendesk sync is unavailable until backend Zendesk credentials are configured.',
+        },
+      };
+    }
+
+    return {
+      ticket,
+      providerSync: {
+        provider: 'Zendesk',
+        status: 'BLOCKED',
+        missingRequirements: ['ZENDESK_TICKET_ADAPTER_LIVE_TEST'],
+        message:
+          'The local support ticket was saved. Zendesk ticket creation remains blocked until the Zendesk adapter is implemented and live-tested with the configured account.',
+      },
+    };
   }
 
   async createDispute(userId: string, payload: AnyRecord) {
@@ -2753,6 +2981,170 @@ export class VidalpayService {
     }
 
     return { received: true, provider, reference: reference ?? null, status };
+  }
+
+  verifyWhatsAppWebhook(query: AnyRecord) {
+    const mode = this.asString(query['hub.mode'] ?? query.mode);
+    const token = this.asString(query['hub.verify_token'] ?? query.verify_token);
+    const challenge = this.asString(query['hub.challenge'] ?? query.challenge);
+    const expected = this.configService.get<string>(
+      'WHATSAPP_WEBHOOK_VERIFY_TOKEN',
+    );
+    if (!expected) {
+      throw new ServiceUnavailableException(
+        createBlockedResponse({
+          code: 'WHATSAPP_WEBHOOK_NOT_CONFIGURED',
+          feature: 'WhatsApp webhook verification',
+          capability: 'whatsapp_support',
+          provider: 'WhatsApp Cloud API',
+          reason:
+            'WHATSAPP_WEBHOOK_VERIFY_TOKEN is not configured in the backend environment.',
+          missingRequirements: ['WHATSAPP_WEBHOOK_VERIFY_TOKEN'],
+          retryable: false,
+        }),
+      );
+    }
+    if (mode !== 'subscribe' || token !== expected || !challenge) {
+      throw new UnauthorizedException('Invalid WhatsApp webhook verification');
+    }
+    return challenge;
+  }
+
+  async handleWhatsAppWebhook(payload: AnyRecord, signature?: string) {
+    this.assertGenericWebhookSignature({
+      provider: 'WhatsApp Cloud API',
+      capability: 'whatsapp_support',
+      secretKey: 'WHATSAPP_APP_SECRET',
+      signature,
+      payload,
+      signaturePrefix: 'sha256=',
+      requiredInProduction: false,
+    });
+    const eventId =
+      this.asString(payload.entry?.[0]?.id) ??
+      this.asString(payload.id) ??
+      `whatsapp_${createHash('sha256')
+        .update(JSON.stringify(payload))
+        .digest('hex')}`;
+    const existing = await this.providerOperationRepository.findOne({
+      where: { type: 'whatsapp_webhook', idempotencyKey: eventId },
+    });
+    if (existing) {
+      return {
+        received: true,
+        provider: 'WhatsApp Cloud API',
+        duplicate: true,
+        reference: existing.reference,
+      };
+    }
+    await this.providerOperationRepository.save(
+      this.providerOperationRepository.create({
+        userId: 'SYSTEM',
+        type: 'whatsapp_webhook',
+        idempotencyKey: eventId,
+        reference: eventId,
+        status: 'RECEIVED',
+        provider: 'WhatsApp Cloud API',
+        requestPayload: this.redactPayload(payload),
+        metadata: {
+          persistence: 'PROVIDER_OPERATION_ONLY',
+          message:
+            'Dedicated support_conversation/support_message tables are required before WhatsApp can become the production live-chat source of truth.',
+        },
+      }),
+    );
+    return {
+      received: true,
+      provider: 'WhatsApp Cloud API',
+      duplicate: false,
+      reference: eventId,
+    };
+  }
+
+  async handleZendeskWebhook(payload: AnyRecord, signature?: string) {
+    this.assertGenericWebhookSignature({
+      provider: 'Zendesk',
+      capability: 'zendesk_support',
+      secretKey: 'ZENDESK_WEBHOOK_SECRET',
+      signature,
+      payload,
+      signaturePrefix: 'sha256=',
+      requiredInProduction: false,
+    });
+    const ticketId =
+      this.asString(this.asRecord(payload.ticket)?.id) ??
+      this.asString(payload.ticket_id) ??
+      this.asString(payload.id);
+    const eventId =
+      this.asString(payload.event_id) ??
+      this.asString(payload.eventId) ??
+      `zendesk_${createHash('sha256')
+        .update(JSON.stringify(payload))
+        .digest('hex')}`;
+    const existing = await this.providerOperationRepository.findOne({
+      where: { type: 'zendesk_webhook', idempotencyKey: eventId },
+    });
+    if (!existing) {
+      await this.providerOperationRepository.save(
+        this.providerOperationRepository.create({
+          userId: 'SYSTEM',
+          type: 'zendesk_webhook',
+          idempotencyKey: eventId,
+          reference: eventId,
+          status: this.asString(payload.status)?.toUpperCase() ?? 'RECEIVED',
+          provider: 'Zendesk',
+          providerReference: ticketId ?? null,
+          requestPayload: this.redactPayload(payload),
+          metadata: {
+            ticketId: ticketId ?? null,
+            persistence: 'PROVIDER_OPERATION_ONLY',
+          },
+        }),
+      );
+    }
+    return {
+      received: true,
+      provider: 'Zendesk',
+      duplicate: Boolean(existing),
+      providerReference: ticketId ?? null,
+    };
+  }
+
+  async handleVtuWebhook(payload: AnyRecord, signature?: string) {
+    this.assertGenericWebhookSignature({
+      provider: 'VTU provider',
+      capability: 'vtu_requery',
+      secretKey: 'VTU_WEBHOOK_SECRET',
+      signature,
+      payload,
+      signaturePrefix: 'sha256=',
+      requiredInProduction: false,
+    });
+    const reference =
+      this.asString(payload.reference) ??
+      this.asString(payload.request_id) ??
+      this.asString(payload.transactionId);
+    if (reference) {
+      const operation = await this.providerOperationRepository.findOne({
+        where: [{ reference }, { providerReference: reference }],
+      });
+      if (operation) {
+        operation.responsePayload = this.redactPayload(payload);
+        operation.metadata = {
+          ...(operation.metadata ?? {}),
+          vtuWebhookReceived: true,
+          finalizationBlocked:
+            'Ledger/hold finalization is not enabled until the VTU provider contract and reconciliation flow are live-tested.',
+        };
+        await this.providerOperationRepository.save(operation);
+      }
+    }
+    return {
+      received: true,
+      provider: 'VTU provider',
+      reference: reference ?? null,
+      finalized: false,
+    };
   }
 
   async ensureCustomerWallets(userId: string) {
@@ -3448,6 +3840,23 @@ export class VidalpayService {
       metadata: transaction.metadata,
       createdAt: transaction.createdAt,
       updatedAt: transaction.updatedAt,
+    };
+  }
+
+  private normalizeAdminSupportTicket(ticket: SupportTicket) {
+    return {
+      id: ticket.id,
+      userId: ticket.userId,
+      category: ticket.category,
+      subject: ticket.subject,
+      message: ticket.message,
+      priority: ticket.priority,
+      status: ticket.status,
+      preferredChannel: ticket.preferredChannel,
+      resolutionSummary: ticket.resolutionSummary,
+      metadata: ticket.metadata,
+      createdAt: ticket.createdAt,
+      updatedAt: ticket.updatedAt,
     };
   }
 
@@ -4320,6 +4729,52 @@ export class VidalpayService {
       !timingSafeEqual(expectedBuffer, providedBuffer)
     ) {
       throw new UnauthorizedException(`Invalid ${provider} webhook signature`);
+    }
+  }
+
+  private assertGenericWebhookSignature(input: {
+    provider: string;
+    capability: ProviderCapability;
+    secretKey: string;
+    payload: AnyRecord;
+    signature?: string;
+    signaturePrefix?: string;
+    requiredInProduction?: boolean;
+  }) {
+    const secret = this.configService.get<string>(input.secretKey);
+    const environment =
+      this.configService.get<string>('NODE_ENV') ?? 'development';
+    if (!secret) {
+      if (environment === 'production' || input.requiredInProduction) {
+        this.throwProviderUnavailable({
+          code: 'PROVIDER_WEBHOOK_NOT_CONFIGURED',
+          feature: `${input.provider} webhook`,
+          capability: input.capability,
+          provider: input.provider,
+          reason: `${input.provider} webhook signing secret is not configured.`,
+          missingRequirements: [input.secretKey],
+        });
+      }
+      return;
+    }
+    if (!input.signature) {
+      throw new UnauthorizedException(
+        `${input.provider} webhook signature is required`,
+      );
+    }
+    const expected = createHmac('sha256', secret)
+      .update(JSON.stringify(input.payload))
+      .digest('hex');
+    const provided = input.signature
+      .replace(new RegExp(`^${input.signaturePrefix ?? ''}`, 'i'), '')
+      .trim();
+    const expectedBuffer = Buffer.from(expected, 'utf8');
+    const providedBuffer = Buffer.from(provided, 'utf8');
+    if (
+      expectedBuffer.length !== providedBuffer.length ||
+      !timingSafeEqual(expectedBuffer, providedBuffer)
+    ) {
+      throw new UnauthorizedException(`Invalid ${input.provider} webhook signature`);
     }
   }
 

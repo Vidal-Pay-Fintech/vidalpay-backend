@@ -1,0 +1,162 @@
+[
+  {
+    "file": "src\\database\\entities\\auth-session.entity.ts",
+    "entityArg": "'auth_session'",
+    "className": null
+  },
+  {
+    "file": "src\\database\\entities\\auth-session.entity.ts",
+    "entityArg": "",
+    "className": "AuthSession"
+  },
+  {
+    "file": "src\\database\\entities\\beneficiary.entity.ts",
+    "entityArg": "'beneficiary'",
+    "className": null
+  },
+  {
+    "file": "src\\database\\entities\\beneficiary.entity.ts",
+    "entityArg": "",
+    "className": "Beneficiary"
+  },
+  {
+    "file": "src\\database\\entities\\card.entity.ts",
+    "entityArg": "'card'",
+    "className": null
+  },
+  {
+    "file": "src\\database\\entities\\card.entity.ts",
+    "entityArg": "",
+    "className": "Card"
+  },
+  {
+    "file": "src\\database\\entities\\dispute.entity.ts",
+    "entityArg": "'dispute'",
+    "className": null
+  },
+  {
+    "file": "src\\database\\entities\\dispute.entity.ts",
+    "entityArg": "",
+    "className": "Dispute"
+  },
+  {
+    "file": "src\\database\\entities\\financial-transaction.entity.ts",
+    "entityArg": "'financial_transaction'",
+    "className": null
+  },
+  {
+    "file": "src\\database\\entities\\financial-transaction.entity.ts",
+    "entityArg": "",
+    "className": "FinancialTransaction"
+  },
+  {
+    "file": "src\\database\\entities\\kyc-profile.entity.ts",
+    "entityArg": "'kyc_profile'",
+    "className": null
+  },
+  {
+    "file": "src\\database\\entities\\kyc-profile.entity.ts",
+    "entityArg": "",
+    "className": "KycProfile"
+  },
+  {
+    "file": "src\\database\\entities\\notification-device.entity.ts",
+    "entityArg": "'notification_device'",
+    "className": null
+  },
+  {
+    "file": "src\\database\\entities\\notification-device.entity.ts",
+    "entityArg": "",
+    "className": "NotificationDevice"
+  },
+  {
+    "file": "src\\database\\entities\\notification-preference.entity.ts",
+    "entityArg": "'notification_preference'",
+    "className": null
+  },
+  {
+    "file": "src\\database\\entities\\notification-preference.entity.ts",
+    "entityArg": "",
+    "className": "NotificationPreference"
+  },
+  {
+    "file": "src\\database\\entities\\notification.entity.ts",
+    "entityArg": "'notification'",
+    "className": null
+  },
+  {
+    "file": "src\\database\\entities\\notification.entity.ts",
+    "entityArg": "",
+    "className": "Notification"
+  },
+  {
+    "file": "src\\database\\entities\\provider-operation.entity.ts",
+    "entityArg": "'provider_operation'",
+    "className": null
+  },
+  {
+    "file": "src\\database\\entities\\provider-operation.entity.ts",
+    "entityArg": "",
+    "className": "ProviderOperation"
+  },
+  {
+    "file": "src\\database\\entities\\referral-event.entity.ts",
+    "entityArg": "'referral_event'",
+    "className": null
+  },
+  {
+    "file": "src\\database\\entities\\referral-event.entity.ts",
+    "entityArg": "",
+    "className": "ReferralEvent"
+  },
+  {
+    "file": "src\\database\\entities\\request-log.entity.ts",
+    "entityArg": "'request_log'",
+    "className": null
+  },
+  {
+    "file": "src\\database\\entities\\request-log.entity.ts",
+    "entityArg": "",
+    "className": "RequestLog"
+  },
+  {
+    "file": "src\\database\\entities\\reward-ledger-entry.entity.ts",
+    "entityArg": "'reward_ledger_entry'",
+    "className": null
+  },
+  {
+    "file": "src\\database\\entities\\reward-ledger-entry.entity.ts",
+    "entityArg": "",
+    "className": "RewardLedgerEntry"
+  },
+  {
+    "file": "src\\database\\entities\\support-ticket.entity.ts",
+    "entityArg": "'support_ticket'",
+    "className": null
+  },
+  {
+    "file": "src\\database\\entities\\support-ticket.entity.ts",
+    "entityArg": "",
+    "className": "SupportTicket"
+  },
+  {
+    "file": "src\\database\\entities\\token.entity.ts",
+    "entityArg": "",
+    "className": "Token"
+  },
+  {
+    "file": "src\\database\\entities\\user.entity.ts",
+    "entityArg": "{ name: 'user' }",
+    "className": null
+  },
+  {
+    "file": "src\\database\\entities\\user.entity.ts",
+    "entityArg": "",
+    "className": "User"
+  },
+  {
+    "file": "src\\database\\entities\\wallet.entity.ts",
+    "entityArg": "",
+    "className": "Wallet"
+  }
+]

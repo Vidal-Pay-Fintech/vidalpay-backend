@@ -1,0 +1,1541 @@
+[
+  {
+    "method": "GET",
+    "route": "/",
+    "controller": "AppController",
+    "handler": "getHello",
+    "auth": "GLOBAL_DEFAULT",
+    "roles": "",
+    "file": "src\\app.controller.ts"
+  },
+  {
+    "method": "GET",
+    "route": "/admin/finance/ledger-entries",
+    "controller": "AdminController",
+    "handler": "ledgerEntries",
+    "auth": "AuthType.Bearer",
+    "roles": "Role.ADMIN, Role.SUPER_ADMIN",
+    "file": "src\\vidalpay\\vidalpay.controller.ts"
+  },
+  {
+    "method": "GET",
+    "route": "/admin/finance/ledger-entries/:id",
+    "controller": "AdminController",
+    "handler": "ledgerEntry",
+    "auth": "AuthType.Bearer",
+    "roles": "Role.ADMIN, Role.SUPER_ADMIN",
+    "file": "src\\vidalpay\\vidalpay.controller.ts"
+  },
+  {
+    "method": "GET",
+    "route": "/admin/finance/money-events",
+    "controller": "AdminController",
+    "handler": "moneyEvents",
+    "auth": "AuthType.Bearer",
+    "roles": "Role.ADMIN, Role.SUPER_ADMIN",
+    "file": "src\\vidalpay\\vidalpay.controller.ts"
+  },
+  {
+    "method": "GET",
+    "route": "/admin/finance/money-events/:id",
+    "controller": "AdminController",
+    "handler": "moneyEvent",
+    "auth": "AuthType.Bearer",
+    "roles": "Role.ADMIN, Role.SUPER_ADMIN",
+    "file": "src\\vidalpay\\vidalpay.controller.ts"
+  },
+  {
+    "method": "GET",
+    "route": "/admin/finance/overview",
+    "controller": "AdminController",
+    "handler": "financeOverview",
+    "auth": "AuthType.Bearer",
+    "roles": "Role.ADMIN, Role.SUPER_ADMIN",
+    "file": "src\\vidalpay\\vidalpay.controller.ts"
+  },
+  {
+    "method": "GET",
+    "route": "/admin/kyc",
+    "controller": "AdminKycController",
+    "handler": "list",
+    "auth": "AuthType.Bearer",
+    "roles": "Role.ADMIN, Role.SUPER_ADMIN",
+    "file": "src\\vidalpay\\vidalpay.controller.ts"
+  },
+  {
+    "method": "GET",
+    "route": "/admin/kyc/:userId",
+    "controller": "AdminKycController",
+    "handler": "one",
+    "auth": "AuthType.Bearer",
+    "roles": "Role.ADMIN, Role.SUPER_ADMIN",
+    "file": "src\\vidalpay\\vidalpay.controller.ts"
+  },
+  {
+    "method": "POST",
+    "route": "/admin/kyc/:userId/approve",
+    "controller": "AdminKycController",
+    "handler": "approve",
+    "auth": "AuthType.Bearer",
+    "roles": "Role.ADMIN, Role.SUPER_ADMIN",
+    "file": "src\\vidalpay\\vidalpay.controller.ts"
+  },
+  {
+    "method": "POST",
+    "route": "/admin/kyc/:userId/reject",
+    "controller": "AdminKycController",
+    "handler": "reject",
+    "auth": "AuthType.Bearer",
+    "roles": "Role.ADMIN, Role.SUPER_ADMIN",
+    "file": "src\\vidalpay\\vidalpay.controller.ts"
+  },
+  {
+    "method": "POST",
+    "route": "/admin/kyc/:userId/request-information",
+    "controller": "AdminKycController",
+    "handler": "requestInformation",
+    "auth": "AuthType.Bearer",
+    "roles": "Role.ADMIN, Role.SUPER_ADMIN",
+    "file": "src\\vidalpay\\vidalpay.controller.ts"
+  },
+  {
+    "method": "POST",
+    "route": "/admin/kyc/:userId/request-more-info",
+    "controller": "AdminKycController",
+    "handler": "requestMoreInfo",
+    "auth": "AuthType.Bearer",
+    "roles": "Role.ADMIN, Role.SUPER_ADMIN",
+    "file": "src\\vidalpay\\vidalpay.controller.ts"
+  },
+  {
+    "method": "GET",
+    "route": "/admin/provider-operations",
+    "controller": "AdminController",
+    "handler": "providerOperations",
+    "auth": "AuthType.Bearer",
+    "roles": "Role.ADMIN, Role.SUPER_ADMIN",
+    "file": "src\\vidalpay\\vidalpay.controller.ts"
+  },
+  {
+    "method": "GET",
+    "route": "/admin/provider-operations/:id",
+    "controller": "AdminController",
+    "handler": "providerOperation",
+    "auth": "AuthType.Bearer",
+    "roles": "Role.ADMIN, Role.SUPER_ADMIN",
+    "file": "src\\vidalpay\\vidalpay.controller.ts"
+  },
+  {
+    "method": "GET",
+    "route": "/admin/users",
+    "controller": "AdminController",
+    "handler": "users",
+    "auth": "AuthType.Bearer",
+    "roles": "Role.ADMIN, Role.SUPER_ADMIN",
+    "file": "src\\vidalpay\\vidalpay.controller.ts"
+  },
+  {
+    "method": "GET",
+    "route": "/admin/users/:userId",
+    "controller": "AdminController",
+    "handler": "user",
+    "auth": "AuthType.Bearer",
+    "roles": "Role.ADMIN, Role.SUPER_ADMIN",
+    "file": "src\\vidalpay\\vidalpay.controller.ts"
+  },
+  {
+    "method": "POST",
+    "route": "/auth/admin/login",
+    "controller": "AuthenticationController",
+    "handler": "adminSignIn",
+    "auth": "AuthType.None",
+    "roles": "",
+    "file": "src\\iam\\authentication\\authentication.controller.ts"
+  },
+  {
+    "method": "POST",
+    "route": "/auth/create-transaction-pin",
+    "controller": "AuthenticationController",
+    "handler": "createTransactionPin",
+    "auth": "AuthType.Bearer",
+    "roles": "",
+    "file": "src\\iam\\authentication\\authentication.controller.ts"
+  },
+  {
+    "method": "POST",
+    "route": "/auth/deactivate-account",
+    "controller": "AuthenticationController",
+    "handler": "deactivateAccount",
+    "auth": "AuthType.Bearer",
+    "roles": "",
+    "file": "src\\iam\\authentication\\authentication.controller.ts"
+  },
+  {
+    "method": "POST",
+    "route": "/auth/forget-password",
+    "controller": "AuthenticationController",
+    "handler": "sendResetPasswordLink",
+    "auth": "AuthType.Bearer",
+    "roles": "",
+    "file": "src\\iam\\authentication\\authentication.controller.ts"
+  },
+  {
+    "method": "POST",
+    "route": "/auth/login",
+    "controller": "AuthenticationController",
+    "handler": "signIn",
+    "auth": "AuthType.None",
+    "roles": "",
+    "file": "src\\iam\\authentication\\authentication.controller.ts"
+  },
+  {
+    "method": "POST",
+    "route": "/auth/logout",
+    "controller": "AuthenticationController",
+    "handler": "logout",
+    "auth": "AuthType.None",
+    "roles": "",
+    "file": "src\\iam\\authentication\\authentication.controller.ts"
+  },
+  {
+    "method": "POST",
+    "route": "/auth/logout-all",
+    "controller": "AuthenticationController",
+    "handler": "logoutAll",
+    "auth": "AuthType.Bearer",
+    "roles": "",
+    "file": "src\\iam\\authentication\\authentication.controller.ts"
+  },
+  {
+    "method": "GET",
+    "route": "/auth/me",
+    "controller": "AuthenticationController",
+    "handler": "me",
+    "auth": "AuthType.Bearer",
+    "roles": "",
+    "file": "src\\iam\\authentication\\authentication.controller.ts"
+  },
+  {
+    "method": "POST",
+    "route": "/auth/password-reset/complete",
+    "controller": "AuthenticationController",
+    "handler": "resetPassword",
+    "auth": "AuthType.None",
+    "roles": "",
+    "file": "src\\iam\\authentication\\authentication.controller.ts"
+  },
+  {
+    "method": "POST",
+    "route": "/auth/password-reset/request",
+    "controller": "AuthenticationController",
+    "handler": "requestReset",
+    "auth": "AuthType.None",
+    "roles": "",
+    "file": "src\\iam\\authentication\\authentication.controller.ts"
+  },
+  {
+    "method": "POST",
+    "route": "/auth/password-reset/verify-otp",
+    "controller": "AuthenticationController",
+    "handler": "verifyOtp",
+    "auth": "AuthType.None",
+    "roles": "",
+    "file": "src\\iam\\authentication\\authentication.controller.ts"
+  },
+  {
+    "method": "POST",
+    "route": "/auth/reauth",
+    "controller": "AuthenticationController",
+    "handler": "reauth",
+    "auth": "AuthType.Bearer",
+    "roles": "",
+    "file": "src\\iam\\authentication\\authentication.controller.ts"
+  },
+  {
+    "method": "POST",
+    "route": "/auth/refresh-token",
+    "controller": "AuthenticationController",
+    "handler": "refreshToken",
+    "auth": "AuthType.None",
+    "roles": "",
+    "file": "src\\iam\\authentication\\authentication.controller.ts"
+  },
+  {
+    "method": "POST",
+    "route": "/auth/request-reset-pin",
+    "controller": "AuthenticationController",
+    "handler": "requestTransactionPinReset",
+    "auth": "AuthType.Bearer",
+    "roles": "",
+    "file": "src\\iam\\authentication\\authentication.controller.ts"
+  },
+  {
+    "method": "POST",
+    "route": "/auth/resend-otp",
+    "controller": "AuthenticationController",
+    "handler": "resendEmailVerificationOtp",
+    "auth": "AuthType.None",
+    "roles": "",
+    "file": "src\\iam\\authentication\\authentication.controller.ts"
+  },
+  {
+    "method": "POST",
+    "route": "/auth/resend-otp-phone",
+    "controller": "AuthenticationController",
+    "handler": "resendPhoneVerificationOtp",
+    "auth": "AuthType.None",
+    "roles": "",
+    "file": "src\\iam\\authentication\\authentication.controller.ts"
+  },
+  {
+    "method": "POST",
+    "route": "/auth/reset-pin",
+    "controller": "AuthenticationController",
+    "handler": "resetTransactionPin",
+    "auth": "AuthType.Bearer",
+    "roles": "",
+    "file": "src\\iam\\authentication\\authentication.controller.ts"
+  },
+  {
+    "method": "GET",
+    "route": "/auth/sessions",
+    "controller": "AuthenticationController",
+    "handler": "sessions",
+    "auth": "AuthType.Bearer",
+    "roles": "",
+    "file": "src\\iam\\authentication\\authentication.controller.ts"
+  },
+  {
+    "method": "POST",
+    "route": "/auth/sessions/:familyId/revoke",
+    "controller": "AuthenticationController",
+    "handler": "revokeSession",
+    "auth": "AuthType.Bearer",
+    "roles": "",
+    "file": "src\\iam\\authentication\\authentication.controller.ts"
+  },
+  {
+    "method": "POST",
+    "route": "/auth/sessions/revoke-others",
+    "controller": "AuthenticationController",
+    "handler": "revokeOtherSessions",
+    "auth": "AuthType.Bearer",
+    "roles": "",
+    "file": "src\\iam\\authentication\\authentication.controller.ts"
+  },
+  {
+    "method": "POST",
+    "route": "/auth/sign-up",
+    "controller": "AuthenticationController",
+    "handler": "signUp",
+    "auth": "AuthType.None",
+    "roles": "",
+    "file": "src\\iam\\authentication\\authentication.controller.ts"
+  },
+  {
+    "method": "POST",
+    "route": "/auth/transaction-pin/request",
+    "controller": "AuthenticationController",
+    "handler": "requestTransactionPinCode",
+    "auth": "AuthType.Bearer",
+    "roles": "",
+    "file": "src\\iam\\authentication\\authentication.controller.ts"
+  },
+  {
+    "method": "POST",
+    "route": "/auth/transaction-pin/set",
+    "controller": "AuthenticationController",
+    "handler": "setTransactionPin",
+    "auth": "AuthType.Bearer",
+    "roles": "",
+    "file": "src\\iam\\authentication\\authentication.controller.ts"
+  },
+  {
+    "method": "POST",
+    "route": "/auth/transaction-pin/validate",
+    "controller": "AuthenticationController",
+    "handler": "validateTransactionPin",
+    "auth": "AuthType.Bearer",
+    "roles": "",
+    "file": "src\\iam\\authentication\\authentication.controller.ts"
+  },
+  {
+    "method": "POST",
+    "route": "/auth/transaction-pin/verify",
+    "controller": "AuthenticationController",
+    "handler": "verifyTransactionPinCode",
+    "auth": "AuthType.Bearer",
+    "roles": "",
+    "file": "src\\iam\\authentication\\authentication.controller.ts"
+  },
+  {
+    "method": "GET",
+    "route": "/auth/validate-token/:token",
+    "controller": "AuthenticationController",
+    "handler": "validateToken",
+    "auth": "AuthType.Bearer",
+    "roles": "",
+    "file": "src\\iam\\authentication\\authentication.controller.ts"
+  },
+  {
+    "method": "POST",
+    "route": "/auth/verify-email",
+    "controller": "AuthenticationController",
+    "handler": "verifyUserEmail",
+    "auth": "AuthType.None",
+    "roles": "",
+    "file": "src\\iam\\authentication\\authentication.controller.ts"
+  },
+  {
+    "method": "POST",
+    "route": "/auth/verify-phone",
+    "controller": "AuthenticationController",
+    "handler": "verifyPhoneNumber",
+    "auth": "AuthType.None",
+    "roles": "",
+    "file": "src\\iam\\authentication\\authentication.controller.ts"
+  },
+  {
+    "method": "GET",
+    "route": "/beneficiary/me",
+    "controller": "BeneficiaryController",
+    "handler": "me",
+    "auth": "GLOBAL_DEFAULT",
+    "roles": "",
+    "file": "src\\vidalpay\\vidalpay.controller.ts"
+  },
+  {
+    "method": "GET",
+    "route": "/beneficiary/resolve",
+    "controller": "BeneficiaryController",
+    "handler": "resolve",
+    "auth": "GLOBAL_DEFAULT",
+    "roles": "",
+    "file": "src\\vidalpay\\vidalpay.controller.ts"
+  },
+  {
+    "method": "GET",
+    "route": "/cards",
+    "controller": "CardsController",
+    "handler": "list",
+    "auth": "GLOBAL_DEFAULT",
+    "roles": "",
+    "file": "src\\vidalpay\\vidalpay.controller.ts"
+  },
+  {
+    "method": "GET",
+    "route": "/cards/:cardId",
+    "controller": "CardsController",
+    "handler": "one",
+    "auth": "GLOBAL_DEFAULT",
+    "roles": "",
+    "file": "src\\vidalpay\\vidalpay.controller.ts"
+  },
+  {
+    "method": "POST",
+    "route": "/cards/:cardId/freeze",
+    "controller": "CardsController",
+    "handler": "freeze",
+    "auth": "GLOBAL_DEFAULT",
+    "roles": "",
+    "file": "src\\vidalpay\\vidalpay.controller.ts"
+  },
+  {
+    "method": "POST",
+    "route": "/cards/:cardId/fund",
+    "controller": "CardsController",
+    "handler": "fund",
+    "auth": "GLOBAL_DEFAULT",
+    "roles": "",
+    "file": "src\\vidalpay\\vidalpay.controller.ts"
+  },
+  {
+    "method": "GET",
+    "route": "/cards/:cardId/limits",
+    "controller": "CardsController",
+    "handler": "limits",
+    "auth": "GLOBAL_DEFAULT",
+    "roles": "",
+    "file": "src\\vidalpay\\vidalpay.controller.ts"
+  },
+  {
+    "method": "PATCH",
+    "route": "/cards/:cardId/limits",
+    "controller": "CardsController",
+    "handler": "updateLimits",
+    "auth": "GLOBAL_DEFAULT",
+    "roles": "",
+    "file": "src\\vidalpay\\vidalpay.controller.ts"
+  },
+  {
+    "method": "POST",
+    "route": "/cards/:cardId/reveal",
+    "controller": "CardsController",
+    "handler": "reveal",
+    "auth": "GLOBAL_DEFAULT",
+    "roles": "",
+    "file": "src\\vidalpay\\vidalpay.controller.ts"
+  },
+  {
+    "method": "PATCH",
+    "route": "/cards/:cardId/settings",
+    "controller": "CardsController",
+    "handler": "settings",
+    "auth": "GLOBAL_DEFAULT",
+    "roles": "",
+    "file": "src\\vidalpay\\vidalpay.controller.ts"
+  },
+  {
+    "method": "POST",
+    "route": "/cards/:cardId/terminate",
+    "controller": "CardsController",
+    "handler": "terminate",
+    "auth": "GLOBAL_DEFAULT",
+    "roles": "",
+    "file": "src\\vidalpay\\vidalpay.controller.ts"
+  },
+  {
+    "method": "GET",
+    "route": "/cards/:cardId/transactions",
+    "controller": "CardsController",
+    "handler": "transactions",
+    "auth": "GLOBAL_DEFAULT",
+    "roles": "",
+    "file": "src\\vidalpay\\vidalpay.controller.ts"
+  },
+  {
+    "method": "POST",
+    "route": "/cards/:cardId/unfreeze",
+    "controller": "CardsController",
+    "handler": "unfreeze",
+    "auth": "GLOBAL_DEFAULT",
+    "roles": "",
+    "file": "src\\vidalpay\\vidalpay.controller.ts"
+  },
+  {
+    "method": "POST",
+    "route": "/cards/:cardId/withdraw",
+    "controller": "CardsController",
+    "handler": "withdraw",
+    "auth": "GLOBAL_DEFAULT",
+    "roles": "",
+    "file": "src\\vidalpay\\vidalpay.controller.ts"
+  },
+  {
+    "method": "POST",
+    "route": "/cards/physical",
+    "controller": "CardsController",
+    "handler": "physical",
+    "auth": "GLOBAL_DEFAULT",
+    "roles": "",
+    "file": "src\\vidalpay\\vidalpay.controller.ts"
+  },
+  {
+    "method": "POST",
+    "route": "/cards/virtual",
+    "controller": "CardsController",
+    "handler": "virtual",
+    "auth": "GLOBAL_DEFAULT",
+    "roles": "",
+    "file": "src\\vidalpay\\vidalpay.controller.ts"
+  },
+  {
+    "method": "GET",
+    "route": "/crypto/assets",
+    "controller": "CryptoController",
+    "handler": "assets",
+    "auth": "GLOBAL_DEFAULT",
+    "roles": "",
+    "file": "src\\vidalpay\\vidalpay.controller.ts"
+  },
+  {
+    "method": "POST",
+    "route": "/crypto/deposit-address",
+    "controller": "CryptoController",
+    "handler": "deposit",
+    "auth": "GLOBAL_DEFAULT",
+    "roles": "",
+    "file": "src\\vidalpay\\vidalpay.controller.ts"
+  },
+  {
+    "method": "GET",
+    "route": "/crypto/overview",
+    "controller": "CryptoController",
+    "handler": "overview",
+    "auth": "GLOBAL_DEFAULT",
+    "roles": "",
+    "file": "src\\vidalpay\\vidalpay.controller.ts"
+  },
+  {
+    "method": "POST",
+    "route": "/crypto/withdrawal-quote",
+    "controller": "CryptoController",
+    "handler": "withdrawalQuote",
+    "auth": "GLOBAL_DEFAULT",
+    "roles": "",
+    "file": "src\\vidalpay\\vidalpay.controller.ts"
+  },
+  {
+    "method": "POST",
+    "route": "/crypto/withdrawals",
+    "controller": "CryptoController",
+    "handler": "withdrawal",
+    "auth": "GLOBAL_DEFAULT",
+    "roles": "",
+    "file": "src\\vidalpay\\vidalpay.controller.ts"
+  },
+  {
+    "method": "GET",
+    "route": "/database",
+    "controller": "DatabaseController",
+    "handler": "findAll",
+    "auth": "GLOBAL_DEFAULT",
+    "roles": "",
+    "file": "src\\database\\database.controller.ts"
+  },
+  {
+    "method": "POST",
+    "route": "/database",
+    "controller": "DatabaseController",
+    "handler": "create",
+    "auth": "GLOBAL_DEFAULT",
+    "roles": "",
+    "file": "src\\database\\database.controller.ts"
+  },
+  {
+    "method": "DELETE",
+    "route": "/database/:id",
+    "controller": "DatabaseController",
+    "handler": "remove",
+    "auth": "GLOBAL_DEFAULT",
+    "roles": "",
+    "file": "src\\database\\database.controller.ts"
+  },
+  {
+    "method": "GET",
+    "route": "/database/:id",
+    "controller": "DatabaseController",
+    "handler": "findOne",
+    "auth": "GLOBAL_DEFAULT",
+    "roles": "",
+    "file": "src\\database\\database.controller.ts"
+  },
+  {
+    "method": "PATCH",
+    "route": "/database/:id",
+    "controller": "DatabaseController",
+    "handler": "update",
+    "auth": "GLOBAL_DEFAULT",
+    "roles": "",
+    "file": "src\\database\\database.controller.ts"
+  },
+  {
+    "method": "POST",
+    "route": "/disputes",
+    "controller": "DisputesController",
+    "handler": "create",
+    "auth": "GLOBAL_DEFAULT",
+    "roles": "",
+    "file": "src\\vidalpay\\vidalpay.controller.ts"
+  },
+  {
+    "method": "POST",
+    "route": "/fx/convert",
+    "controller": "FxController",
+    "handler": "convert",
+    "auth": "GLOBAL_DEFAULT",
+    "roles": "",
+    "file": "src\\vidalpay\\vidalpay.controller.ts"
+  },
+  {
+    "method": "GET",
+    "route": "/fx/quotes",
+    "controller": "FxController",
+    "handler": "quotes",
+    "auth": "GLOBAL_DEFAULT",
+    "roles": "",
+    "file": "src\\vidalpay\\vidalpay.controller.ts"
+  },
+  {
+    "method": "POST",
+    "route": "/investments/account",
+    "controller": "InvestmentsController",
+    "handler": "account",
+    "auth": "GLOBAL_DEFAULT",
+    "roles": "",
+    "file": "src\\vidalpay\\vidalpay.controller.ts"
+  },
+  {
+    "method": "POST",
+    "route": "/investments/orders",
+    "controller": "InvestmentsController",
+    "handler": "orders",
+    "auth": "GLOBAL_DEFAULT",
+    "roles": "",
+    "file": "src\\vidalpay\\vidalpay.controller.ts"
+  },
+  {
+    "method": "GET",
+    "route": "/investments/orders/:orderId",
+    "controller": "InvestmentsController",
+    "handler": "orderStatus",
+    "auth": "GLOBAL_DEFAULT",
+    "roles": "",
+    "file": "src\\vidalpay\\vidalpay.controller.ts"
+  },
+  {
+    "method": "GET",
+    "route": "/investments/overview",
+    "controller": "InvestmentsController",
+    "handler": "overview",
+    "auth": "GLOBAL_DEFAULT",
+    "roles": "",
+    "file": "src\\vidalpay\\vidalpay.controller.ts"
+  },
+  {
+    "method": "GET",
+    "route": "/investments/portfolio",
+    "controller": "InvestmentsController",
+    "handler": "portfolio",
+    "auth": "GLOBAL_DEFAULT",
+    "roles": "",
+    "file": "src\\vidalpay\\vidalpay.controller.ts"
+  },
+  {
+    "method": "GET",
+    "route": "/investments/products",
+    "controller": "InvestmentsController",
+    "handler": "products",
+    "auth": "GLOBAL_DEFAULT",
+    "roles": "",
+    "file": "src\\vidalpay\\vidalpay.controller.ts"
+  },
+  {
+    "method": "POST",
+    "route": "/kyc/start",
+    "controller": "KycController",
+    "handler": "start",
+    "auth": "AuthType.Bearer",
+    "roles": "Role.ADMIN, Role.SUPER_ADMIN",
+    "file": "src\\vidalpay\\vidalpay.controller.ts"
+  },
+  {
+    "method": "GET",
+    "route": "/kyc/status",
+    "controller": "KycController",
+    "handler": "status",
+    "auth": "AuthType.Bearer",
+    "roles": "Role.ADMIN, Role.SUPER_ADMIN",
+    "file": "src\\vidalpay\\vidalpay.controller.ts"
+  },
+  {
+    "method": "GET",
+    "route": "/legal/documents/:slug",
+    "controller": "LegalController",
+    "handler": "document",
+    "auth": "GLOBAL_DEFAULT",
+    "roles": "",
+    "file": "src\\vidalpay\\vidalpay.controller.ts"
+  },
+  {
+    "method": "GET",
+    "route": "/legal/overview",
+    "controller": "LegalController",
+    "handler": "overview",
+    "auth": "GLOBAL_DEFAULT",
+    "roles": "",
+    "file": "src\\vidalpay\\vidalpay.controller.ts"
+  },
+  {
+    "method": "GET",
+    "route": "/loans/:loanId",
+    "controller": "LoansController",
+    "handler": "loan",
+    "auth": "GLOBAL_DEFAULT",
+    "roles": "",
+    "file": "src\\vidalpay\\vidalpay.controller.ts"
+  },
+  {
+    "method": "POST",
+    "route": "/loans/:loanId/accept",
+    "controller": "LoansController",
+    "handler": "accept",
+    "auth": "GLOBAL_DEFAULT",
+    "roles": "",
+    "file": "src\\vidalpay\\vidalpay.controller.ts"
+  },
+  {
+    "method": "POST",
+    "route": "/loans/:loanId/repay",
+    "controller": "LoansController",
+    "handler": "repay",
+    "auth": "GLOBAL_DEFAULT",
+    "roles": "",
+    "file": "src\\vidalpay\\vidalpay.controller.ts"
+  },
+  {
+    "method": "GET",
+    "route": "/loans/:loanId/repayment-schedule",
+    "controller": "LoansController",
+    "handler": "repaymentSchedule",
+    "auth": "GLOBAL_DEFAULT",
+    "roles": "",
+    "file": "src\\vidalpay\\vidalpay.controller.ts"
+  },
+  {
+    "method": "POST",
+    "route": "/loans/applications",
+    "controller": "LoansController",
+    "handler": "application",
+    "auth": "GLOBAL_DEFAULT",
+    "roles": "",
+    "file": "src\\vidalpay\\vidalpay.controller.ts"
+  },
+  {
+    "method": "GET",
+    "route": "/loans/eligibility",
+    "controller": "LoansController",
+    "handler": "eligibility",
+    "auth": "GLOBAL_DEFAULT",
+    "roles": "",
+    "file": "src\\vidalpay\\vidalpay.controller.ts"
+  },
+  {
+    "method": "GET",
+    "route": "/loans/history",
+    "controller": "LoansController",
+    "handler": "history",
+    "auth": "GLOBAL_DEFAULT",
+    "roles": "",
+    "file": "src\\vidalpay\\vidalpay.controller.ts"
+  },
+  {
+    "method": "GET",
+    "route": "/loans/offers",
+    "controller": "LoansController",
+    "handler": "offers",
+    "auth": "GLOBAL_DEFAULT",
+    "roles": "",
+    "file": "src\\vidalpay\\vidalpay.controller.ts"
+  },
+  {
+    "method": "GET",
+    "route": "/loans/overview",
+    "controller": "LoansController",
+    "handler": "overview",
+    "auth": "GLOBAL_DEFAULT",
+    "roles": "",
+    "file": "src\\vidalpay\\vidalpay.controller.ts"
+  },
+  {
+    "method": "GET",
+    "route": "/me/capabilities",
+    "controller": "MeController",
+    "handler": "capabilities",
+    "auth": "GLOBAL_DEFAULT",
+    "roles": "",
+    "file": "src\\vidalpay\\vidalpay.controller.ts"
+  },
+  {
+    "method": "GET",
+    "route": "/money-requests",
+    "controller": "MoneyRequestsController",
+    "handler": "history",
+    "auth": "GLOBAL_DEFAULT",
+    "roles": "",
+    "file": "src\\vidalpay\\vidalpay.controller.ts"
+  },
+  {
+    "method": "POST",
+    "route": "/money-requests",
+    "controller": "MoneyRequestsController",
+    "handler": "create",
+    "auth": "GLOBAL_DEFAULT",
+    "roles": "",
+    "file": "src\\vidalpay\\vidalpay.controller.ts"
+  },
+  {
+    "method": "POST",
+    "route": "/money-requests/:requestId/accept",
+    "controller": "MoneyRequestsController",
+    "handler": "accept",
+    "auth": "GLOBAL_DEFAULT",
+    "roles": "",
+    "file": "src\\vidalpay\\vidalpay.controller.ts"
+  },
+  {
+    "method": "POST",
+    "route": "/money-requests/:requestId/decline",
+    "controller": "MoneyRequestsController",
+    "handler": "decline",
+    "auth": "GLOBAL_DEFAULT",
+    "roles": "",
+    "file": "src\\vidalpay\\vidalpay.controller.ts"
+  },
+  {
+    "method": "GET",
+    "route": "/notifications",
+    "controller": "NotificationsController",
+    "handler": "list",
+    "auth": "GLOBAL_DEFAULT",
+    "roles": "",
+    "file": "src\\vidalpay\\vidalpay.controller.ts"
+  },
+  {
+    "method": "GET",
+    "route": "/notifications/devices",
+    "controller": "NotificationsController",
+    "handler": "devices",
+    "auth": "GLOBAL_DEFAULT",
+    "roles": "",
+    "file": "src\\vidalpay\\vidalpay.controller.ts"
+  },
+  {
+    "method": "POST",
+    "route": "/notifications/devices",
+    "controller": "NotificationsController",
+    "handler": "registerDevice",
+    "auth": "GLOBAL_DEFAULT",
+    "roles": "",
+    "file": "src\\vidalpay\\vidalpay.controller.ts"
+  },
+  {
+    "method": "POST",
+    "route": "/notifications/devices/:id/revoke",
+    "controller": "NotificationsController",
+    "handler": "revokeDevice",
+    "auth": "GLOBAL_DEFAULT",
+    "roles": "",
+    "file": "src\\vidalpay\\vidalpay.controller.ts"
+  },
+  {
+    "method": "GET",
+    "route": "/notifications/preferences",
+    "controller": "NotificationsController",
+    "handler": "preferences",
+    "auth": "GLOBAL_DEFAULT",
+    "roles": "",
+    "file": "src\\vidalpay\\vidalpay.controller.ts"
+  },
+  {
+    "method": "POST",
+    "route": "/notifications/preferences",
+    "controller": "NotificationsController",
+    "handler": "updatePreferences",
+    "auth": "GLOBAL_DEFAULT",
+    "roles": "",
+    "file": "src\\vidalpay\\vidalpay.controller.ts"
+  },
+  {
+    "method": "POST",
+    "route": "/notifications/read",
+    "controller": "NotificationsController",
+    "handler": "read",
+    "auth": "GLOBAL_DEFAULT",
+    "roles": "",
+    "file": "src\\vidalpay\\vidalpay.controller.ts"
+  },
+  {
+    "method": "GET",
+    "route": "/providers/fincra/sandbox-probe",
+    "controller": "ProvidersController",
+    "handler": "fincraSandboxProbe",
+    "auth": "AuthType.Bearer",
+    "roles": "Role.ADMIN, Role.SUPER_ADMIN",
+    "file": "src\\vidalpay\\vidalpay.controller.ts"
+  },
+  {
+    "method": "GET",
+    "route": "/providers/status",
+    "controller": "ProvidersController",
+    "handler": "status",
+    "auth": "GLOBAL_DEFAULT",
+    "roles": "",
+    "file": "src\\vidalpay\\vidalpay.controller.ts"
+  },
+  {
+    "method": "POST",
+    "route": "/qr/payments",
+    "controller": "QrController",
+    "handler": "payment",
+    "auth": "GLOBAL_DEFAULT",
+    "roles": "",
+    "file": "src\\vidalpay\\vidalpay.controller.ts"
+  },
+  {
+    "method": "GET",
+    "route": "/qr/resolve",
+    "controller": "QrController",
+    "handler": "resolve",
+    "auth": "GLOBAL_DEFAULT",
+    "roles": "",
+    "file": "src\\vidalpay\\vidalpay.controller.ts"
+  },
+  {
+    "method": "GET",
+    "route": "/referrals/dashboard",
+    "controller": "ReferralsController",
+    "handler": "dashboard",
+    "auth": "GLOBAL_DEFAULT",
+    "roles": "",
+    "file": "src\\vidalpay\\vidalpay.controller.ts"
+  },
+  {
+    "method": "GET",
+    "route": "/referrals/earnings",
+    "controller": "ReferralsController",
+    "handler": "earnings",
+    "auth": "GLOBAL_DEFAULT",
+    "roles": "",
+    "file": "src\\vidalpay\\vidalpay.controller.ts"
+  },
+  {
+    "method": "POST",
+    "route": "/referrals/invite",
+    "controller": "ReferralsController",
+    "handler": "invite",
+    "auth": "GLOBAL_DEFAULT",
+    "roles": "",
+    "file": "src\\vidalpay\\vidalpay.controller.ts"
+  },
+  {
+    "method": "GET",
+    "route": "/rewards/dashboard",
+    "controller": "RewardsController",
+    "handler": "dashboard",
+    "auth": "GLOBAL_DEFAULT",
+    "roles": "",
+    "file": "src\\vidalpay\\vidalpay.controller.ts"
+  },
+  {
+    "method": "GET",
+    "route": "/rewards/history",
+    "controller": "RewardsController",
+    "handler": "history",
+    "auth": "GLOBAL_DEFAULT",
+    "roles": "",
+    "file": "src\\vidalpay\\vidalpay.controller.ts"
+  },
+  {
+    "method": "POST",
+    "route": "/rewards/redeem",
+    "controller": "RewardsController",
+    "handler": "redeem",
+    "auth": "GLOBAL_DEFAULT",
+    "roles": "",
+    "file": "src\\vidalpay\\vidalpay.controller.ts"
+  },
+  {
+    "method": "GET",
+    "route": "/support/faqs",
+    "controller": "SupportController",
+    "handler": "faqs",
+    "auth": "GLOBAL_DEFAULT",
+    "roles": "",
+    "file": "src\\vidalpay\\vidalpay.controller.ts"
+  },
+  {
+    "method": "GET",
+    "route": "/support/overview",
+    "controller": "SupportController",
+    "handler": "overview",
+    "auth": "GLOBAL_DEFAULT",
+    "roles": "",
+    "file": "src\\vidalpay\\vidalpay.controller.ts"
+  },
+  {
+    "method": "GET",
+    "route": "/support/tickets",
+    "controller": "SupportController",
+    "handler": "tickets",
+    "auth": "GLOBAL_DEFAULT",
+    "roles": "",
+    "file": "src\\vidalpay\\vidalpay.controller.ts"
+  },
+  {
+    "method": "POST",
+    "route": "/support/tickets",
+    "controller": "SupportController",
+    "handler": "create",
+    "auth": "GLOBAL_DEFAULT",
+    "roles": "",
+    "file": "src\\vidalpay\\vidalpay.controller.ts"
+  },
+  {
+    "method": "POST",
+    "route": "/tax/filings",
+    "controller": "TaxController",
+    "handler": "file",
+    "auth": "GLOBAL_DEFAULT",
+    "roles": "",
+    "file": "src\\vidalpay\\vidalpay.controller.ts"
+  },
+  {
+    "method": "GET",
+    "route": "/tax/overview",
+    "controller": "TaxController",
+    "handler": "overview",
+    "auth": "GLOBAL_DEFAULT",
+    "roles": "",
+    "file": "src\\vidalpay\\vidalpay.controller.ts"
+  },
+  {
+    "method": "GET",
+    "route": "/tax/status",
+    "controller": "TaxController",
+    "handler": "status",
+    "auth": "GLOBAL_DEFAULT",
+    "roles": "",
+    "file": "src\\vidalpay\\vidalpay.controller.ts"
+  },
+  {
+    "method": "GET",
+    "route": "/transaction/:id",
+    "controller": "TransactionController",
+    "handler": "one",
+    "auth": "GLOBAL_DEFAULT",
+    "roles": "",
+    "file": "src\\vidalpay\\vidalpay.controller.ts"
+  },
+  {
+    "method": "GET",
+    "route": "/transaction/:id/receipt",
+    "controller": "TransactionController",
+    "handler": "receipt",
+    "auth": "GLOBAL_DEFAULT",
+    "roles": "",
+    "file": "src\\vidalpay\\vidalpay.controller.ts"
+  },
+  {
+    "method": "GET",
+    "route": "/transaction/me",
+    "controller": "TransactionController",
+    "handler": "me",
+    "auth": "GLOBAL_DEFAULT",
+    "roles": "",
+    "file": "src\\vidalpay\\vidalpay.controller.ts"
+  },
+  {
+    "method": "GET",
+    "route": "/transaction/me/statement",
+    "controller": "TransactionController",
+    "handler": "statement",
+    "auth": "GLOBAL_DEFAULT",
+    "roles": "",
+    "file": "src\\vidalpay\\vidalpay.controller.ts"
+  },
+  {
+    "method": "POST",
+    "route": "/transfers/internal",
+    "controller": "TransfersController",
+    "handler": "internal",
+    "auth": "GLOBAL_DEFAULT",
+    "roles": "",
+    "file": "src\\vidalpay\\vidalpay.controller.ts"
+  },
+  {
+    "method": "GET",
+    "route": "/user/account-level",
+    "controller": "UserController",
+    "handler": "accountLevel",
+    "auth": "GLOBAL_DEFAULT",
+    "roles": "",
+    "file": "src\\user\\user.controller.ts"
+  },
+  {
+    "method": "POST",
+    "route": "/user/account/closure",
+    "controller": "UserController",
+    "handler": "closeAccount",
+    "auth": "GLOBAL_DEFAULT",
+    "roles": "",
+    "file": "src\\user\\user.controller.ts"
+  },
+  {
+    "method": "POST",
+    "route": "/user/account/deletion",
+    "controller": "UserController",
+    "handler": "requestAccountDeletion",
+    "auth": "GLOBAL_DEFAULT",
+    "roles": "",
+    "file": "src\\user\\user.controller.ts"
+  },
+  {
+    "method": "GET",
+    "route": "/user/home",
+    "controller": "UserController",
+    "handler": "home",
+    "auth": "GLOBAL_DEFAULT",
+    "roles": "",
+    "file": "src\\user\\user.controller.ts"
+  },
+  {
+    "method": "POST",
+    "route": "/user/kyc/address",
+    "controller": "UserController",
+    "handler": "submitKycAddress",
+    "auth": "GLOBAL_DEFAULT",
+    "roles": "",
+    "file": "src\\user\\user.controller.ts"
+  },
+  {
+    "method": "POST",
+    "route": "/user/kyc/identity",
+    "controller": "UserController",
+    "handler": "submitKycIdentity",
+    "auth": "GLOBAL_DEFAULT",
+    "roles": "",
+    "file": "src\\user\\user.controller.ts"
+  },
+  {
+    "method": "POST",
+    "route": "/user/kyc/liveness",
+    "controller": "UserController",
+    "handler": "submitKycLiveness",
+    "auth": "GLOBAL_DEFAULT",
+    "roles": "",
+    "file": "src\\user\\user.controller.ts"
+  },
+  {
+    "method": "POST",
+    "route": "/user/kyc/submit",
+    "controller": "UserController",
+    "handler": "submitKyc",
+    "auth": "GLOBAL_DEFAULT",
+    "roles": "",
+    "file": "src\\user\\user.controller.ts"
+  },
+  {
+    "method": "GET",
+    "route": "/user/limits",
+    "controller": "UserController",
+    "handler": "limits",
+    "auth": "GLOBAL_DEFAULT",
+    "roles": "",
+    "file": "src\\user\\user.controller.ts"
+  },
+  {
+    "method": "GET",
+    "route": "/user/me",
+    "controller": "UserController",
+    "handler": "me",
+    "auth": "GLOBAL_DEFAULT",
+    "roles": "",
+    "file": "src\\user\\user.controller.ts"
+  },
+  {
+    "method": "PATCH",
+    "route": "/user/profile",
+    "controller": "UserController",
+    "handler": "updateProfile",
+    "auth": "GLOBAL_DEFAULT",
+    "roles": "",
+    "file": "src\\user\\user.controller.ts"
+  },
+  {
+    "method": "GET",
+    "route": "/user/scheduled-transfers",
+    "controller": "UserController",
+    "handler": "scheduledTransfers",
+    "auth": "GLOBAL_DEFAULT",
+    "roles": "",
+    "file": "src\\user\\user.controller.ts"
+  },
+  {
+    "method": "POST",
+    "route": "/user/scheduled-transfers",
+    "controller": "UserController",
+    "handler": "createScheduledTransfer",
+    "auth": "GLOBAL_DEFAULT",
+    "roles": "",
+    "file": "src\\user\\user.controller.ts"
+  },
+  {
+    "method": "GET",
+    "route": "/user/security",
+    "controller": "UserController",
+    "handler": "security",
+    "auth": "GLOBAL_DEFAULT",
+    "roles": "",
+    "file": "src\\user\\user.controller.ts"
+  },
+  {
+    "method": "POST",
+    "route": "/user/security/change-email/request",
+    "controller": "UserController",
+    "handler": "requestEmailChange",
+    "auth": "GLOBAL_DEFAULT",
+    "roles": "",
+    "file": "src\\user\\user.controller.ts"
+  },
+  {
+    "method": "POST",
+    "route": "/user/security/change-email/verify",
+    "controller": "UserController",
+    "handler": "verifyEmailChange",
+    "auth": "GLOBAL_DEFAULT",
+    "roles": "",
+    "file": "src\\user\\user.controller.ts"
+  },
+  {
+    "method": "POST",
+    "route": "/user/security/change-phone/request",
+    "controller": "UserController",
+    "handler": "requestPhoneChange",
+    "auth": "GLOBAL_DEFAULT",
+    "roles": "",
+    "file": "src\\user\\user.controller.ts"
+  },
+  {
+    "method": "POST",
+    "route": "/user/security/change-phone/verify",
+    "controller": "UserController",
+    "handler": "verifyPhoneChange",
+    "auth": "GLOBAL_DEFAULT",
+    "roles": "",
+    "file": "src\\user\\user.controller.ts"
+  },
+  {
+    "method": "POST",
+    "route": "/wallet/airtime",
+    "controller": "WalletController",
+    "handler": "airtime",
+    "auth": "GLOBAL_DEFAULT",
+    "roles": "",
+    "file": "src\\wallet\\wallet.controller.ts"
+  },
+  {
+    "method": "GET",
+    "route": "/wallet/catalogs/airtime",
+    "controller": "WalletController",
+    "handler": "airtimeCatalog",
+    "auth": "GLOBAL_DEFAULT",
+    "roles": "",
+    "file": "src\\wallet\\wallet.controller.ts"
+  },
+  {
+    "method": "GET",
+    "route": "/wallet/catalogs/banks",
+    "controller": "WalletController",
+    "handler": "banks",
+    "auth": "GLOBAL_DEFAULT",
+    "roles": "",
+    "file": "src\\wallet\\wallet.controller.ts"
+  },
+  {
+    "method": "GET",
+    "route": "/wallet/catalogs/data",
+    "controller": "WalletController",
+    "handler": "dataCatalog",
+    "auth": "GLOBAL_DEFAULT",
+    "roles": "",
+    "file": "src\\wallet\\wallet.controller.ts"
+  },
+  {
+    "method": "GET",
+    "route": "/wallet/catalogs/utilities",
+    "controller": "WalletController",
+    "handler": "utilitiesCatalog",
+    "auth": "GLOBAL_DEFAULT",
+    "roles": "",
+    "file": "src\\wallet\\wallet.controller.ts"
+  },
+  {
+    "method": "POST",
+    "route": "/wallet/data",
+    "controller": "WalletController",
+    "handler": "data",
+    "auth": "GLOBAL_DEFAULT",
+    "roles": "",
+    "file": "src\\wallet\\wallet.controller.ts"
+  },
+  {
+    "method": "POST",
+    "route": "/wallet/external-transfer",
+    "controller": "WalletController",
+    "handler": "externalTransfer",
+    "auth": "GLOBAL_DEFAULT",
+    "roles": "",
+    "file": "src\\wallet\\wallet.controller.ts"
+  },
+  {
+    "method": "POST",
+    "route": "/wallet/external-transfer/resolve",
+    "controller": "WalletController",
+    "handler": "resolveExternalTransfer",
+    "auth": "GLOBAL_DEFAULT",
+    "roles": "",
+    "file": "src\\wallet\\wallet.controller.ts"
+  },
+  {
+    "method": "POST",
+    "route": "/wallet/top-up/card",
+    "controller": "WalletController",
+    "handler": "topUpCard",
+    "auth": "GLOBAL_DEFAULT",
+    "roles": "",
+    "file": "src\\wallet\\wallet.controller.ts"
+  },
+  {
+    "method": "GET",
+    "route": "/wallet/top-up/card/:reference",
+    "controller": "WalletController",
+    "handler": "topUpCardStatus",
+    "auth": "GLOBAL_DEFAULT",
+    "roles": "",
+    "file": "src\\wallet\\wallet.controller.ts"
+  },
+  {
+    "method": "GET",
+    "route": "/wallet/transactions",
+    "controller": "WalletController",
+    "handler": "transactions",
+    "auth": "GLOBAL_DEFAULT",
+    "roles": "",
+    "file": "src\\wallet\\wallet.controller.ts"
+  },
+  {
+    "method": "POST",
+    "route": "/wallet/utilities",
+    "controller": "WalletController",
+    "handler": "utilities",
+    "auth": "GLOBAL_DEFAULT",
+    "roles": "",
+    "file": "src\\wallet\\wallet.controller.ts"
+  },
+  {
+    "method": "POST",
+    "route": "/wallet/utilities/validate",
+    "controller": "WalletController",
+    "handler": "validateUtility",
+    "auth": "GLOBAL_DEFAULT",
+    "roles": "",
+    "file": "src\\wallet\\wallet.controller.ts"
+  },
+  {
+    "method": "GET",
+    "route": "/wallets",
+    "controller": "WalletsController",
+    "handler": "wallets",
+    "auth": "GLOBAL_DEFAULT",
+    "roles": "",
+    "file": "src\\wallet\\wallet.controller.ts"
+  },
+  {
+    "method": "POST",
+    "route": "/wallets/:currency/activate",
+    "controller": "WalletsController",
+    "handler": "activate",
+    "auth": "GLOBAL_DEFAULT",
+    "roles": "",
+    "file": "src\\wallet\\wallet.controller.ts"
+  },
+  {
+    "method": "GET",
+    "route": "/wallets/:currency/eligibility",
+    "controller": "WalletsController",
+    "handler": "eligibility",
+    "auth": "GLOBAL_DEFAULT",
+    "roles": "",
+    "file": "src\\wallet\\wallet.controller.ts"
+  },
+  {
+    "method": "GET",
+    "route": "/wallets/available",
+    "controller": "WalletsController",
+    "handler": "available",
+    "auth": "GLOBAL_DEFAULT",
+    "roles": "",
+    "file": "src\\wallet\\wallet.controller.ts"
+  },
+  {
+    "method": "GET",
+    "route": "/wallets/ngn",
+    "controller": "WalletsController",
+    "handler": "ngn",
+    "auth": "GLOBAL_DEFAULT",
+    "roles": "",
+    "file": "src\\wallet\\wallet.controller.ts"
+  },
+  {
+    "method": "GET",
+    "route": "/wallets/ngn/account-details",
+    "controller": "WalletsController",
+    "handler": "ngnAccountDetails",
+    "auth": "GLOBAL_DEFAULT",
+    "roles": "",
+    "file": "src\\wallet\\wallet.controller.ts"
+  },
+  {
+    "method": "GET",
+    "route": "/wallets/ngn/transactions",
+    "controller": "WalletsController",
+    "handler": "ngnTransactions",
+    "auth": "GLOBAL_DEFAULT",
+    "roles": "",
+    "file": "src\\wallet\\wallet.controller.ts"
+  },
+  {
+    "method": "GET",
+    "route": "/wallets/transactions",
+    "controller": "WalletsController",
+    "handler": "transactions",
+    "auth": "GLOBAL_DEFAULT",
+    "roles": "",
+    "file": "src\\wallet\\wallet.controller.ts"
+  },
+  {
+    "method": "GET",
+    "route": "/wallets/usd",
+    "controller": "WalletsController",
+    "handler": "usd",
+    "auth": "GLOBAL_DEFAULT",
+    "roles": "",
+    "file": "src\\wallet\\wallet.controller.ts"
+  },
+  {
+    "method": "GET",
+    "route": "/wallets/usd/account-details",
+    "controller": "WalletsController",
+    "handler": "usdAccountDetails",
+    "auth": "GLOBAL_DEFAULT",
+    "roles": "",
+    "file": "src\\wallet\\wallet.controller.ts"
+  },
+  {
+    "method": "GET",
+    "route": "/wallets/usd/transactions",
+    "controller": "WalletsController",
+    "handler": "usdTransactions",
+    "auth": "GLOBAL_DEFAULT",
+    "roles": "",
+    "file": "src\\wallet\\wallet.controller.ts"
+  },
+  {
+    "method": "POST",
+    "route": "/webhooks/kyc/metamap",
+    "controller": "WebhooksController",
+    "handler": "kyc",
+    "auth": "AuthType.None",
+    "roles": "",
+    "file": "src\\vidalpay\\vidalpay.controller.ts"
+  },
+  {
+    "method": "POST",
+    "route": "/webhooks/payvessel",
+    "controller": "WebhooksController",
+    "handler": "payvessel",
+    "auth": "AuthType.None",
+    "roles": "",
+    "file": "src\\vidalpay\\vidalpay.controller.ts"
+  },
+  {
+    "method": "POST",
+    "route": "/webhooks/unit",
+    "controller": "WebhooksController",
+    "handler": "unit",
+    "auth": "AuthType.None",
+    "roles": "",
+    "file": "src\\vidalpay\\vidalpay.controller.ts"
+  }
+]

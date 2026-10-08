@@ -1304,6 +1304,107 @@ describe('VidalpayService', () => {
     );
   });
 
+  it('saves a local support ticket when Zendesk is unavailable', async () => {
+    const supportTicketRepository = (service as any).supportTicketRepository;
+    supportTicketRepository.create.mockImplementation((payload: any) => ({
+      id: 'ticket-1',
+      ...payload,
+    }));
+    supportTicketRepository.save.mockImplementation(async (payload: any) => payload);
+    providerStatusService.getStatus.mockReturnValue(
+      status({
+        capability: 'zendesk_support',
+        provider: 'Zendesk',
+        enabled: false,
+        readinessStatus: 'MISSING_CREDENTIALS',
+        missingEnvVars: ['ZENDESK_SUBDOMAIN', 'ZENDESK_OAUTH_TOKEN'],
+      }) as any,
+    );
+
+    await expect(
+      service.createSupportTicket('user-1', {
+        subject: 'Need help',
+        message: 'Please assist',
+      }),
+    ).resolves.toMatchObject({
+      ticket: { id: 'ticket-1', userId: 'user-1' },
+      providerSync: { provider: 'Zendesk', status: 'NOT_CONFIGURED' },
+    });
+  });
+
+  it('blocks VTU purchases even when configured until provider contract and ledger finalization are implemented', async () => {
+    const pin = await hash('1234', 4);
+    userRepository.findOne.mockResolvedValue({
+      id: 'user-1',
+      country: 'Nigeria',
+      pin,
+    });
+    providerOperationRepository.findOne.mockResolvedValue(null);
+    providerOperationRepository.create.mockImplementation((payload: any) => payload);
+    providerOperationRepository.save.mockImplementation(async (payload: any) => payload);
+    providerStatusService.getStatus.mockImplementation((capability: any) =>
+      status({
+        capability,
+        provider: capability === 'vtu_purchase' ? 'VTU provider' : 'Unit.co',
+        enabled: capability === 'vtu_purchase',
+        missingEnvVars: [],
+      }) as any,
+    );
+
+    await expect(
+      service.purchaseService('user-1', 'airtime', {
+        amount: 1000,
+        currency: 'NGN',
+        transactionPin: '1234',
+        idempotencyKey: 'vtu-airtime-1',
+      }),
+    ).rejects.toBeInstanceOf(ServiceUnavailableException);
+    expect(providerOperationRepository.save).toHaveBeenCalledWith(
+      expect.objectContaining({
+        type: 'airtime',
+        idempotencyKey: 'vtu-airtime-1',
+        status: 'BLOCKED',
+        provider: 'VTU provider',
+      }),
+    );
+  });
+
+  it('verifies WhatsApp webhooks using only the backend verify token', () => {
+    configService.get.mockImplementation((key: string) =>
+      key === 'WHATSAPP_WEBHOOK_VERIFY_TOKEN' ? 'verify-me' : undefined,
+    );
+
+    expect(
+      service.verifyWhatsAppWebhook({
+        'hub.mode': 'subscribe',
+        'hub.verify_token': 'verify-me',
+        'hub.challenge': 'challenge-1',
+      }),
+    ).toBe('challenge-1');
+  });
+
+  it('deduplicates WhatsApp webhooks in provider operations without exposing message storage as ready', async () => {
+    providerOperationRepository.findOne.mockResolvedValue(null);
+    providerOperationRepository.create.mockImplementation((payload: any) => payload);
+    providerOperationRepository.save.mockImplementation(async (payload: any) => payload);
+
+    await expect(
+      service.handleWhatsAppWebhook({ entry: [{ id: 'wa-event-1' }] }),
+    ).resolves.toMatchObject({
+      received: true,
+      provider: 'WhatsApp Cloud API',
+      duplicate: false,
+      reference: 'wa-event-1',
+    });
+    expect(providerOperationRepository.save).toHaveBeenCalledWith(
+      expect.objectContaining({
+        type: 'whatsapp_webhook',
+        idempotencyKey: 'wa-event-1',
+        provider: 'WhatsApp Cloud API',
+      }),
+    );
+  });
+
   it('returns an existing bill operation without repeating a Reloadly purchase', async () => {
     const pin = await hash('1234', 4);
     userRepository.findOne.mockResolvedValue({
@@ -1334,5 +1435,105 @@ describe('VidalpayService', () => {
       }),
     );
     expect(sandboxProviderService.purchaseReloadly).not.toHaveBeenCalled();
+  });
+
+
+  it('lists admin support tickets without exposing provider sync as a fake success', async () => {
+    const supportTicketRepository = (service as any).supportTicketRepository;
+    const ticket = {
+      id: 'ticket-1',
+      userId: 'user-1',
+      category: 'Wallet',
+      subject: 'Wallet issue',
+      message: 'Please help',
+      priority: 'NORMAL',
+      status: 'OPEN',
+      preferredChannel: 'email',
+      resolutionSummary: null,
+      metadata: { zendesk: { syncStatus: 'NOT_CONFIGURED' } },
+      createdAt: new Date('2026-01-01T00:00:00Z'),
+      updatedAt: new Date('2026-01-01T00:00:00Z'),
+    };
+    const queryBuilder = {
+      andWhere: jest.fn().mockReturnThis(),
+      orderBy: jest.fn().mockReturnThis(),
+      skip: jest.fn().mockReturnThis(),
+      take: jest.fn().mockReturnThis(),
+      getManyAndCount: jest.fn().mockResolvedValue([[ticket], 1]),
+    };
+    supportTicketRepository.createQueryBuilder.mockReturnValue(queryBuilder);
+
+    await expect(
+      service.listAdminSupportTickets({ search: 'wallet', status: 'OPEN' }),
+    ).resolves.toMatchObject({
+      items: [
+        {
+          id: 'ticket-1',
+          userId: 'user-1',
+          category: 'Wallet',
+          status: 'OPEN',
+          metadata: { zendesk: { syncStatus: 'NOT_CONFIGURED' } },
+        },
+      ],
+      meta: { total: 1, page: 1, limit: 50, pages: 1 },
+    });
+    expect(queryBuilder.andWhere).toHaveBeenCalledWith(
+      expect.stringContaining('LOWER(ticket.id)'),
+      { search: '%wallet%' },
+    );
+    expect(queryBuilder.andWhere).toHaveBeenCalledWith('ticket.status = :status', {
+      status: 'OPEN',
+    });
+  });
+
+  it('filters admin WhatsApp and VTU operation readers through stored provider operations', async () => {
+    const operation = {
+      id: 'op-1',
+      userId: 'SYSTEM',
+      type: 'whatsapp_webhook',
+      idempotencyKey: 'wa-1',
+      reference: 'wa-1',
+      status: 'RECEIVED',
+      amount: null,
+      currency: null,
+      provider: 'WhatsApp Cloud API',
+      providerReference: 'wa-1',
+      requestPayload: null,
+      responsePayload: { received: true },
+      errorCode: null,
+      failureReason: null,
+      metadata: { storage: 'provider_operation_audit_only' },
+      createdAt: new Date('2026-01-01T00:00:00Z'),
+      updatedAt: new Date('2026-01-01T00:00:00Z'),
+    };
+    const queryBuilder = {
+      andWhere: jest.fn().mockReturnThis(),
+      orderBy: jest.fn().mockReturnThis(),
+      skip: jest.fn().mockReturnThis(),
+      take: jest.fn().mockReturnThis(),
+      getManyAndCount: jest.fn().mockResolvedValue([[operation], 1]),
+    };
+    providerOperationRepository.createQueryBuilder.mockReturnValue(queryBuilder);
+
+    await expect(
+      service.listAdminWhatsAppConversations({ page: '1' }),
+    ).resolves.toMatchObject({
+      items: [{ id: 'op-1', operationType: 'whatsapp_webhook' }],
+    });
+    expect(queryBuilder.andWhere).toHaveBeenCalledWith('operation.type = :type', {
+      type: 'whatsapp_webhook',
+    });
+
+    queryBuilder.andWhere.mockClear();
+    await expect(service.listAdminVtuOperations({ userId: 'user-1' })).resolves.toMatchObject({
+      items: [{ id: 'op-1' }],
+    });
+    expect(queryBuilder.andWhere).toHaveBeenCalledWith(
+      expect.stringContaining('operation.type IN'),
+      expect.objectContaining({ types: ['airtime', 'data', 'utilities', 'vtu_webhook'] }),
+    );
+    expect(queryBuilder.andWhere).toHaveBeenCalledWith('operation.userId = :userId', {
+      userId: 'user-1',
+    });
   });
 });

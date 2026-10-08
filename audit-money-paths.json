@@ -1,0 +1,1542 @@
+[
+  {
+    "file": "src\\common\\enum\\siteOption.enum.ts",
+    "line": 2,
+    "text": "REFERRAL_BONUS_AMOUNT = 'Referral Bonus Amount',"
+  },
+  {
+    "file": "src\\common\\enum\\transaction-type.enum.ts",
+    "line": 2,
+    "text": "DEBIT = 'DEBIT',"
+  },
+  {
+    "file": "src\\common\\enum\\transaction-type.enum.ts",
+    "line": 3,
+    "text": "CREDIT = 'CREDIT',"
+  },
+  {
+    "file": "src\\database\\abstract.entity.ts",
+    "line": 4,
+    "text": "PrimaryGeneratedColumn,"
+  },
+  {
+    "file": "src\\database\\abstract.entity.ts",
+    "line": 9,
+    "text": "@PrimaryGeneratedColumn('uuid')"
+  },
+  {
+    "file": "src\\database\\entities\\card.entity.ts",
+    "line": 5,
+    "text": "const amountTransformer = {"
+  },
+  {
+    "file": "src\\database\\entities\\card.entity.ts",
+    "line": 45,
+    "text": "transformer: amountTransformer,"
+  },
+  {
+    "file": "src\\database\\entities\\card.entity.ts",
+    "line": 54,
+    "text": "transformer: amountTransformer,"
+  },
+  {
+    "file": "src\\database\\entities\\dispute.entity.ts",
+    "line": 5,
+    "text": "const amountTransformer = {"
+  },
+  {
+    "file": "src\\database\\entities\\dispute.entity.ts",
+    "line": 31,
+    "text": "transformer: amountTransformer,"
+  },
+  {
+    "file": "src\\database\\entities\\dispute.entity.ts",
+    "line": 33,
+    "text": "disputedAmount: number | null;"
+  },
+  {
+    "file": "src\\database\\entities\\financial-transaction.entity.ts",
+    "line": 6,
+    "text": "const amountTransformer = {"
+  },
+  {
+    "file": "src\\database\\entities\\financial-transaction.entity.ts",
+    "line": 34,
+    "text": "transformer: amountTransformer,"
+  },
+  {
+    "file": "src\\database\\entities\\financial-transaction.entity.ts",
+    "line": 36,
+    "text": "amount: number;"
+  },
+  {
+    "file": "src\\database\\entities\\financial-transaction.entity.ts",
+    "line": 43,
+    "text": "transformer: amountTransformer,"
+  },
+  {
+    "file": "src\\database\\entities\\financial-transaction.entity.ts",
+    "line": 52,
+    "text": "transformer: amountTransformer,"
+  },
+  {
+    "file": "src\\database\\entities\\financial-transaction.entity.ts",
+    "line": 57,
+    "text": "type: 'credit' | 'debit';"
+  },
+  {
+    "file": "src\\database\\entities\\provider-operation.entity.ts",
+    "line": 5,
+    "text": "const amountTransformer = {"
+  },
+  {
+    "file": "src\\database\\entities\\provider-operation.entity.ts",
+    "line": 35,
+    "text": "transformer: amountTransformer,"
+  },
+  {
+    "file": "src\\database\\entities\\provider-operation.entity.ts",
+    "line": 37,
+    "text": "amount: number | null;"
+  },
+  {
+    "file": "src\\database\\entities\\token.entity.ts",
+    "line": 3,
+    "text": "PrimaryGeneratedColumn,"
+  },
+  {
+    "file": "src\\database\\migrations\\1788998400000-MobileContractSchema.ts",
+    "line": 121,
+    "text": "amount decimal(20,2) NULL,"
+  },
+  {
+    "file": "src\\database\\migrations\\1788998400000-MobileContractSchema.ts",
+    "line": 146,
+    "text": "amount decimal(20,2) NOT NULL,"
+  },
+  {
+    "file": "src\\database\\migrations\\1788998400000-MobileContractSchema.ts",
+    "line": 286,
+    "text": "disputedAmount decimal(20,2) NULL,"
+  },
+  {
+    "file": "src\\iam\\authentication\\authentication.service.spec.ts",
+    "line": 417,
+    "text": "service.generateToken({"
+  },
+  {
+    "file": "src\\iam\\authentication\\authentication.service.ts",
+    "line": 98,
+    "text": "const refCode = UTILITIES.generateReferralCode();"
+  },
+  {
+    "file": "src\\iam\\authentication\\authentication.service.ts",
+    "line": 99,
+    "text": "const tagId = await TagIdGenerator.generateUniqueTagId(this.userRepository);"
+  },
+  {
+    "file": "src\\iam\\authentication\\authentication.service.ts",
+    "line": 124,
+    "text": "const phoneVerificationCode = this.generateSixDigitToken();"
+  },
+  {
+    "file": "src\\iam\\authentication\\authentication.service.ts",
+    "line": 153,
+    "text": "const tokens = await this.generateToken(newUser, request);"
+  },
+  {
+    "file": "src\\iam\\authentication\\authentication.service.ts",
+    "line": 184,
+    "text": "const tokens = await this.generateToken(user, request);"
+  },
+  {
+    "file": "src\\iam\\authentication\\authentication.service.ts",
+    "line": 227,
+    "text": "const phoneVerificationCode = this.generateFourDigitToken();"
+  },
+  {
+    "file": "src\\iam\\authentication\\authentication.service.ts",
+    "line": 257,
+    "text": "const tokens = await this.generateToken(user, request);"
+  },
+  {
+    "file": "src\\iam\\authentication\\authentication.service.ts",
+    "line": 306,
+    "text": "const tokens = await this.generateToken(admin, request);"
+  },
+  {
+    "file": "src\\iam\\authentication\\authentication.service.ts",
+    "line": 351,
+    "text": "async generateToken("
+  },
+  {
+    "file": "src\\iam\\authentication\\authentication.service.ts",
+    "line": 363,
+    "text": "return this.generateStatelessTokens(user);"
+  },
+  {
+    "file": "src\\iam\\authentication\\authentication.service.ts",
+    "line": 395,
+    "text": "return this.generateStatelessTokens(user);"
+  },
+  {
+    "file": "src\\iam\\authentication\\authentication.service.ts",
+    "line": 403,
+    "text": "private async generateStatelessTokens(user: User) {"
+  },
+  {
+    "file": "src\\iam\\authentication\\authentication.service.ts",
+    "line": 428,
+    "text": "const verificationToken = this.generateSixDigitToken();"
+  },
+  {
+    "file": "src\\iam\\authentication\\authentication.service.ts",
+    "line": 491,
+    "text": "return this.generateStatelessTokens(user as User);"
+  },
+  {
+    "file": "src\\iam\\authentication\\authentication.service.ts",
+    "line": 509,
+    "text": "return this.generateToken(user as User, undefined, session);"
+  },
+  {
+    "file": "src\\iam\\authentication\\authentication.service.ts",
+    "line": 516,
+    "text": "return this.generateStatelessTokens(user as User);"
+  },
+  {
+    "file": "src\\iam\\authentication\\authentication.service.ts",
+    "line": 657,
+    "text": "public generateFourDigitToken(): string {"
+  },
+  {
+    "file": "src\\iam\\authentication\\authentication.service.ts",
+    "line": 661,
+    "text": "//generate a 6 digit token"
+  },
+  {
+    "file": "src\\iam\\authentication\\authentication.service.ts",
+    "line": 662,
+    "text": "public generateSixDigitToken(): string {"
+  },
+  {
+    "file": "src\\iam\\authentication\\authentication.service.ts",
+    "line": 776,
+    "text": "//       amount: Number(promoCode.amount),"
+  },
+  {
+    "file": "src\\iam\\authentication\\authentication.service.ts",
+    "line": 778,
+    "text": "//     await this.walletService.creditGameBalanceWallet("
+  },
+  {
+    "file": "src\\iam\\authentication\\authentication.service.ts",
+    "line": 780,
+    "text": "//       Number(promoCode?.amount),"
+  },
+  {
+    "file": "src\\iam\\authentication\\authentication.service.ts",
+    "line": 793,
+    "text": "const verificationToken = this.generateSixDigitToken();"
+  },
+  {
+    "file": "src\\iam\\authentication\\authentication.service.ts",
+    "line": 877,
+    "text": "// Generate 6-digit OTP"
+  },
+  {
+    "file": "src\\iam\\authentication\\authentication.service.ts",
+    "line": 878,
+    "text": "const verificationToken = this.generateSixDigitToken();"
+  },
+  {
+    "file": "src\\iam\\authentication\\authentication.service.ts",
+    "line": 944,
+    "text": "// Use the correct method signature: 3 separate parameters"
+  },
+  {
+    "file": "src\\iam\\iam.module.ts",
+    "line": 20,
+    "text": "import { GoogleStrategy } from './strategy/google.strategy';"
+  },
+  {
+    "file": "src\\iam\\iam.module.ts",
+    "line": 40,
+    "text": "GoogleStrategy,"
+  },
+  {
+    "file": "src\\iam\\strategy\\google.strategy.ts",
+    "line": 1,
+    "text": "import { PassportStrategy } from '@nestjs/passport';"
+  },
+  {
+    "file": "src\\iam\\strategy\\google.strategy.ts",
+    "line": 2,
+    "text": "import { Strategy, Profile } from 'passport-google-oauth20';"
+  },
+  {
+    "file": "src\\iam\\strategy\\google.strategy.ts",
+    "line": 10,
+    "text": "export class GoogleStrategy extends PassportStrategy(Strategy, 'google') {"
+  },
+  {
+    "file": "src\\iam\\strategy\\google.strategy.ts",
+    "line": 35,
+    "text": "const tokens = await this.authService.generateToken(checkUserExists);"
+  },
+  {
+    "file": "src\\iam\\strategy\\google.strategy.ts",
+    "line": 42,
+    "text": "const playerId = UTILITIES.generatePlayerId();"
+  },
+  {
+    "file": "src\\iam\\strategy\\google.strategy.ts",
+    "line": 43,
+    "text": "const referralCode = UTILITIES.generateReferralCode();"
+  },
+  {
+    "file": "src\\iam\\strategy\\google.strategy.ts",
+    "line": 56,
+    "text": "const tokens = await this.authService.generateToken(user);"
+  },
+  {
+    "file": "src\\mail\\email.service.ts",
+    "line": 22,
+    "text": "//   private generateEmail = (template: any) => {"
+  },
+  {
+    "file": "src\\mail\\email.service.ts",
+    "line": 33,
+    "text": "//     const html = await this.generateEmail(template);"
+  },
+  {
+    "file": "src\\mail\\email.service.ts",
+    "line": 192,
+    "text": "private generateEmail = (template: any) => {"
+  },
+  {
+    "file": "src\\mail\\email.service.ts",
+    "line": 198,
+    "text": "const html = await this.generateEmail(template);"
+  },
+  {
+    "file": "src\\mail\\mail.service.ts",
+    "line": 111,
+    "text": "//     amount: number,"
+  },
+  {
+    "file": "src\\mail\\mail.service.ts",
+    "line": 116,
+    "text": "//       `Your withdrawal request for ${UTILITIES.formatMoney(amount)} has been processed successfully.`,"
+  },
+  {
+    "file": "src\\mail\\mail.service.ts",
+    "line": 124,
+    "text": "//         amount,"
+  },
+  {
+    "file": "src\\user\\user.controller.spec.ts",
+    "line": 48,
+    "text": "limits: { enforcement: { amountLimitsEnforced: false } },"
+  },
+  {
+    "file": "src\\user\\user.controller.spec.ts",
+    "line": 55,
+    "text": "limits: { enforcement: { amountLimitsEnforced: false } },"
+  },
+  {
+    "file": "src\\user\\user.controller.spec.ts",
+    "line": 84,
+    "text": "controller.createScheduledTransfer({ sub: 'user-1' } as any, { amount: 25 }),"
+  },
+  {
+    "file": "src\\user\\user.controller.spec.ts",
+    "line": 86,
+    "text": "expect(vidalpayService.createScheduledTransfer).toHaveBeenCalledWith('user-1', { amount: 25 });"
+  },
+  {
+    "file": "src\\utils\\apiMessages.ts",
+    "line": 17,
+    "text": "public INSUFFICIENT_BALANCE = `Insuffiucient Balance. Please top-up your wallet and try again.`;"
+  },
+  {
+    "file": "src\\utils\\apiMessages.ts",
+    "line": 18,
+    "text": "public PAYMENT_ALREADY_VERIFIED = 'Payment already verified and credited';"
+  },
+  {
+    "file": "src\\utils\\apiMessages.ts",
+    "line": 28,
+    "text": "public INSUFFICIENT_WINNING_BALANCE = `Insufficient balance in Winnings Wallet to withdraw. Kindly play more games to increase your winnings`;"
+  },
+  {
+    "file": "src\\utils\\apiMessages.ts",
+    "line": 130,
+    "text": "public INVALID_STAKE_AMOUNT = 'Invalid Stake Amount';"
+  },
+  {
+    "file": "src\\utils\\helperFuncs.ts",
+    "line": 21,
+    "text": "public getPercentage(amountSaved: number, targetAmount: number) {"
+  },
+  {
+    "file": "src\\utils\\helperFuncs.ts",
+    "line": 22,
+    "text": "return ((amountSaved / targetAmount) * 100).toFixed(2);"
+  },
+  {
+    "file": "src\\utils\\helperFuncs.ts",
+    "line": 25,
+    "text": "public getPercentageAmount(amount: number, percentage: number) {"
+  },
+  {
+    "file": "src\\utils\\helperFuncs.ts",
+    "line": 26,
+    "text": "const percent: number = (percentage / 100) * amount;"
+  },
+  {
+    "file": "src\\utils\\helperFuncs.ts",
+    "line": 41,
+    "text": "public generateReferralCode() {"
+  },
+  {
+    "file": "src\\utils\\helperFuncs.ts",
+    "line": 51,
+    "text": "public generatePassword(length: number) {"
+  },
+  {
+    "file": "src\\utils\\helperFuncs.ts",
+    "line": 62,
+    "text": "public generateTransactionRef() {"
+  },
+  {
+    "file": "src\\utils\\helperFuncs.ts",
+    "line": 63,
+    "text": "return `FT_${this.generateCode(10)}`;"
+  },
+  {
+    "file": "src\\utils\\helperFuncs.ts",
+    "line": 66,
+    "text": "public generateOtp() {"
+  },
+  {
+    "file": "src\\utils\\helperFuncs.ts",
+    "line": 80,
+    "text": "amount: number,"
+  },
+  {
+    "file": "src\\utils\\helperFuncs.ts",
+    "line": 82,
+    "text": "return date.clone().add(amount, unit);"
+  },
+  {
+    "file": "src\\utils\\helperFuncs.ts",
+    "line": 89,
+    "text": "public generateReference(): string {"
+  },
+  {
+    "file": "src\\utils\\helperFuncs.ts",
+    "line": 93,
+    "text": "public geerateWalletReference(): string {"
+  },
+  {
+    "file": "src\\utils\\helperFuncs.ts",
+    "line": 94,
+    "text": "return `WAL_${this.generateRandomString(20)}`;"
+  },
+  {
+    "file": "src\\utils\\helperFuncs.ts",
+    "line": 97,
+    "text": "public generateBillsReference(): string {"
+  },
+  {
+    "file": "src\\utils\\helperFuncs.ts",
+    "line": 105,
+    "text": "public generateReversalReference(): string {"
+  },
+  {
+    "file": "src\\utils\\helperFuncs.ts",
+    "line": 123,
+    "text": "public generateCode(maxLen = 6): string {"
+  },
+  {
+    "file": "src\\utils\\helperFuncs.ts",
+    "line": 134,
+    "text": "public generateRandomString(length = 4): string {"
+  },
+  {
+    "file": "src\\utils\\helperFuncs.ts",
+    "line": 145,
+    "text": "public convertAmountToWords(amount: number): string {"
+  },
+  {
+    "file": "src\\utils\\helperFuncs.ts",
+    "line": 184,
+    "text": "if (amount === 0) return units[0];"
+  },
+  {
+    "file": "src\\utils\\helperFuncs.ts",
+    "line": 185,
+    "text": "if (amount < 0) return `minus ${this.convertAmountToWords(-amount)}`;"
+  },
+  {
+    "file": "src\\utils\\helperFuncs.ts",
+    "line": 206,
+    "text": "for (let i = 0; amount > 0; i++) {"
+  },
+  {
+    "file": "src\\utils\\helperFuncs.ts",
+    "line": 207,
+    "text": "const aPart = amount % 1000;"
+  },
+  {
+    "file": "src\\utils\\helperFuncs.ts",
+    "line": 214,
+    "text": "amount = Math.floor(amount / 1000);"
+  },
+  {
+    "file": "src\\utils\\helperFuncs.ts",
+    "line": 242,
+    "text": "public generateAccountNo(length: number = 10): string {"
+  },
+  {
+    "file": "src\\utils\\helperFuncs.ts",
+    "line": 248,
+    "text": "public generateLoanRequestId(length: number = 10): string {"
+  },
+  {
+    "file": "src\\utils\\helperFuncs.ts",
+    "line": 249,
+    "text": "return this.generateAccountNo(length);"
+  },
+  {
+    "file": "src\\utils\\helperFuncs.ts",
+    "line": 253,
+    "text": "const amount = Number(value);"
+  },
+  {
+    "file": "src\\utils\\helperFuncs.ts",
+    "line": 254,
+    "text": "return amount.toLocaleString('en-US', {"
+  },
+  {
+    "file": "src\\utils\\helperFuncs.ts",
+    "line": 260,
+    "text": "public calculateSimpleInterest(rate: number, amountInvested: number) {"
+  },
+  {
+    "file": "src\\utils\\helperFuncs.ts",
+    "line": 261,
+    "text": "return (rate / 100) * amountInvested;"
+  },
+  {
+    "file": "src\\utils\\helperFuncs.ts",
+    "line": 285,
+    "text": "isCredit: boolean,"
+  },
+  {
+    "file": "src\\utils\\helperFuncs.ts",
+    "line": 286,
+    "text": "amount: number,"
+  },
+  {
+    "file": "src\\utils\\helperFuncs.ts",
+    "line": 290,
+    "text": "const PURSE_CREDIT = `Transfer In: NGN${amount}: ${tag} - Ref: ${reference}`;"
+  },
+  {
+    "file": "src\\utils\\helperFuncs.ts",
+    "line": 291,
+    "text": "const PURSE_DEBIT = `Transfer Out: NGN${amount}: ${tag} - Ref: ${reference}`;"
+  },
+  {
+    "file": "src\\utils\\helperFuncs.ts",
+    "line": 293,
+    "text": "if (isCredit) {"
+  },
+  {
+    "file": "src\\utils\\helperFuncs.ts",
+    "line": 294,
+    "text": "return PURSE_CREDIT;"
+  },
+  {
+    "file": "src\\utils\\helperFuncs.ts",
+    "line": 296,
+    "text": "return PURSE_DEBIT;"
+  },
+  {
+    "file": "src\\utils\\helperFuncs.ts",
+    "line": 315,
+    "text": "public generatePlayerId(): string {"
+  },
+  {
+    "file": "src\\utils\\tagIdGenerator.ts",
+    "line": 10,
+    "text": "* Generates a unique 10-character tag ID starting with $"
+  },
+  {
+    "file": "src\\utils\\tagIdGenerator.ts",
+    "line": 15,
+    "text": "static async generateUniqueTagId("
+  },
+  {
+    "file": "src\\utils\\tagIdGenerator.ts",
+    "line": 22,
+    "text": "const tagId = this.generateTagId();"
+  },
+  {
+    "file": "src\\utils\\tagIdGenerator.ts",
+    "line": 37,
+    "text": "`Failed to generate unique tag ID after ${maxAttempts} attempts`,"
+  },
+  {
+    "file": "src\\utils\\tagIdGenerator.ts",
+    "line": 42,
+    "text": "* Generates a single tag ID (may not be unique)"
+  },
+  {
+    "file": "src\\utils\\tagIdGenerator.ts",
+    "line": 43,
+    "text": "* @returns string - Generated tag ID"
+  },
+  {
+    "file": "src\\utils\\tagIdGenerator.ts",
+    "line": 45,
+    "text": "private static generateTagId(): string {"
+  },
+  {
+    "file": "src\\utils\\tagIdGenerator.ts",
+    "line": 46,
+    "text": "const randomPart = this.generateRandomString(this.TAG_LENGTH - 1); // -1 for the $ prefix"
+  },
+  {
+    "file": "src\\utils\\tagIdGenerator.ts",
+    "line": 51,
+    "text": "* Generates a cryptographically secure random string"
+  },
+  {
+    "file": "src\\utils\\tagIdGenerator.ts",
+    "line": 55,
+    "text": "private static generateRandomString(length: number): string {"
+  },
+  {
+    "file": "src\\utils\\tagIdGenerator.ts",
+    "line": 90,
+    "text": "static async generateTimestampBasedTagId("
+  },
+  {
+    "file": "src\\utils\\tagIdGenerator.ts",
+    "line": 100,
+    "text": "const randomPart = this.generateRandomString(6);"
+  },
+  {
+    "file": "src\\utils\\tagIdGenerator.ts",
+    "line": 118,
+    "text": "`Failed to generate unique timestamp-based tag ID after ${maxAttempts} attempts`,"
+  },
+  {
+    "file": "src\\vidalpay\\contracts.ts",
+    "line": 71,
+    "text": "'fx_quote',"
+  },
+  {
+    "file": "src\\vidalpay\\fincra-sandbox.service.ts",
+    "line": 130,
+    "text": "{ name: 'treasury_rates', method: 'GET', path: '/quotes/treasury-orders/rates' },"
+  },
+  {
+    "file": "src\\vidalpay\\fincra-sandbox.service.ts",
+    "line": 175,
+    "text": "errorCode: this.safeErrorCode(axiosError.code),"
+  },
+  {
+    "file": "src\\vidalpay\\fincra-sandbox.service.ts",
+    "line": 176,
+    "text": "message: this.safeErrorMessage(body, status),"
+  },
+  {
+    "file": "src\\vidalpay\\fincra-sandbox.service.ts",
+    "line": 286,
+    "text": "private safeErrorCode(code?: string) {"
+  },
+  {
+    "file": "src\\vidalpay\\fincra-sandbox.service.ts",
+    "line": 291,
+    "text": "private safeErrorMessage(value: unknown, status: number | null): string {"
+  },
+  {
+    "file": "src\\vidalpay\\product-eligibility.service.ts",
+    "line": 66,
+    "text": "generatedAt: new Date().toISOString(),"
+  },
+  {
+    "file": "src\\vidalpay\\provider-status.service.spec.ts",
+    "line": 38,
+    "text": "expect(service.getStatus('fx_quote')).toEqual("
+  },
+  {
+    "file": "src\\vidalpay\\provider-status.service.ts",
+    "line": 52,
+    "text": "service: 'Unit sandbox virtual debit cards',"
+  },
+  {
+    "file": "src\\vidalpay\\provider-status.service.ts",
+    "line": 58,
+    "text": "service: 'Unit sandbox physical debit cards',"
+  },
+  {
+    "file": "src\\vidalpay\\provider-status.service.ts",
+    "line": 173,
+    "text": "fx_quote: {"
+  },
+  {
+    "file": "src\\vidalpay\\provider-status.service.ts",
+    "line": 176,
+    "text": "service: 'Backend FX quote provider',"
+  },
+  {
+    "file": "src\\vidalpay\\provider-status.service.ts",
+    "line": 255,
+    "text": "providerType: 'CREDIT',"
+  },
+  {
+    "file": "src\\vidalpay\\provider-status.service.ts",
+    "line": 256,
+    "text": "service: 'Unit credit accounts',"
+  },
+  {
+    "file": "src\\vidalpay\\provider-status.service.ts",
+    "line": 260,
+    "text": "'Unit credit support is not contractually enabled or sandbox-tested for VidalPay.',"
+  },
+  {
+    "file": "src\\vidalpay\\provider-status.service.ts",
+    "line": 264,
+    "text": "providerType: 'CREDIT',"
+  },
+  {
+    "file": "src\\vidalpay\\provider-status.service.ts",
+    "line": 265,
+    "text": "service: 'Unit credit program eligibility',"
+  },
+  {
+    "file": "src\\vidalpay\\provider-status.service.ts",
+    "line": 269,
+    "text": "'Unit credit eligibility is not contractually enabled or sandbox-tested for VidalPay.',"
+  },
+  {
+    "file": "src\\vidalpay\\provider-status.service.ts",
+    "line": 273,
+    "text": "providerType: 'CREDIT',"
+  },
+  {
+    "file": "src\\vidalpay\\provider-status.service.ts",
+    "line": 274,
+    "text": "service: 'Unit credit application flow',"
+  },
+  {
+    "file": "src\\vidalpay\\provider-status.service.ts",
+    "line": 278,
+    "text": "'Unit credit applications are not contractually enabled or sandbox-tested for VidalPay.',"
+  },
+  {
+    "file": "src\\vidalpay\\provider-status.service.ts",
+    "line": 282,
+    "text": "providerType: 'CREDIT',"
+  },
+  {
+    "file": "src\\vidalpay\\provider-status.service.ts",
+    "line": 283,
+    "text": "service: 'Unit credit repayment',"
+  },
+  {
+    "file": "src\\vidalpay\\provider-status.service.ts",
+    "line": 287,
+    "text": "'Unit credit repayment is not contractually enabled or sandbox-tested for VidalPay.',"
+  },
+  {
+    "file": "src\\vidalpay\\vidalpay.controller.spec.ts",
+    "line": 205,
+    "text": "amount: 10,"
+  },
+  {
+    "file": "src\\vidalpay\\vidalpay.controller.spec.ts",
+    "line": 255,
+    "text": "it('routes referral dashboard, earnings, and invite tracking separately', () => {"
+  },
+  {
+    "file": "src\\vidalpay\\vidalpay.controller.ts",
+    "line": 232,
+    "text": "@Get('quotes')"
+  },
+  {
+    "file": "src\\vidalpay\\vidalpay.controller.ts",
+    "line": 233,
+    "text": "quotes(@ActiveUser() user: ActiveUserData, @Query() query: AnyRecord) {"
+  },
+  {
+    "file": "src\\vidalpay\\vidalpay.controller.ts",
+    "line": 234,
+    "text": "return this.vidalpayService.getFxQuote(user.sub, query);"
+  },
+  {
+    "file": "src\\vidalpay\\vidalpay.controller.ts",
+    "line": 493,
+    "text": "@Post('withdrawal-quote')"
+  },
+  {
+    "file": "src\\vidalpay\\vidalpay.controller.ts",
+    "line": 494,
+    "text": "withdrawalQuote(@ActiveUser() user: ActiveUserData, @Body() body: AnyRecord) {"
+  },
+  {
+    "file": "src\\vidalpay\\vidalpay.controller.ts",
+    "line": 497,
+    "text": "'crypto_withdrawal_quote',"
+  },
+  {
+    "file": "src\\vidalpay\\vidalpay.service.spec.ts",
+    "line": 228,
+    "text": "expect(walletRepository.save).toHaveBeenCalledWith("
+  },
+  {
+    "file": "src\\vidalpay\\vidalpay.service.spec.ts",
+    "line": 370,
+    "text": ".spyOn(TagIdGenerator, 'generateUniqueTagId')"
+  },
+  {
+    "file": "src\\vidalpay\\vidalpay.service.spec.ts",
+    "line": 428,
+    "text": "amount: 100,"
+  },
+  {
+    "file": "src\\vidalpay\\vidalpay.service.spec.ts",
+    "line": 584,
+    "text": "amount: 25,"
+  },
+  {
+    "file": "src\\vidalpay\\vidalpay.service.spec.ts",
+    "line": 685,
+    "text": "expect(walletRepository.save).not.toHaveBeenCalled();"
+  },
+  {
+    "file": "src\\vidalpay\\vidalpay.service.spec.ts",
+    "line": 845,
+    "text": "expect(walletRepository.save).not.toHaveBeenCalled();"
+  },
+  {
+    "file": "src\\vidalpay\\vidalpay.service.spec.ts",
+    "line": 858,
+    "text": "expect(walletRepository.save).not.toHaveBeenCalled();"
+  },
+  {
+    "file": "src\\vidalpay\\vidalpay.service.spec.ts",
+    "line": 883,
+    "text": "expect(walletRepository.save).not.toHaveBeenCalled();"
+  },
+  {
+    "file": "src\\vidalpay\\vidalpay.service.spec.ts",
+    "line": 948,
+    "text": "amount: 25,"
+  },
+  {
+    "file": "src\\vidalpay\\vidalpay.service.spec.ts",
+    "line": 1058,
+    "text": "amountLimitsEnforced: false,"
+  },
+  {
+    "file": "src\\vidalpay\\vidalpay.service.spec.ts",
+    "line": 1317,
+    "text": "amount: 1000,"
+  },
+  {
+    "file": "src\\vidalpay\\vidalpay.service.ts",
+    "line": 13,
+    "text": "import { createHash, createHmac, randomUUID, timingSafeEqual } from 'crypto';"
+  },
+  {
+    "file": "src\\vidalpay\\vidalpay.service.ts",
+    "line": 161,
+    "text": "'Amount limits are exposed from backend policy. Provider-specific limits remain null until Unit.co and PayVessel account/card provisioning is live-tested.',"
+  },
+  {
+    "file": "src\\vidalpay\\vidalpay.service.ts",
+    "line": 340,
+    "text": "'Scheduled transfers are unavailable because no scheduler, debit authorization, or provider execution job is implemented.',"
+  },
+  {
+    "file": "src\\vidalpay\\vidalpay.service.ts",
+    "line": 497,
+    "text": "amount: null,"
+  },
+  {
+    "file": "src\\vidalpay\\vidalpay.service.ts",
+    "line": 820,
+    "text": "amount: this.normalizeAmount(payload.amount),"
+  },
+  {
+    "file": "src\\vidalpay\\vidalpay.service.ts",
+    "line": 867,
+    "text": "'NGN wallet is not debited until PayVessel confirms the bill-payment operation.',"
+  },
+  {
+    "file": "src\\vidalpay\\vidalpay.service.ts",
+    "line": 871,
+    "text": "async getFxQuote(userId: string, payload: AnyRecord) {"
+  },
+  {
+    "file": "src\\vidalpay\\vidalpay.service.ts",
+    "line": 874,
+    "text": "feature: 'FX quote',"
+  },
+  {
+    "file": "src\\vidalpay\\vidalpay.service.ts",
+    "line": 875,
+    "text": "capability: 'fx_quote',"
+  },
+  {
+    "file": "src\\vidalpay\\vidalpay.service.ts",
+    "line": 878,
+    "text": "'The backend has no configured FX quote provider, so it cannot compute a final executable rate.',"
+  },
+  {
+    "file": "src\\vidalpay\\vidalpay.service.ts",
+    "line": 880,
+    "text": "this.providerStatusService.getStatus('fx_quote').missingEnvVars,"
+  },
+  {
+    "file": "src\\vidalpay\\vidalpay.service.ts",
+    "line": 889,
+    "text": "'Currency conversion requires a provider quote and backend recomputation of final amounts.',"
+  },
+  {
+    "file": "src\\vidalpay\\vidalpay.service.ts",
+    "line": 895,
+    "text": "const amount = this.normalizeAmount(payload.amount);"
+  },
+  {
+    "file": "src\\vidalpay\\vidalpay.service.ts",
+    "line": 935,
+    "text": "const wallets = manager.getRepository(Wallet);"
+  },
+  {
+    "file": "src\\vidalpay\\vidalpay.service.ts",
+    "line": 937,
+    "text": "const transactions = manager.getRepository(FinancialTransaction);"
+  },
+  {
+    "file": "src\\vidalpay\\vidalpay.service.ts",
+    "line": 979,
+    "text": "if (Number(senderWallet.balance ?? 0) < amount) {"
+  },
+  {
+    "file": "src\\vidalpay\\vidalpay.service.ts",
+    "line": 986,
+    "text": "senderWallet.balance = this.roundMoney(senderBefore - amount);"
+  },
+  {
+    "file": "src\\vidalpay\\vidalpay.service.ts",
+    "line": 987,
+    "text": "senderWallet.availableBalance = senderWallet.balance;"
+  },
+  {
+    "file": "src\\vidalpay\\vidalpay.service.ts",
+    "line": 988,
+    "text": "senderWallet.ledgerBalance = senderWallet.balance;"
+  },
+  {
+    "file": "src\\vidalpay\\vidalpay.service.ts",
+    "line": 989,
+    "text": "recipientWallet.balance = this.roundMoney(recipientBefore + amount);"
+  },
+  {
+    "file": "src\\vidalpay\\vidalpay.service.ts",
+    "line": 990,
+    "text": "recipientWallet.availableBalance = recipientWallet.balance;"
+  },
+  {
+    "file": "src\\vidalpay\\vidalpay.service.ts",
+    "line": 991,
+    "text": "recipientWallet.ledgerBalance = recipientWallet.balance;"
+  },
+  {
+    "file": "src\\vidalpay\\vidalpay.service.ts",
+    "line": 993,
+    "text": "await wallets.save([senderWallet, recipientWallet]);"
+  },
+  {
+    "file": "src\\vidalpay\\vidalpay.service.ts",
+    "line": 1002,
+    "text": "amount,"
+  },
+  {
+    "file": "src\\vidalpay\\vidalpay.service.ts",
+    "line": 1019,
+    "text": "await transactions.save(["
+  },
+  {
+    "file": "src\\vidalpay\\vidalpay.service.ts",
+    "line": 1023,
+    "text": "reference: `${reference}_debit`,"
+  },
+  {
+    "file": "src\\vidalpay\\vidalpay.service.ts",
+    "line": 1026,
+    "text": "amount,"
+  },
+  {
+    "file": "src\\vidalpay\\vidalpay.service.ts",
+    "line": 1029,
+    "text": "type: 'debit',"
+  },
+  {
+    "file": "src\\vidalpay\\vidalpay.service.ts",
+    "line": 1042,
+    "text": "reference: `${reference}_credit`,"
+  },
+  {
+    "file": "src\\vidalpay\\vidalpay.service.ts",
+    "line": 1045,
+    "text": "amount,"
+  },
+  {
+    "file": "src\\vidalpay\\vidalpay.service.ts",
+    "line": 1048,
+    "text": "type: 'credit',"
+  },
+  {
+    "file": "src\\vidalpay\\vidalpay.service.ts",
+    "line": 1140,
+    "text": "amount: transaction.amount,"
+  },
+  {
+    "file": "src\\vidalpay\\vidalpay.service.ts",
+    "line": 1173,
+    "text": "generatedAt: new Date().toISOString(),"
+  },
+  {
+    "file": "src\\vidalpay\\vidalpay.service.ts",
+    "line": 1309,
+    "text": "const query = this.transactionRepository.createQueryBuilder('transaction');"
+  },
+  {
+    "file": "src\\vidalpay\\vidalpay.service.ts",
+    "line": 1954,
+    "text": "amount: null,"
+  },
+  {
+    "file": "src\\vidalpay\\vidalpay.service.ts",
+    "line": 2372,
+    "text": "disputedAmount:"
+  },
+  {
+    "file": "src\\vidalpay\\vidalpay.service.ts",
+    "line": 2373,
+    "text": "payload.disputedAmount === undefined"
+  },
+  {
+    "file": "src\\vidalpay\\vidalpay.service.ts",
+    "line": 2375,
+    "text": ": this.normalizeAmount(payload.disputedAmount),"
+  },
+  {
+    "file": "src\\vidalpay\\vidalpay.service.ts",
+    "line": 2529,
+    "text": "'Loan offers, approval, disbursement, and repayment require a live Unit credit program integration.',"
+  },
+  {
+    "file": "src\\vidalpay\\vidalpay.service.ts",
+    "line": 2539,
+    "text": "'USD loans are unavailable until Unit credit support is configured and live-tested.',"
+  },
+  {
+    "file": "src\\vidalpay\\vidalpay.service.ts",
+    "line": 2551,
+    "text": "'The backend has no live-tested Unit credit program integration for this loan action.',"
+  },
+  {
+    "file": "src\\vidalpay\\vidalpay.service.ts",
+    "line": 2573,
+    "text": "'Reward redemption requires an approved redemption policy and wallet-credit workflow before points can be converted or paid out.',"
+  },
+  {
+    "file": "src\\vidalpay\\vidalpay.service.ts",
+    "line": 2602,
+    "text": "'Reward ledger history is available, but redemption is blocked until VidalPay defines the points-to-value policy, approval flow, and wallet-credit journal.',"
+  },
+  {
+    "file": "src\\vidalpay\\vidalpay.service.ts",
+    "line": 2768,
+    "text": "this.walletRepository.create({"
+  },
+  {
+    "file": "src\\vidalpay\\vidalpay.service.ts",
+    "line": 2782,
+    "text": "await this.walletRepository.save(created);"
+  },
+  {
+    "file": "src\\vidalpay\\vidalpay.service.ts",
+    "line": 3175,
+    "text": "const tagId = await TagIdGenerator.generateUniqueTagId(this.userRepository);"
+  },
+  {
+    "file": "src\\vidalpay\\vidalpay.service.ts",
+    "line": 3436,
+    "text": "amount: transaction.amount,"
+  },
+  {
+    "file": "src\\vidalpay\\vidalpay.service.ts",
+    "line": 3463,
+    "text": "amount: operation.amount,"
+  },
+  {
+    "file": "src\\vidalpay\\vidalpay.service.ts",
+    "line": 3712,
+    "text": "const balance = posted.reduce("
+  },
+  {
+    "file": "src\\vidalpay\\vidalpay.service.ts",
+    "line": 3716,
+    "text": "const pendingBalance = pending.reduce("
+  },
+  {
+    "file": "src\\vidalpay\\vidalpay.service.ts",
+    "line": 3754,
+    "text": "const code = this.generateReferralCode(user);"
+  },
+  {
+    "file": "src\\vidalpay\\vidalpay.service.ts",
+    "line": 3760,
+    "text": "private generateReferralCode(user: User) {"
+  },
+  {
+    "file": "src\\vidalpay\\vidalpay.service.ts",
+    "line": 3775,
+    "text": "amount: operation.amount,"
+  },
+  {
+    "file": "src\\vidalpay\\vidalpay.service.ts",
+    "line": 3830,
+    "text": "minAmount: item.minAmount ?? item.minAmountLocal ?? null,"
+  },
+  {
+    "file": "src\\vidalpay\\vidalpay.service.ts",
+    "line": 3831,
+    "text": "maxAmount: item.maxAmount ?? item.maxAmountLocal ?? null,"
+  },
+  {
+    "file": "src\\vidalpay\\vidalpay.service.ts",
+    "line": 3833,
+    "text": "kind === 'data' && Array.isArray(item.fixedAmountsDescriptions)"
+  },
+  {
+    "file": "src\\vidalpay\\vidalpay.service.ts",
+    "line": 3834,
+    "text": "? item.fixedAmountsDescriptions"
+  },
+  {
+    "file": "src\\vidalpay\\vidalpay.service.ts",
+    "line": 3916,
+    "text": "amount:"
+  },
+  {
+    "file": "src\\vidalpay\\vidalpay.service.ts",
+    "line": 3917,
+    "text": "payload.amount === undefined"
+  },
+  {
+    "file": "src\\vidalpay\\vidalpay.service.ts",
+    "line": 3919,
+    "text": ": this.normalizeAmount(payload.amount),"
+  },
+  {
+    "file": "src\\vidalpay\\vidalpay.service.ts",
+    "line": 4005,
+    "text": "private normalizeAmount(value: unknown): number {"
+  },
+  {
+    "file": "src\\vidalpay\\vidalpay.service.ts",
+    "line": 4006,
+    "text": "const amount = Number(value);"
+  },
+  {
+    "file": "src\\vidalpay\\vidalpay.service.ts",
+    "line": 4007,
+    "text": "if (!Number.isFinite(amount) || amount <= 0) {"
+  },
+  {
+    "file": "src\\vidalpay\\vidalpay.service.ts",
+    "line": 4008,
+    "text": "throw new BadRequestException('amount must be greater than zero');"
+  },
+  {
+    "file": "src\\vidalpay\\vidalpay.service.ts",
+    "line": 4010,
+    "text": "return this.roundMoney(amount);"
+  },
+  {
+    "file": "src\\vidalpay\\vidalpay.service.ts",
+    "line": 4013,
+    "text": "private roundMoney(amount: number) {"
+  },
+  {
+    "file": "src\\vidalpay\\vidalpay.service.ts",
+    "line": 4014,
+    "text": "return Math.round(amount * 100) / 100;"
+  },
+  {
+    "file": "src\\vidalpay\\vidalpay.service.ts",
+    "line": 4272,
+    "text": "!timingSafeEqual(expectedBuffer, providedBuffer)"
+  },
+  {
+    "file": "src\\vidalpay\\vidalpay.service.ts",
+    "line": 4320,
+    "text": "!timingSafeEqual(expectedBuffer, providedBuffer)"
+  },
+  {
+    "file": "src\\vidalpay\\vidalpay.service.ts",
+    "line": 4369,
+    "text": "amountLimitsEnforced: false,"
+  },
+  {
+    "file": "src\\vidalpay\\vidalpay.service.ts",
+    "line": 4371,
+    "text": "'Daily and monthly amount limits are not configured for production enforcement yet. Provider-specific limits are returned only after provider provisioning.',"
+  },
+  {
+    "file": "src\\wallet\\wallet.service.spec.ts",
+    "line": 25,
+    "text": "it('provisions separate zero-balance NGN and USD wallet rows for a new user', async () => {"
+  },
+  {
+    "file": "src\\wallet\\wallet.service.spec.ts",
+    "line": 30,
+    "text": "expect(walletRepository.create).toHaveBeenCalledWith("
+  },
+  {
+    "file": "src\\wallet\\wallet.service.spec.ts",
+    "line": 33,
+    "text": "expect(walletRepository.create).toHaveBeenCalledWith("
+  },
+  {
+    "file": "src\\wallet\\wallet.service.spec.ts",
+    "line": 43,
+    "text": "expect(walletRepository.create).toHaveBeenCalledTimes(1);"
+  },
+  {
+    "file": "src\\wallet\\wallet.service.spec.ts",
+    "line": 44,
+    "text": "expect(walletRepository.create).toHaveBeenCalledWith("
+  },
+  {
+    "file": "src\\wallet\\wallet.service.ts",
+    "line": 21,
+    "text": "await this.walletRepository.create({"
+  },
+  {
+    "file": "src\\wallet\\wallet.service.ts",
+    "line": 33,
+    "text": "await this.walletRepository.create({"
+  },
+  {
+    "file": "scripts\\audit-legacy-data.js",
+    "line": 6,
+    "text": "function quoteIdentifier(value) {"
+  },
+  {
+    "file": "scripts\\audit-legacy-data.js",
+    "line": 57,
+    "text": "`SELECT COUNT(*)::text AS row_count FROM ${quoteIdentifier(tableName)}`,"
+  },
+  {
+    "file": "scripts\\audit-legacy-data.js",
+    "line": 80,
+    "text": "generatedAt: new Date().toISOString(),"
+  },
+  {
+    "file": "scripts\\audit-legacy-data.js",
+    "line": 101,
+    "text": "module.exports = { audit, quoteIdentifier, sslConfiguration };"
+  },
+  {
+    "file": "scripts\\audit-legacy-data.test.js",
+    "line": 4,
+    "text": "const { quoteIdentifier, sslConfiguration } = require('./audit-legacy-data');"
+  },
+  {
+    "file": "scripts\\audit-legacy-data.test.js",
+    "line": 6,
+    "text": "assert.equal(quoteIdentifier('financial_transaction'), '\"financial_transaction\"');"
+  },
+  {
+    "file": "scripts\\audit-legacy-data.test.js",
+    "line": 7,
+    "text": "assert.equal(quoteIdentifier('unsafe\"name'), '\"unsafe\"\"name\"');"
+  },
+  {
+    "file": "scripts\\plan-legacy-restore.js",
+    "line": 20,
+    "text": "'amount',"
+  },
+  {
+    "file": "scripts\\plan-legacy-restore.js",
+    "line": 59,
+    "text": "requiredAny: ['userId', 'user_id', 'points', 'amount', 'reference'],"
+  },
+  {
+    "file": "scripts\\plan-legacy-restore.js",
+    "line": 132,
+    "text": "generatedAt: new Date().toISOString(),"
+  },
+  {
+    "file": "scripts\\plan-legacy-restore.js",
+    "line": 133,
+    "text": "sourceAuditGeneratedAt: audit.generatedAt ?? null,"
+  },
+  {
+    "file": "scripts\\restore-legacy-data.js",
+    "line": 5,
+    "text": "const { quoteIdentifier, sslConfiguration } = require('./audit-legacy-data');"
+  },
+  {
+    "file": "scripts\\restore-legacy-data.js",
+    "line": 11,
+    "text": "required: ['userId', 'reference', 'currency', 'amount', 'type'],"
+  },
+  {
+    "file": "scripts\\restore-legacy-data.js",
+    "line": 19,
+    "text": "'amount',"
+  },
+  {
+    "file": "scripts\\restore-legacy-data.js",
+    "line": 118,
+    "text": "'amount',"
+  },
+  {
+    "file": "scripts\\restore-legacy-data.js",
+    "line": 133,
+    "text": "amount: null,"
+  },
+  {
+    "file": "scripts\\restore-legacy-data.js",
+    "line": 184,
+    "text": "if (['debit', 'withdrawal', 'out', 'sent', 'payment'].includes(normalized)) {"
+  },
+  {
+    "file": "scripts\\restore-legacy-data.js",
+    "line": 185,
+    "text": "return 'debit';"
+  },
+  {
+    "file": "scripts\\restore-legacy-data.js",
+    "line": 187,
+    "text": "return 'credit';"
+  },
+  {
+    "file": "scripts\\restore-legacy-data.js",
+    "line": 205,
+    "text": "function normalizeAmount(value) {"
+  },
+  {
+    "file": "scripts\\restore-legacy-data.js",
+    "line": 206,
+    "text": "const amount = Number(value ?? 0);"
+  },
+  {
+    "file": "scripts\\restore-legacy-data.js",
+    "line": 207,
+    "text": "return Number.isFinite(amount) ? Math.round(amount * 100) / 100 : 0;"
+  },
+  {
+    "file": "scripts\\restore-legacy-data.js",
+    "line": 225,
+    "text": "if (targetColumn === 'amount') return normalizeAmount(mapped);"
+  },
+  {
+    "file": "scripts\\restore-legacy-data.js",
+    "line": 290,
+    "text": "if (domain === 'transactions' && !['credit', 'debit'].includes(row.type)) {"
+  },
+  {
+    "file": "scripts\\restore-legacy-data.js",
+    "line": 291,
+    "text": "errors.push({ index, column: 'type', reason: 'must be credit or debit' });"
+  },
+  {
+    "file": "scripts\\restore-legacy-data.js",
+    "line": 305,
+    "text": "const sql = `SELECT * FROM ${quoteIdentifier(config.sourceTable)}${"
+  },
+  {
+    "file": "scripts\\restore-legacy-data.js",
+    "line": 319,
+    "text": "`SELECT COUNT(*)::int AS count FROM ${quoteIdentifier("
+  },
+  {
+    "file": "scripts\\restore-legacy-data.js",
+    "line": 321,
+    "text": ")} WHERE ${quoteIdentifier(column)} = ANY($1)`,"
+  },
+  {
+    "file": "scripts\\restore-legacy-data.js",
+    "line": 333,
+    "text": "`SELECT id FROM ${quoteIdentifier('user')} WHERE id = ANY($1)`,"
+  },
+  {
+    "file": "scripts\\restore-legacy-data.js",
+    "line": 347,
+    "text": ".map((column) => quoteIdentifier(column))"
+  },
+  {
+    "file": "scripts\\restore-legacy-data.js",
+    "line": 350,
+    "text": "INSERT INTO ${quoteIdentifier(targetConfig.table)}"
+  },
+  {
+    "file": "scripts\\restore-legacy-data.js",
+    "line": 351,
+    "text": "(${columns.map(quoteIdentifier).join(', ')})"
+  },
+  {
+    "file": "scripts\\restore-legacy-data.js",
+    "line": 383,
+    "text": "generatedAt: new Date().toISOString(),"
+  },
+  {
+    "file": "scripts\\restore-legacy-data.js",
+    "line": 472,
+    "text": "normalizeAmount,"
+  },
+  {
+    "file": "test\\legacy-restore-data.spec.js",
+    "line": 7,
+    "text": "normalizeAmount,"
+  },
+  {
+    "file": "test\\legacy-restore-data.spec.js",
+    "line": 23,
+    "text": "amount_value: '1200.129',"
+  },
+  {
+    "file": "test\\legacy-restore-data.spec.js",
+    "line": 35,
+    "text": "amount: 'amount_value',"
+  },
+  {
+    "file": "test\\legacy-restore-data.spec.js",
+    "line": 46,
+    "text": "assert.equal(rows[0].amount, 1200.13);"
+  },
+  {
+    "file": "test\\legacy-restore-data.spec.js",
+    "line": 47,
+    "text": "assert.equal(rows[0].type, 'debit');"
+  },
+  {
+    "file": "test\\legacy-restore-data.spec.js",
+    "line": 69,
+    "text": "assert.equal(normalizeAmount('9.999'), 10);"
+  },
+  {
+    "file": "test\\legacy-restore-plan.spec.js",
+    "line": 15,
+    "text": "{ name: 'amount' },"
+  },
+  {
+    "file": "docs\\legacy-restore-mapping.example.json",
+    "line": 12,
+    "text": "\"amount\": \"amount\","
+  },
+  {
+    "file": "docs\\legacy-restore-mapping.example.json",
+    "line": 84,
+    "text": "\"amount\": \"amount\","
+  },
+  {
+    "file": "docs\\LEGACY_DATA_RESTORE.md",
+    "line": 19,
+    "text": "Generate a read-only candidate mapping from the audit:"
+  },
+  {
+    "file": "docs\\LEGACY_DATA_RESTORE.md",
+    "line": 30,
+    "text": "- currency and amount precision;"
+  },
+  {
+    "file": "docs\\PROVIDER_SANDBOX_SELECTION_2026-09-14.md",
+    "line": 5,
+    "text": "The deployed API is reachable, but the financial feature surface is not 100% functional. Public reachability, configured environment variables, authenticated sandbox success, persisted operations, webhook completion, and mobile rendering are separate readiness gates. No financial capability should be labelled ready until all six have evidence."
+  },
+  {
+    "file": "docs\\PROVIDER_SANDBOX_SELECTION_2026-09-14.md",
+    "line": 18,
+    "text": "| NGN/USD FX quote and conversion | Existing Verto relationship, if valid | Currencycloud Demo after pair validation | Keep unavailable until an authenticated NGN/USD sandbox quote succeeds |"
+  },
+  {
+    "file": "docs\\PROVIDER_SANDBOX_SELECTION_2026-09-14.md",
+    "line": 22,
+    "text": "| Loans | Unit credit if contractually enabled | none selected | Keep unavailable; no provider-backed loan origination sandbox is approved |"
+  },
+  {
+    "file": "docs\\PROVIDER_SANDBOX_SELECTION_2026-09-14.md",
+    "line": 24,
+    "text": "| Fraud/risk | Sardine sandbox | provider rules internal | Integrate as a risk decision input, never as the transaction ledger |"
+  },
+  {
+    "file": "docs\\PROVIDER_SANDBOX_SELECTION_2026-09-14.md",
+    "line": 69,
+    "text": "- Virtual card creation: `POST /cards` with `individualVirtualDebitCard`."
+  },
+  {
+    "file": "docs\\PROVIDER_SANDBOX_SELECTION_2026-09-14.md",
+    "line": 96,
+    "text": "- Supports operator lookup, airtime, and data bundle testing; utility payments use a separate audience."
+  },
+  {
+    "file": "docs\\PROVIDER_SANDBOX_SELECTION_2026-09-14.md",
+    "line": 102,
+    "text": "- Candidate for FX contract testing only after the account confirms both required currencies and an authenticated NGN/USD quote."
+  },
+  {
+    "file": "docs\\PROVIDER_SANDBOX_SELECTION_2026-09-14.md",
+    "line": 103,
+    "text": "- Do not substitute indicative rates for executable conversion or debit wallets without a confirmed conversion response."
+  },
+  {
+    "file": "docs\\PROVIDER_SANDBOX_SELECTION_2026-09-14.md",
+    "line": 116,
+    "text": "- Requires approval as a broker partner/correspondent. A personal paper-trading key must not be used to fabricate separate customer portfolios."
+  },
+  {
+    "file": "docs\\SANDBOX_ENDPOINTS_IMPLEMENTED.md",
+    "line": 35,
+    "text": "If credentials or provider mappings are missing, the route returns HTTP 503 with the structured unavailable contract. If Sudo declines or times out, the provider operation is persisted as `FAILED`; the NGN wallet is not debited."
+  },
+  {
+    "file": "docs\\SANDBOX_ENDPOINTS_IMPLEMENTED.md",
+    "line": 70,
+    "text": "\"amount\": 1000,"
+  },
+  {
+    "file": "docs\\SANDBOX_ENDPOINTS_IMPLEMENTED.md",
+    "line": 81,
+    "text": "The backend removes the transaction PIN before sending the request to Reloadly. A provider operation is written as `PENDING` before the external request and updated to `SUBMITTED` or `FAILED`. `SUBMITTED` does not mean settled. Wallet debit and settlement must be completed by a verified status/reconciliation flow before this can be production-ready."
+  },
+  {
+    "file": "docs\\SANDBOX_ENDPOINTS_IMPLEMENTED.md",
+    "line": 125,
+    "text": "## Deliberately unavailable"
+  },
+  {
+    "file": "docs\\SANDBOX_ENDPOINTS_IMPLEMENTED.md",
+    "line": 128,
+    "text": "- FX conversion until an executable NGN/USD sandbox quote and conversion are confirmed."
+  },
+  {
+    "file": "docs\\SANDBOX_ENDPOINTS_IMPLEMENTED.md",
+    "line": 139,
+    "text": "5. Provider decline and timeout remain failed/pending without wallet debit."
+  }
+]
