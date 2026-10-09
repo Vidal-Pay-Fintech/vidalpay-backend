@@ -44,6 +44,7 @@ describe('VidalPay mobile contract controllers', () => {
     listNotifications: jest.fn(),
     markNotificationsRead: jest.fn(),
     handleProviderWebhook: jest.fn(),
+    handleFincraWebhook: jest.fn(),
     handleKycWebhook: jest.fn(),
     rewardsDashboard: jest.fn(),
     rewardsHistory: jest.fn(),
@@ -281,12 +282,17 @@ describe('VidalPay mobile contract controllers', () => {
     const controller = new WebhooksController(service as VidalpayService);
 
     controller.unit({ reference: 'unit-ref' });
+    controller.fincra({ reference: 'fincra-ref' }, 'fincra-signature', undefined);
     controller.payvessel({ reference: 'payvessel-ref' });
 
     expect(service.handleProviderWebhook).toHaveBeenCalledWith(
       'Unit.co',
       { reference: 'unit-ref' },
       undefined,
+    );
+    expect(service.handleFincraWebhook).toHaveBeenCalledWith(
+      { reference: 'fincra-ref' },
+      'fincra-signature',
     );
     expect(service.handleProviderWebhook).toHaveBeenCalledWith(
       'PayVessel',

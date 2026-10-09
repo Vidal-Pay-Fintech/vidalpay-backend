@@ -835,6 +835,19 @@ export class WebhooksController {
     );
   }
 
+  @Post('fincra')
+  fincra(
+    @Body() body: AnyRecord,
+    @Headers('signature') signature?: string,
+    @Headers('x-fincra-signature') fincraSignature?: string,
+    @Headers('x-signature') legacySignature?: string,
+  ) {
+    return this.vidalpayService.handleFincraWebhook(
+      body,
+      signature ?? fincraSignature ?? legacySignature,
+    );
+  }
+
   @Post('payvessel')
   payvessel(
     @Body() body: AnyRecord,

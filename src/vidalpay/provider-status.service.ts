@@ -46,6 +46,12 @@ export class ProviderStatusService {
       service: 'PayVessel dedicated virtual accounts',
       envVars: ['PAYVESSEL_API_KEY', 'PAYVESSEL_API_SECRET'],
     },
+    wallet_activation: {
+      provider: 'Fincra',
+      providerType: 'BANKING',
+      service: 'Fincra sandbox virtual account activation requests',
+      envVars: ['FINCRA_API_KEY', 'FINCRA_BASE_URL'],
+    },
     usd_virtual_card: {
       provider: 'Unit.co',
       providerType: 'CARD',

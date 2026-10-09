@@ -3,6 +3,13 @@ import { ConfigService } from '@nestjs/config';
 import { createBlockedResponse } from './contracts';
 import { AccountJurisdiction } from './jurisdiction.service';
 
+const FINCRA_SANDBOX_VIRTUAL_ACCOUNT_CURRENCIES = new Set([
+  'NGN',
+  'USD',
+  'GBP',
+  'CAD',
+]);
+
 export type WalletProductKind = 'VIRTUAL_ACCOUNT' | 'WALLET_ACCOUNT';
 export type WalletProductTier = 'PRIMARY' | 'ADDITIONAL';
 export type WalletRequirementKey =
@@ -63,16 +70,27 @@ export class WalletProductCatalogService {
     const missingEnvVars = ['FINCRA_API_KEY', 'FINCRA_BASE_URL'].filter(
       (key) => !this.configService.get<string>(key),
     );
-    const missingProductConfig = product.providerProductId
+    const missingProductConfig = product.canProvision
       ? []
-      : [`FINCRA_${product.currency}_PRODUCT_ID`];
+      : [`FINCRA_${product.currency}_CAN_PROVISION`];
+    const missingRequirementsConfig = product.requirementsConfigured
+      ? []
+      : [`FINCRA_${product.currency}_REQUIREMENTS_CONFIGURED`];
+    const missingCapability = FINCRA_SANDBOX_VIRTUAL_ACCOUNT_CURRENCIES.has(
+      product.currency,
+    )
+      ? []
+      : [`FINCRA_${product.currency}_SANDBOX_VA_SUPPORT`];
+    const missingRequirements = [
+      ...missingEnvVars,
+      ...missingProductConfig,
+      ...missingRequirementsConfig,
+      ...missingCapability,
+    ];
 
     return {
-      configured:
-        missingEnvVars.length === 0 &&
-        missingProductConfig.length === 0 &&
-        product.canProvision,
-      missingRequirements: [...missingEnvVars, ...missingProductConfig],
+      configured: missingRequirements.length === 0,
+      missingRequirements,
       blockedResponse: createBlockedResponse({
         code: 'PROVIDER_NOT_CONFIGURED',
         message: `${product.currency} wallet activation is not configured yet.`,
@@ -80,8 +98,8 @@ export class WalletProductCatalogService {
         capability: 'wallet_activation',
         provider: 'FINCRA',
         reason:
-          'Fincra sandbox credentials and an approved Vidal Pay product id are required before this wallet can be provisioned.',
-        missingRequirements: [...missingEnvVars, ...missingProductConfig],
+          'Fincra sandbox credentials, explicit product enablement, configured requirements, and sandbox virtual-account support are required before this wallet can be provisioned.',
+        missingRequirements,
         retryable: false,
       }),
     };
@@ -160,7 +178,9 @@ export class WalletProductCatalogService {
       typeof record.currency === 'string'
         ? this.normalizeCurrency(record.currency)
         : null;
-    if (!currency) return null;
+    if (!currency || !FINCRA_SANDBOX_VIRTUAL_ACCOUNT_CURRENCIES.has(currency)) {
+      return null;
+    }
 
     const supportedJurisdictions: AccountJurisdiction[] = Array.isArray(
       record.supportedJurisdictions,

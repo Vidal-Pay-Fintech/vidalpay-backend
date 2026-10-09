@@ -52,6 +52,7 @@ export const REQUIRED_PROVIDER_CAPABILITIES = [
   'ngn_wallet',
   'usd_account_details',
   'ngn_account_details',
+  'wallet_activation',
   'usd_virtual_card',
   'usd_physical_card',
   'ngn_virtual_card',

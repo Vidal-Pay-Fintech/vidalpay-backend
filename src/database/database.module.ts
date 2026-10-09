@@ -19,6 +19,7 @@ import { Beneficiary } from './entities/beneficiary.entity';
 import { Card } from './entities/card.entity';
 import { Dispute } from './entities/dispute.entity';
 import { FinancialTransaction } from './entities/financial-transaction.entity';
+import { FincraWebhookEvent } from './entities/fincra-webhook-event.entity';
 import { KycProfile } from './entities/kyc-profile.entity';
 import { Notification } from './entities/notification.entity';
 import { NotificationDevice } from './entities/notification-device.entity';
@@ -84,6 +85,7 @@ import { buildDatabaseDataSourceOptions } from './database.config';
       Card,
       Dispute,
       FinancialTransaction,
+      FincraWebhookEvent,
       KycProfile,
       Notification,
       NotificationDevice,

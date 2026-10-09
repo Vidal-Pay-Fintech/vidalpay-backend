@@ -17,6 +17,7 @@ import { Beneficiary } from 'src/database/entities/beneficiary.entity';
 import { Card } from 'src/database/entities/card.entity';
 import { Dispute } from 'src/database/entities/dispute.entity';
 import { FinancialTransaction } from 'src/database/entities/financial-transaction.entity';
+import { FincraWebhookEvent } from 'src/database/entities/fincra-webhook-event.entity';
 import { KycProfile } from 'src/database/entities/kyc-profile.entity';
 import { Notification } from 'src/database/entities/notification.entity';
 import { NotificationDevice } from 'src/database/entities/notification-device.entity';
@@ -39,6 +40,10 @@ import {
 } from './contracts';
 import { ProviderStatusService } from './provider-status.service';
 import { FincraSandboxService } from './fincra-sandbox.service';
+import {
+  FincraVirtualAccountRequestPayload,
+  FincraWalletService,
+} from './fincra-wallet.service';
 import {
   ProductCode,
   ProductEligibilityService,
@@ -67,6 +72,8 @@ export class VidalpayService {
     private readonly transactionRepository: Repository<FinancialTransaction>,
     @InjectRepository(ProviderOperation)
     private readonly providerOperationRepository: Repository<ProviderOperation>,
+    @InjectRepository(FincraWebhookEvent)
+    private readonly fincraWebhookEventRepository: Repository<FincraWebhookEvent>,
     @InjectRepository(RewardLedgerEntry)
     private readonly rewardLedgerRepository: Repository<RewardLedgerEntry>,
     @InjectRepository(ReferralEvent)
@@ -89,6 +96,7 @@ export class VidalpayService {
     private readonly disputeRepository: Repository<Dispute>,
     private readonly providerStatusService: ProviderStatusService,
     private readonly fincraSandboxService: FincraSandboxService,
+    private readonly fincraWalletService: FincraWalletService,
     private readonly productEligibilityService: ProductEligibilityService,
     private readonly walletProductCatalogService: WalletProductCatalogService,
     private readonly sandboxProviderService: SandboxProviderService,
@@ -522,20 +530,95 @@ export class VidalpayService {
       };
     }
 
-    return {
-      ...eligibility,
-      available: true,
-      eligible: false,
-      status: 'PROVIDER_NOT_CONFIGURED',
-      reason:
-        'The Fincra provider adapter is not implemented in this backend build.',
-      activation: {
-        status: 'NOT_STARTED',
-        reference: null,
-        message:
-          'Wallet activation will proceed only after the backend Fincra adapter is implemented and live-tested.',
-      },
-    };
+    const fincraRequest = this.buildFincraVirtualAccountRequest(
+      user,
+      rawProduct,
+      payload,
+      activationKey,
+    );
+    const operation = await this.providerOperationRepository.save(
+      this.providerOperationRepository.create({
+        userId,
+        type: 'wallet_activation',
+        idempotencyKey: activationKey,
+        reference: activationKey,
+        status: 'SUBMITTING',
+        amount: null,
+        currency: eligibility.currency,
+        provider: 'FINCRA',
+        requestPayload: this.safeFincraActivationAuditPayload(fincraRequest),
+        responsePayload: null,
+        errorCode: null,
+        failureReason: null,
+        metadata: {
+          product: eligibility.product,
+          providerRequestStatus: 'SUBMITTING',
+        },
+      }),
+    );
+
+    try {
+      const result = await this.fincraWalletService.requestPermanentVirtualAccount(
+        fincraRequest,
+      );
+      operation.status = 'PENDING';
+      operation.providerReference = result.providerReference;
+      operation.responsePayload = this.safeFincraActivationResponsePayload(result);
+      operation.metadata = {
+        ...(operation.metadata ?? {}),
+        providerRequestStatus: result.requestStatus,
+        providerHttpStatus: result.status,
+      };
+      const saved = await this.providerOperationRepository.save(operation);
+      return {
+        ...eligibility,
+        available: false,
+        eligible: false,
+        status: 'PENDING',
+        reason:
+          'A Fincra sandbox virtual account request has been submitted and is pending provider completion.',
+        pendingActivation: this.normalizeProviderOperation(saved),
+        activation: {
+          status: saved.status,
+          reference: saved.reference,
+          providerReference: saved.providerReference,
+          providerStatus: result.requestStatus,
+          message:
+            'Fincra sandbox wallet activation request submitted. No account number will be shown until Fincra returns real account details.',
+        },
+      };
+    } catch (error) {
+      const failure = this.asRecord(
+        (error as { response?: { message?: unknown } })?.response?.message,
+      );
+      const retryable = failure?.retryable === true;
+      operation.status = retryable ? 'AMBIGUOUS_PROVIDER_STATE' : 'FAILED';
+      operation.errorCode =
+        this.asString(failure?.code) ?? 'FINCRA_VIRTUAL_ACCOUNT_REQUEST_FAILED';
+      operation.failureReason =
+        this.asString(failure?.message) ??
+        'Fincra virtual account request failed.';
+      operation.responsePayload = failure ?? { message: operation.failureReason };
+      operation.metadata = {
+        ...(operation.metadata ?? {}),
+        providerRequestStatus: operation.status,
+        retryable,
+        reconciliationRequired: retryable,
+      };
+      await this.providerOperationRepository.save(operation);
+      return {
+        ...eligibility,
+        available: true,
+        eligible: false,
+        status: 'PROVIDER_REQUEST_FAILED',
+        reason: operation.failureReason,
+        activation: {
+          status: operation.status,
+          reference: operation.reference,
+          message: operation.failureReason,
+        },
+      };
+    }
   }
 
   async getWalletByCurrency(userId: string, currency: Currency) {
@@ -3110,6 +3193,90 @@ export class VidalpayService {
     };
   }
 
+  async handleFincraWebhook(payload: AnyRecord, signature?: string) {
+    this.assertFincraWebhookSignature(payload, signature);
+
+    const reference = this.fincraWebhookReference(payload);
+    const status = this.fincraWebhookStatus(payload);
+    let updated = false;
+    let walletUpdated = false;
+    let operation: ProviderOperation | null = null;
+
+    if (reference) {
+      operation = await this.providerOperationRepository.findOne({
+        where: [
+          { reference },
+          { providerReference: reference },
+          { idempotencyKey: reference },
+        ],
+      });
+      if (operation) {
+        const eventId = this.fincraWebhookEventId(payload);
+        const eventRecord = await this.recordFincraWebhookEvent({
+          eventId,
+          reference,
+          operationId: operation.id,
+          status,
+          payload,
+        });
+        const processedEventIds = this.providerOperationEventIds(operation);
+        if (
+          eventRecord.duplicate ||
+          (eventId && processedEventIds.includes(eventId))
+        ) {
+          return {
+            received: true,
+            provider: 'FINCRA',
+            reference,
+            status,
+            updated: false,
+            duplicate: true,
+            activationReference: operation.reference,
+            walletUpdated: false,
+          };
+        }
+        const walletUpdate = await this.persistFincraWalletFromWebhook(
+          operation,
+          payload,
+          status,
+        );
+        walletUpdated = walletUpdate.persisted;
+        operation.status = walletUpdate.persisted ? 'ACTIVE' : status;
+        operation.responsePayload = this.safeFincraWebhookPayload(payload);
+        operation.metadata = {
+          ...(operation.metadata ?? {}),
+          providerWebhookReceived: true,
+          providerWebhookStatus: status,
+          providerWebhookEventId: eventId,
+          providerWebhookEventIds: this.appendLimitedUnique(
+            processedEventIds,
+            eventId,
+            20,
+          ),
+          providerAccountDetailsAvailable:
+            this.fincraWebhookHasAccountDetails(payload),
+          walletPersistenceBlocked: walletUpdate.persisted
+            ? null
+            : 'Provider account details were not persisted because the webhook did not contain approved/active real account details or wallet storage is not ready.',
+          walletPersistenceStatus: walletUpdate.status,
+          walletId: walletUpdate.walletId,
+        };
+        await this.providerOperationRepository.save(operation);
+        updated = true;
+      }
+    }
+
+    return {
+      received: true,
+      provider: 'FINCRA',
+      reference: reference ?? null,
+      status,
+      updated,
+      activationReference: operation?.reference ?? null,
+      walletUpdated,
+    };
+  }
+
   async handleVtuWebhook(payload: AnyRecord, signature?: string) {
     this.assertGenericWebhookSignature({
       provider: 'VTU provider',
@@ -3448,6 +3615,330 @@ export class VidalpayService {
     return Boolean(identity[key]);
   }
 
+  private fincraWebhookReference(payload: AnyRecord) {
+    const data = this.asRecord(payload.data) ?? {};
+    const account = this.asRecord(data.account) ?? this.asRecord(payload.account) ?? {};
+    return (
+      this.asString(payload.reference) ??
+      this.asString(payload.providerReference) ??
+      this.asString(payload.requestId) ??
+      this.asString(payload.requestID) ??
+      this.asString(payload.virtualAccountRequestId) ??
+      this.asString(data.reference) ??
+      this.asString(data.id) ??
+      this.asString(data._id) ??
+      this.asString(data.requestId) ??
+      this.asString(account.reference) ??
+      this.asString(account.id) ??
+      null
+    );
+  }
+
+  private fincraWebhookStatus(payload: AnyRecord) {
+    const data = this.asRecord(payload.data) ?? {};
+    const raw =
+      this.asString(payload.status) ??
+      this.asString(payload.event) ??
+      this.asString(payload.type) ??
+      this.asString(data.status) ??
+      this.asString(data.state) ??
+      'RECEIVED';
+    return raw.toUpperCase();
+  }
+
+  private fincraWebhookEventId(payload: AnyRecord) {
+    const data = this.asRecord(payload.data) ?? {};
+    return (
+      this.asString(payload.eventId) ??
+      this.asString(payload.eventID) ??
+      this.asString(payload.id) ??
+      this.asString(payload._id) ??
+      this.asString(data.eventId) ??
+      this.asString(data.eventID) ??
+      null
+    );
+  }
+
+  private providerOperationEventIds(operation: ProviderOperation) {
+    const metadata = this.asRecord(operation.metadata) ?? {};
+    const raw = metadata.providerWebhookEventIds;
+    if (!Array.isArray(raw)) return [];
+    return raw
+      .map((value) => this.asString(value))
+      .filter((value): value is string => Boolean(value));
+  }
+
+  private appendLimitedUnique(
+    values: string[],
+    next: string | null,
+    limit: number,
+  ) {
+    const normalized = [...values];
+    if (next && !normalized.includes(next)) normalized.push(next);
+    return normalized.slice(Math.max(0, normalized.length - limit));
+  }
+
+  private fincraWebhookHasAccountDetails(payload: AnyRecord) {
+    const data = this.asRecord(payload.data) ?? {};
+    const account = this.asRecord(data.account) ?? this.asRecord(payload.account) ?? {};
+    return Boolean(
+      this.asString(account.accountNumber) ??
+        this.asString(account.account_number) ??
+        this.asString(data.accountNumber) ??
+        this.asString(data.account_number),
+    );
+  }
+
+  private async recordFincraWebhookEvent(input: {
+    eventId: string | null;
+    reference: string;
+    operationId: string;
+    status: string;
+    payload: AnyRecord;
+  }) {
+    if (!input.eventId) return { duplicate: false, stored: false };
+    try {
+      await this.fincraWebhookEventRepository.save(
+        this.fincraWebhookEventRepository.create({
+          provider: 'FINCRA',
+          eventId: input.eventId,
+          reference: input.reference,
+          operationId: input.operationId,
+          status: input.status,
+          payloadSummary: this.safeFincraWebhookPayload(input.payload),
+        }),
+      );
+      return { duplicate: false, stored: true };
+    } catch (error) {
+      if (this.isDuplicateKey(error)) return { duplicate: true, stored: false };
+      if (this.isMissingTable(error, 'fincra_webhook_event')) {
+        return { duplicate: false, stored: false };
+      }
+      throw error;
+    }
+  }
+
+  private async persistFincraWalletFromWebhook(
+    operation: ProviderOperation,
+    payload: AnyRecord,
+    status: string,
+  ) {
+    const details = this.fincraWebhookAccountDetails(payload);
+    if (!this.isFincraWalletActiveStatus(status) || !details.accountNumber) {
+      return { persisted: false, status: 'NO_APPROVED_ACCOUNT_DETAILS', walletId: null };
+    }
+    if (!operation.userId || !operation.currency) {
+      return { persisted: false, status: 'MISSING_OPERATION_OWNER_OR_CURRENCY', walletId: null };
+    }
+    const currency = this.walletProductCatalogService.normalizeCurrency(
+      operation.currency,
+    );
+    if (!currency || !Object.values(Currency).includes(currency as Currency)) {
+      return { persisted: false, status: 'UNSUPPORTED_WALLET_CURRENCY', walletId: null };
+    }
+
+    let wallet = await this.walletRepository.findOne({
+      where: { userId: operation.userId, currency: currency as Currency },
+    });
+    if (!wallet) {
+      wallet = this.walletRepository.create({
+        userId: operation.userId,
+        currency: currency as Currency,
+        balance: 0,
+        withdrawalSuspended: false,
+      });
+    }
+
+    wallet.accountNumber = details.accountNumber;
+    wallet.accountName = details.accountName ?? wallet.accountName ?? null;
+    wallet.bankName = details.bankName ?? wallet.bankName ?? null;
+    wallet.routingNumber = details.routingNumber ?? wallet.routingNumber ?? null;
+    wallet.sortCode = details.sortCode ?? wallet.sortCode ?? null;
+    wallet.address = details.address ?? wallet.address ?? null;
+    wallet.provider = 'FINCRA';
+    wallet.providerAccountId = details.providerAccountId ?? wallet.providerAccountId ?? null;
+    wallet.providerVirtualAccountId =
+      details.providerVirtualAccountId ?? wallet.providerVirtualAccountId ?? null;
+    wallet.providerReference = operation.providerReference ?? operation.reference;
+    wallet.providerStatus = 'ACTIVE';
+    wallet.metadata = {
+      ...(wallet.metadata ?? {}),
+      source: 'fincra_webhook',
+      activationOperationId: operation.id,
+      activationReference: operation.reference,
+      providerWebhookStatus: status,
+      providerAccountDetailsPersistedAt: new Date().toISOString(),
+    };
+
+    const saved = await this.walletRepository.save(wallet);
+    return { persisted: true, status: 'PERSISTED', walletId: saved.id ?? wallet.id ?? null };
+  }
+
+  private fincraWebhookAccountDetails(payload: AnyRecord) {
+    const data = this.asRecord(payload.data) ?? {};
+    const account = this.asRecord(data.account) ?? this.asRecord(payload.account) ?? {};
+    const bank = this.asRecord(account.bank) ?? this.asRecord(data.bank) ?? {};
+    return {
+      accountNumber:
+        this.asString(account.accountNumber) ??
+        this.asString(account.account_number) ??
+        this.asString(data.accountNumber) ??
+        this.asString(data.account_number) ??
+        null,
+      accountName:
+        this.asString(account.accountName) ??
+        this.asString(account.account_name) ??
+        this.asString(data.accountName) ??
+        this.asString(data.account_name) ??
+        null,
+      bankName:
+        this.asString(account.bankName) ??
+        this.asString(account.bank_name) ??
+        this.asString(bank.name) ??
+        this.asString(data.bankName) ??
+        null,
+      routingNumber:
+        this.asString(account.routingNumber) ??
+        this.asString(account.routing_number) ??
+        null,
+      sortCode:
+        this.asString(account.sortCode) ??
+        this.asString(account.sort_code) ??
+        null,
+      address: this.asString(account.address) ?? this.asString(data.address) ?? null,
+      providerAccountId:
+        this.asString(account.id) ??
+        this.asString(account._id) ??
+        this.asString(data.accountId) ??
+        null,
+      providerVirtualAccountId:
+        this.asString(data.virtualAccountId) ??
+        this.asString(data.id) ??
+        this.asString(data._id) ??
+        null,
+    };
+  }
+
+  private isFincraWalletActiveStatus(status: string) {
+    return ['APPROVED', 'ACTIVE', 'COMPLETED', 'SUCCESSFUL', 'SUCCESS'].some(
+      (candidate) => status.includes(candidate),
+    );
+  }
+
+  private safeFincraWebhookPayload(payload: AnyRecord) {
+    return this.redactPayload({
+      event: this.asString(payload.event) ?? this.asString(payload.type),
+      status: this.fincraWebhookStatus(payload),
+      reference: this.fincraWebhookReference(payload),
+      hasAccountDetails: this.fincraWebhookHasAccountDetails(payload),
+    });
+  }
+
+  private buildFincraVirtualAccountRequest(
+    user: User,
+    product: WalletProduct,
+    payload: AnyRecord,
+    activationKey: string,
+  ): FincraVirtualAccountRequestPayload {
+    const identity = this.asRecord(payload.KYCInformation) ?? {};
+    const metadata = this.asRecord(payload.metadata) ?? {};
+    const request: FincraVirtualAccountRequestPayload = {
+      currency: product.currency,
+      accountType: 'individual',
+      KYCInformation: this.compactRecord({
+        ...this.fincraKycInformationFromUser(user),
+        ...identity,
+      }),
+      isTermsAccepted:
+        payload.isTermsAccepted === true || payload.termsAccepted === true,
+      merchantReference: activationKey,
+      phoneNumber: this.asString(user.phoneNumber) ?? undefined,
+      metadata: {
+        ...metadata,
+        vidalPayUserId: user.id,
+        activationReference: activationKey,
+        productTier: product.tier,
+      },
+    };
+
+    const utilityBill = this.asString(payload.utilityBill);
+    const bankStatement = this.asString(payload.bankStatement);
+    const meansOfId = this.asString(payload.meansOfId);
+    const accountAgreement = this.asString(payload.accountAgreement);
+    const regulatoryEvidence = this.asString(payload.regulatoryEvidence);
+    if (utilityBill) request.utilityBill = utilityBill;
+    if (bankStatement) request.bankStatement = bankStatement;
+    if (meansOfId) request.meansOfId = meansOfId;
+    if (accountAgreement) request.accountAgreement = accountAgreement;
+    if (regulatoryEvidence) request.regulatoryEvidence = regulatoryEvidence;
+    return request;
+  }
+
+  private fincraKycInformationFromUser(user: User) {
+    const userRecord = user as unknown as AnyRecord;
+    return this.compactRecord({
+      firstName: this.asString(user.firstName),
+      lastName: this.asString(user.lastName),
+      email: this.asString(user.email),
+      phone: this.asString(user.phoneNumber),
+      dateOfBirth: this.asString(user.dateOfBirth as unknown),
+      nationality: this.asString(userRecord.nationality),
+      country: this.asString(user.country),
+      countryCode: this.asString(user.countryCode),
+      address: this.compactRecord({
+        state: this.asString(userRecord.stateOrRegion),
+        city: this.asString(userRecord.city),
+        street: this.asString(userRecord.addressLine1),
+        postalCode: this.asString(userRecord.postalCode),
+        country: this.asString(user.country),
+        countryCode: this.asString(user.countryCode),
+      }),
+    });
+  }
+
+  private safeFincraActivationAuditPayload(payload: AnyRecord) {
+    return this.redactPayload({
+      currency: payload.currency,
+      accountType: payload.accountType,
+      hasKycInformation: Boolean(this.asRecord(payload.KYCInformation)),
+      suppliedKycFields: Object.keys(this.asRecord(payload.KYCInformation) ?? {}),
+      suppliedDocuments: {
+        utilityBill: Boolean(payload.utilityBill),
+        bankStatement: Boolean(payload.bankStatement),
+        meansOfId: Boolean(payload.meansOfId),
+        accountAgreement: Boolean(payload.accountAgreement),
+        regulatoryEvidence: Boolean(payload.regulatoryEvidence),
+      },
+      isTermsAccepted: payload.isTermsAccepted === true,
+      metadata: this.asRecord(payload.metadata),
+    });
+  }
+
+  private safeFincraActivationResponsePayload(result: {
+    status: number;
+    providerReference: string | null;
+    requestStatus: string;
+  }) {
+    return {
+      provider: 'FINCRA',
+      httpStatus: result.status,
+      providerReference: result.providerReference,
+      requestStatus: result.requestStatus,
+    };
+  }
+
+  private compactRecord(record: AnyRecord) {
+    return Object.fromEntries(
+      Object.entries(record).filter(([, value]) => {
+        if (value === null || value === undefined || value === '') return false;
+        if (typeof value === 'object' && !Array.isArray(value)) {
+          return Object.keys(value).length > 0;
+        }
+        return true;
+      }),
+    );
+  }
+
   private findWalletActivationOperation(userId: string, currency: string) {
     return this.providerOperationRepository.findOne({
       where: {
@@ -3717,6 +4208,17 @@ export class VidalpayService {
       message.toLowerCase().includes(tableName.toLowerCase()) &&
       /relation .* does not exist/i.test(message)
     );
+  }
+
+  private isDuplicateKey(error: unknown) {
+    const candidate = error as {
+      code?: string;
+      message?: string;
+      driverError?: { code?: string; message?: string };
+    };
+    const code = candidate?.code ?? candidate?.driverError?.code;
+    const message = `${candidate?.message ?? ''} ${candidate?.driverError?.message ?? ''}`.toLowerCase();
+    return code === '23505' || code === 'ER_DUP_ENTRY' || message.includes('duplicate key');
   }
 
   private throwMissingFeatureStorage(
@@ -4729,6 +5231,35 @@ export class VidalpayService {
       !timingSafeEqual(expectedBuffer, providedBuffer)
     ) {
       throw new UnauthorizedException(`Invalid ${provider} webhook signature`);
+    }
+  }
+
+  private assertFincraWebhookSignature(payload: AnyRecord, signature?: string) {
+    const secret = this.configService.get<string>('FINCRA_WEBHOOK_SECRET');
+    if (!secret) {
+      this.throwProviderUnavailable({
+        code: 'PROVIDER_WEBHOOK_NOT_CONFIGURED',
+        feature: 'FINCRA webhook',
+        capability: 'wallet_activation',
+        provider: 'FINCRA',
+        reason: 'FINCRA webhook signing secret is not configured.',
+        missingRequirements: ['FINCRA_WEBHOOK_SECRET'],
+      });
+    }
+    if (!signature) {
+      throw new UnauthorizedException('FINCRA webhook signature is required');
+    }
+    const expected = createHmac('sha512', secret)
+      .update(JSON.stringify(payload))
+      .digest('hex');
+    const provided = signature.trim();
+    const expectedBuffer = Buffer.from(expected, 'utf8');
+    const providedBuffer = Buffer.from(provided, 'utf8');
+    if (
+      expectedBuffer.length !== providedBuffer.length ||
+      !timingSafeEqual(expectedBuffer, providedBuffer)
+    ) {
+      throw new UnauthorizedException('Invalid FINCRA webhook signature');
     }
   }
 

@@ -6,6 +6,7 @@ import { AccountStatus } from 'src/database/entities/user.entity';
 import { VidalpayService } from './vidalpay.service';
 import { ProviderStatusService } from './provider-status.service';
 import { FincraSandboxService } from './fincra-sandbox.service';
+import { FincraWalletService } from './fincra-wallet.service';
 import { JurisdictionService } from './jurisdiction.service';
 import { ProductEligibilityService } from './product-eligibility.service';
 import { WalletProductCatalogService } from './wallet-product-catalog.service';
@@ -45,12 +46,16 @@ describe('VidalpayService', () => {
   let walletRepository: ReturnType<typeof repo>;
   let kycProfileRepository: ReturnType<typeof repo>;
   let providerOperationRepository: ReturnType<typeof repo>;
+  let fincraWebhookEventRepository: ReturnType<typeof repo>;
   let rewardLedgerRepository: ReturnType<typeof repo>;
   let referralEventRepository: ReturnType<typeof repo>;
   let notificationRepository: ReturnType<typeof repo>;
   let notificationPreferenceRepository: ReturnType<typeof repo>;
   let notificationDeviceRepository: ReturnType<typeof repo>;
   let cardRepository: ReturnType<typeof repo>;
+  let fincraWalletService: {
+    requestPermanentVirtualAccount: jest.Mock;
+  };
   let sandboxProviderService: {
     createSudoCard: jest.Mock;
     getReloadlyCatalog: jest.Mock;
@@ -71,6 +76,7 @@ describe('VidalpayService', () => {
     kycProfileRepository = repo();
     const transactionRepository = repo();
     providerOperationRepository = repo();
+    fincraWebhookEventRepository = repo();
     rewardLedgerRepository = repo();
     referralEventRepository = repo();
     cardRepository = repo();
@@ -94,6 +100,9 @@ describe('VidalpayService', () => {
       getStatuses: jest.fn().mockReturnValue([status()]),
       isCapabilityEnabled: jest.fn().mockReturnValue(false),
     };
+    fincraWalletService = {
+      requestPermanentVirtualAccount: jest.fn(),
+    };
     sandboxProviderService = {
       createSudoCard: jest.fn(),
       getReloadlyCatalog: jest.fn(),
@@ -108,6 +117,7 @@ describe('VidalpayService', () => {
       kycProfileRepository as any,
       transactionRepository as any,
       providerOperationRepository as any,
+      fincraWebhookEventRepository as any,
       rewardLedgerRepository as any,
       referralEventRepository as any,
       cardRepository as any,
@@ -120,6 +130,7 @@ describe('VidalpayService', () => {
       disputeRepository as any,
       providerStatusService as any,
       { probeReadOnly: jest.fn() } as unknown as FincraSandboxService,
+      fincraWalletService as unknown as FincraWalletService,
       new ProductEligibilityService(new JurisdictionService()),
       new WalletProductCatalogService(configService as unknown as ConfigService),
       sandboxProviderService as any,
@@ -705,7 +716,7 @@ describe('VidalpayService', () => {
       key === 'FINCRA_WALLET_PRODUCTS_JSON'
         ? JSON.stringify([
             {
-              currency: 'EUR',
+              currency: 'CAD',
               enabled: true,
               tier: 'ADDITIONAL',
               supportedJurisdictions: ['NG'],
@@ -713,7 +724,7 @@ describe('VidalpayService', () => {
               requirementsConfigured: true,
               requirements: [],
             },
-            { currency: 'CAD', enabled: false, tier: 'ADDITIONAL', supportedJurisdictions: ['NG'] },
+            { currency: 'EUR', enabled: true, tier: 'ADDITIONAL', supportedJurisdictions: ['NG'] },
           ])
         : undefined,
     );
@@ -724,8 +735,8 @@ describe('VidalpayService', () => {
 
     const result = await service.getAvailableWalletProducts('user-1');
 
-    expect(result.products.map((product) => product.currency)).toContain('EUR');
-    expect(result.products.map((product) => product.currency)).not.toContain('CAD');
+    expect(result.products.map((product) => product.currency)).toContain('CAD');
+    expect(result.products.map((product) => product.currency)).not.toContain('EUR');
   });
 
   it('evaluates fully satisfied wallet product requirements individually', async () => {
@@ -883,11 +894,307 @@ describe('VidalpayService', () => {
     expect(walletRepository.save).not.toHaveBeenCalled();
   });
 
+  it('submits a real Fincra sandbox virtual account request without creating a fake wallet', async () => {
+    (configService.get as jest.Mock).mockImplementation((key: string) => {
+      if (key === 'FINCRA_WALLET_PRODUCTS_JSON') {
+        return JSON.stringify([
+          {
+            currency: 'GBP',
+            enabled: true,
+            tier: 'PRIMARY',
+            supportedJurisdictions: ['NG'],
+            canProvision: true,
+            providerProductId: 'gbp-product',
+            requirementsConfigured: true,
+            requirements: [],
+          },
+        ]);
+      }
+      if (key === 'FINCRA_API_KEY') return 'configured';
+      if (key === 'FINCRA_BASE_URL') return 'https://sandboxapi.fincra.com';
+      return undefined;
+    });
+    userRepository.findOne.mockResolvedValue({
+      id: 'user-1',
+      region: 'NG',
+      firstName: 'Ada',
+      lastName: 'Lovelace',
+      email: 'ada@example.com',
+      phoneNumber: '+2348012345678',
+      country: 'Nigeria',
+      countryCode: 'NG',
+      addressLine1: '1 Test Street',
+      city: 'Lagos',
+      stateOrRegion: 'Lagos',
+    });
+    walletRepository.find.mockResolvedValue([]);
+    providerOperationRepository.findOne.mockResolvedValue(null);
+    providerOperationRepository.create.mockImplementation((payload: any) => payload);
+    providerOperationRepository.save.mockImplementation(async (payload: any) => ({
+      ...payload,
+      metadata: payload.metadata ? { ...payload.metadata } : payload.metadata,
+    }));
+    kycProfileRepository.findOne.mockResolvedValue(null);
+    fincraWalletService.requestPermanentVirtualAccount.mockResolvedValue({
+      status: 200,
+      data: { success: true, data: { id: 'fincra-request-1', status: 'pending' } },
+      providerReference: 'fincra-request-1',
+      requestStatus: 'PENDING',
+    });
+
+    const result = await service.activateWalletProduct('user-1', 'GBP', {
+      termsAccepted: true,
+    });
+
+    expect(fincraWalletService.requestPermanentVirtualAccount).toHaveBeenCalledWith(
+      expect.objectContaining({
+        currency: 'GBP',
+        accountType: 'individual',
+        isTermsAccepted: true,
+        KYCInformation: expect.objectContaining({
+          firstName: 'Ada',
+          lastName: 'Lovelace',
+          email: 'ada@example.com',
+        }),
+      }),
+    );
+    expect(providerOperationRepository.save).toHaveBeenNthCalledWith(
+      1,
+      expect.objectContaining({
+        type: 'wallet_activation',
+        status: 'SUBMITTING',
+        currency: 'GBP',
+        provider: 'FINCRA',
+        requestPayload: expect.objectContaining({
+          hasKycInformation: true,
+          suppliedKycFields: expect.arrayContaining(['firstName', 'lastName', 'email']),
+        }),
+      }),
+    );
+    expect(providerOperationRepository.save).toHaveBeenNthCalledWith(
+      2,
+      expect.objectContaining({
+        type: 'wallet_activation',
+        status: 'PENDING',
+        currency: 'GBP',
+        provider: 'FINCRA',
+        providerReference: 'fincra-request-1',
+      }),
+    );
+    expect(walletRepository.save).not.toHaveBeenCalled();
+    expect(result.status).toBe('PENDING');
+    expect(result.activation.providerReference).toBe('fincra-request-1');
+  });
+
+  it('marks retryable Fincra timeouts as ambiguous for later reconciliation', async () => {
+    (configService.get as jest.Mock).mockImplementation((key: string) => {
+      if (key === 'FINCRA_WALLET_PRODUCTS_JSON') {
+        return JSON.stringify([
+          {
+            currency: 'CAD',
+            enabled: true,
+            tier: 'ADDITIONAL',
+            supportedJurisdictions: ['NG'],
+            canProvision: true,
+            requirementsConfigured: true,
+            requirements: [],
+          },
+        ]);
+      }
+      if (key === 'FINCRA_API_KEY') return 'configured';
+      if (key === 'FINCRA_BASE_URL') return 'https://sandboxapi.fincra.com';
+      return undefined;
+    });
+    userRepository.findOne.mockResolvedValue({ id: 'user-1', region: 'NG' });
+    walletRepository.find.mockResolvedValue([]);
+    providerOperationRepository.findOne.mockResolvedValue(null);
+    providerOperationRepository.create.mockImplementation((payload: any) => payload);
+    providerOperationRepository.save.mockImplementation(async (payload: any) => payload);
+    kycProfileRepository.findOne.mockResolvedValue(null);
+    fincraWalletService.requestPermanentVirtualAccount.mockRejectedValue({
+      response: {
+        message: {
+          code: 'FINCRA_REQUEST_TIMEOUT',
+          message: 'Fincra request timed out.',
+          retryable: true,
+        },
+      },
+    });
+
+    const result = await service.activateWalletProduct('user-1', 'CAD', {});
+
+    expect(result.status).toBe('PROVIDER_REQUEST_FAILED');
+    expect(providerOperationRepository.save).toHaveBeenLastCalledWith(
+      expect.objectContaining({
+        status: 'AMBIGUOUS_PROVIDER_STATE',
+        currency: 'CAD',
+        errorCode: 'FINCRA_REQUEST_TIMEOUT',
+        metadata: expect.objectContaining({
+          retryable: true,
+          reconciliationRequired: true,
+        }),
+      }),
+    );
+    expect(walletRepository.save).not.toHaveBeenCalled();
+  });
+
+  it('records failed Fincra activation requests without creating wallets or changing balances', async () => {
+    (configService.get as jest.Mock).mockImplementation((key: string) => {
+      if (key === 'FINCRA_WALLET_PRODUCTS_JSON') {
+        return JSON.stringify([
+          {
+            currency: 'CAD',
+            enabled: true,
+            tier: 'ADDITIONAL',
+            supportedJurisdictions: ['NG'],
+            canProvision: true,
+            requirementsConfigured: true,
+            requirements: [],
+          },
+        ]);
+      }
+      if (key === 'FINCRA_API_KEY') return 'configured';
+      if (key === 'FINCRA_BASE_URL') return 'https://sandboxapi.fincra.com';
+      return undefined;
+    });
+    userRepository.findOne.mockResolvedValue({ id: 'user-1', region: 'NG' });
+    walletRepository.find.mockResolvedValue([]);
+    providerOperationRepository.findOne.mockResolvedValue(null);
+    providerOperationRepository.create.mockImplementation((payload: any) => payload);
+    providerOperationRepository.save.mockImplementation(async (payload: any) => payload);
+    kycProfileRepository.findOne.mockResolvedValue(null);
+    fincraWalletService.requestPermanentVirtualAccount.mockRejectedValue({
+      response: {
+        message: {
+          code: 'FINCRA_VIRTUAL_ACCOUNT_REQUEST_FAILED',
+          message: 'Fincra request timed out.',
+        },
+      },
+    });
+
+    const result = await service.activateWalletProduct('user-1', 'CAD', {});
+
+    expect(result.status).toBe('PROVIDER_REQUEST_FAILED');
+    expect(providerOperationRepository.save).toHaveBeenCalledWith(
+      expect.objectContaining({
+        status: 'FAILED',
+        currency: 'CAD',
+        errorCode: 'FINCRA_VIRTUAL_ACCOUNT_REQUEST_FAILED',
+      }),
+    );
+    expect(walletRepository.save).not.toHaveBeenCalled();
+  });
+
+  it('persists real Fincra wallet account details from an authenticated approved webhook', async () => {
+    const payload = {
+      id: 'event-1',
+      event: 'virtual_account.approved',
+      data: {
+        id: 'fincra-request-1',
+        status: 'approved',
+        account: { accountNumber: '1234567890', accountName: 'Ada Lovelace', bankName: 'Fincra Bank' },
+      },
+    };
+    configService.get.mockImplementation((key: string) =>
+      key === 'FINCRA_WEBHOOK_SECRET' ? 'secret' : undefined,
+    );
+    const signature = require('crypto')
+      .createHmac('sha512', 'secret')
+      .update(JSON.stringify(payload))
+      .digest('hex');
+    providerOperationRepository.findOne.mockResolvedValue({
+      id: 'op-1',
+      userId: 'user-1',
+      type: 'wallet_activation',
+      idempotencyKey: 'wallet_activation:user-1:CAD',
+      reference: 'wallet_activation:user-1:CAD',
+      providerReference: 'fincra-request-1',
+      status: 'PENDING',
+      currency: 'CAD',
+      metadata: {},
+    });
+    providerOperationRepository.save.mockImplementation(async (payload: any) => payload);
+
+    await expect(service.handleFincraWebhook(payload, signature)).resolves.toEqual(
+      expect.objectContaining({
+        received: true,
+        provider: 'FINCRA',
+        updated: true,
+        walletUpdated: true,
+      }),
+    );
+    expect(walletRepository.save).toHaveBeenCalledWith(
+      expect.objectContaining({
+        userId: 'user-1',
+        currency: Currency.CAD,
+        balance: 0,
+        accountNumber: '1234567890',
+        accountName: 'Ada Lovelace',
+        bankName: 'Fincra Bank',
+        provider: 'FINCRA',
+        providerStatus: 'ACTIVE',
+        providerReference: 'fincra-request-1',
+      }),
+    );
+    expect(providerOperationRepository.save).toHaveBeenCalledWith(
+      expect.objectContaining({
+        status: 'ACTIVE',
+        metadata: expect.objectContaining({
+          providerWebhookEventId: 'event-1',
+          providerWebhookEventIds: ['event-1'],
+          providerAccountDetailsAvailable: true,
+          walletPersistenceBlocked: null,
+          walletPersistenceStatus: 'PERSISTED',
+        }),
+      }),
+    );
+  });
+
+  it('deduplicates Fincra webhook event ids on the existing provider operation', async () => {
+    const payload = {
+      id: 'event-1',
+      event: 'virtual_account.approved',
+      data: {
+        id: 'fincra-request-1',
+        status: 'approved',
+      },
+    };
+    configService.get.mockImplementation((key: string) =>
+      key === 'FINCRA_WEBHOOK_SECRET' ? 'secret' : undefined,
+    );
+    const signature = require('crypto')
+      .createHmac('sha512', 'secret')
+      .update(JSON.stringify(payload))
+      .digest('hex');
+    providerOperationRepository.findOne.mockResolvedValue({
+      id: 'op-1',
+      userId: 'user-1',
+      type: 'wallet_activation',
+      idempotencyKey: 'wallet_activation:user-1:CAD',
+      reference: 'wallet_activation:user-1:CAD',
+      providerReference: 'fincra-request-1',
+      status: 'PENDING',
+      metadata: { providerWebhookEventIds: ['event-1'] },
+    });
+
+    await expect(service.handleFincraWebhook(payload, signature)).resolves.toEqual(
+      expect.objectContaining({
+        received: true,
+        provider: 'FINCRA',
+        updated: false,
+        duplicate: true,
+        walletUpdated: false,
+      }),
+    );
+    expect(providerOperationRepository.save).not.toHaveBeenCalled();
+    expect(walletRepository.save).not.toHaveBeenCalled();
+  });
+
   it('keeps Nigerian restrictions after eligibility for foreign-currency wallets', async () => {
     (configService.get as jest.Mock).mockImplementation((key: string) =>
       key === 'FINCRA_WALLET_PRODUCTS_JSON'
         ? JSON.stringify([
-            { currency: 'EUR', enabled: true, tier: 'ADDITIONAL', supportedJurisdictions: ['NG'], canProvision: false, requirementsConfigured: true, requirements: [] },
+            { currency: 'CAD', enabled: true, tier: 'ADDITIONAL', supportedJurisdictions: ['NG'], canProvision: false, requirementsConfigured: true, requirements: [] },
           ])
         : undefined,
     );

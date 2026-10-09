@@ -73,8 +73,6 @@ export class Wallet extends AbstractEntity {
     type: 'text',
     nullable: true,
     select: false,
-    insert: false,
-    update: false,
   })
   address: string;
 
@@ -82,8 +80,6 @@ export class Wallet extends AbstractEntity {
     type: 'varchar',
     nullable: true,
     select: false,
-    insert: false,
-    update: false,
   })
   provider: string;
 
@@ -91,8 +87,6 @@ export class Wallet extends AbstractEntity {
     type: 'varchar',
     nullable: true,
     select: false,
-    insert: false,
-    update: false,
   })
   providerCustomerId: string;
 
@@ -100,8 +94,6 @@ export class Wallet extends AbstractEntity {
     type: 'varchar',
     nullable: true,
     select: false,
-    insert: false,
-    update: false,
   })
   providerAccountId: string;
 
@@ -109,8 +101,6 @@ export class Wallet extends AbstractEntity {
     type: 'varchar',
     nullable: true,
     select: false,
-    insert: false,
-    update: false,
   })
   providerVirtualAccountId: string;
 
@@ -118,8 +108,6 @@ export class Wallet extends AbstractEntity {
     type: 'varchar',
     nullable: true,
     select: false,
-    insert: false,
-    update: false,
   })
   providerStatus: string;
 
@@ -127,8 +115,6 @@ export class Wallet extends AbstractEntity {
     type: 'varchar',
     nullable: true,
     select: false,
-    insert: false,
-    update: false,
   })
   providerReference: string;
 
@@ -136,8 +122,6 @@ export class Wallet extends AbstractEntity {
     type: 'simple-json',
     nullable: true,
     select: false,
-    insert: false,
-    update: false,
   })
   metadata: Record<string, unknown>;
 

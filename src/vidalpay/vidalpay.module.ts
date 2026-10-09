@@ -5,6 +5,7 @@ import { Beneficiary } from 'src/database/entities/beneficiary.entity';
 import { Card } from 'src/database/entities/card.entity';
 import { Dispute } from 'src/database/entities/dispute.entity';
 import { FinancialTransaction } from 'src/database/entities/financial-transaction.entity';
+import { FincraWebhookEvent } from 'src/database/entities/fincra-webhook-event.entity';
 import { KycProfile } from 'src/database/entities/kyc-profile.entity';
 import { Notification } from 'src/database/entities/notification.entity';
 import { NotificationDevice } from 'src/database/entities/notification-device.entity';
@@ -44,6 +45,7 @@ import {
 import { ProviderHttpService } from './provider-http.service';
 import { ProviderStatusService } from './provider-status.service';
 import { FincraSandboxService } from './fincra-sandbox.service';
+import { FincraWalletService } from './fincra-wallet.service';
 import { ProductEligibilityService } from './product-eligibility.service';
 import { JurisdictionService } from './jurisdiction.service';
 import { SandboxProviderService } from './sandbox-provider.service';
@@ -58,6 +60,7 @@ import { WalletProductCatalogService } from './wallet-product-catalog.service';
       Card,
       Dispute,
       FinancialTransaction,
+      FincraWebhookEvent,
       KycProfile,
       Notification,
       NotificationDevice,
@@ -99,6 +102,7 @@ import { WalletProductCatalogService } from './wallet-product-catalog.service';
   providers: [
     ConfigService,
     FincraSandboxService,
+    FincraWalletService,
     ProviderHttpService,
     ProviderStatusService,
     ProductEligibilityService,

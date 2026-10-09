@@ -13,6 +13,19 @@ describe('WalletProductCatalogService', () => {
     expect(service.find('GBP')).toEqual(expect.objectContaining({ currency: 'GBP', tier: 'PRIMARY', enabled: true }));
   });
 
+  it('ignores configured currencies outside the approved Fincra sandbox wallet set', () => {
+    const service = new WalletProductCatalogService(
+      config({
+        FINCRA_WALLET_PRODUCTS_JSON: JSON.stringify([
+          { currency: 'EUR', enabled: true, tier: 'ADDITIONAL', supportedJurisdictions: ['NG'] },
+        ]),
+      }),
+    );
+
+    expect(service.find('EUR')).toBeNull();
+    expect(service.enabled().map((product) => product.currency)).not.toContain('EUR');
+  });
+
   it('excludes disabled configured currencies from enabled products', () => {
     const service = new WalletProductCatalogService(
       config({
