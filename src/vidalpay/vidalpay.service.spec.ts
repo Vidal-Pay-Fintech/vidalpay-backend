@@ -345,6 +345,81 @@ describe('VidalpayService', () => {
     expect(kycProfileRepository.save).not.toHaveBeenCalled();
   });
 
+  it('starts MetaMap when KYC profile storage has missing legacy columns', async () => {
+    userRepository.findOne.mockResolvedValue({
+      id: 'legacy-user',
+      kycStatus: 'NOT_STARTED',
+      countryCode: 'NG',
+    });
+    kycProfileRepository.findOne.mockRejectedValue(
+      Object.assign(new Error('column kyc_profile.region does not exist'), {
+        code: '42703',
+      }),
+    );
+    configService.get.mockImplementation(
+      (key: string) =>
+        ({
+          METAMAP_CLIENT_ID: 'metamap-client',
+          METAMAP_WORKFLOW_ID: 'metamap-workflow',
+        })[key],
+    );
+
+    await expect(service.startKyc('legacy-user')).resolves.toEqual(
+      expect.objectContaining({
+        clientId: 'metamap-client',
+        workflowId: 'metamap-workflow',
+        metadata: expect.objectContaining({
+          userId: 'legacy-user',
+          profileId: null,
+          region: 'NG',
+          storageAvailable: false,
+        }),
+      }),
+    );
+    expect(kycProfileRepository.save).not.toHaveBeenCalled();
+  });
+
+  it('starts MetaMap even when saving an existing KYC profile hits a legacy schema gap', async () => {
+    userRepository.findOne.mockResolvedValue({
+      id: 'legacy-user',
+      kycStatus: 'NOT_STARTED',
+      countryCode: 'NG',
+    });
+    kycProfileRepository.findOne.mockResolvedValue({
+      id: 'kyc-1',
+      userId: 'legacy-user',
+      region: 'NG',
+      provider: null,
+      status: 'NOT_STARTED',
+    });
+    kycProfileRepository.save.mockRejectedValue(
+      Object.assign(new Error('column provider does not exist'), {
+        code: '42703',
+      }),
+    );
+    configService.get.mockImplementation(
+      (key: string) =>
+        ({
+          METAMAP_CLIENT_ID: 'metamap-client',
+          METAMAP_WORKFLOW_ID: 'metamap-workflow',
+        })[key],
+    );
+
+    await expect(service.startKyc('legacy-user')).resolves.toEqual(
+      expect.objectContaining({
+        metadata: expect.objectContaining({
+          userId: 'legacy-user',
+          profileId: null,
+          region: 'NG',
+          storageAvailable: false,
+        }),
+      }),
+    );
+    expect(userRepository.update).toHaveBeenCalledWith('legacy-user', {
+      kycStatus: 'IN_PROGRESS',
+    });
+  });
+
   it('starts MetaMap when Postgres reports a schema-qualified missing KYC table', async () => {
     userRepository.findOne.mockResolvedValue({
       id: 'legacy-user',

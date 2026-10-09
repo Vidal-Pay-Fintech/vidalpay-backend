@@ -1973,19 +1973,34 @@ export class VidalpayService {
     profile.provider = 'METAMAP';
     profile.status =
       profile.status === 'NOT_STARTED' ? 'IN_PROGRESS' : profile.status;
+    let kycStorageAvailable = Boolean(profile.id);
     if (profile.id) {
-      await this.kycProfileRepository.save(profile);
+      try {
+        await this.kycProfileRepository.save(profile);
+      } catch (error) {
+        if (!this.isKycProfileStorageUnavailable(error)) {
+          throw error;
+        }
+        kycStorageAvailable = false;
+      }
     }
-    await this.userRepository.update(userId, { kycStatus: profile.status });
+    try {
+      await this.userRepository.update(userId, { kycStatus: profile.status });
+    } catch (error) {
+      if (!this.isMissingColumn(error, 'kycStatus')) {
+        throw error;
+      }
+    }
 
     return {
       clientId,
       workflowId,
       metadata: {
         userId,
-        profileId: profile.id ?? null,
+        profileId: kycStorageAvailable ? (profile.id ?? null) : null,
         region,
         provider: 'METAMAP',
+        storageAvailable: kycStorageAvailable,
       },
     };
   }
@@ -3960,7 +3975,7 @@ export class VidalpayService {
       });
       if (existing) return existing;
     } catch (error) {
-      if (!this.isMissingTable(error, 'kyc_profile')) {
+      if (!this.isKycProfileStorageUnavailable(error)) {
         throw error;
       }
     }
@@ -4171,7 +4186,7 @@ export class VidalpayService {
     try {
       return await this.getOrCreateKycProfile(user);
     } catch (error) {
-      if (!this.isMissingTable(error, 'kyc_profile')) {
+      if (!this.isKycProfileStorageUnavailable(error)) {
         throw error;
       }
 
@@ -4208,6 +4223,38 @@ export class VidalpayService {
       message.toLowerCase().includes(tableName.toLowerCase()) &&
       /relation .* does not exist/i.test(message)
     );
+  }
+
+  private isKycProfileStorageUnavailable(error: unknown) {
+    return (
+      this.isMissingTable(error, 'kyc_profile') ||
+      this.isMissingColumn(error, 'kyc_profile') ||
+      this.isMissingColumn(error, 'region') ||
+      this.isMissingColumn(error, 'provider') ||
+      this.isMissingColumn(error, 'sections') ||
+      this.isMissingColumn(error, 'uploads') ||
+      this.isMissingColumn(error, 'identity') ||
+      this.isMissingColumn(error, 'capabilities') ||
+      this.isMissingColumn(error, 'limits')
+    );
+  }
+
+  private isMissingColumn(error: unknown, columnName: string) {
+    const candidate = error as {
+      code?: string;
+      message?: string;
+      driverError?: { code?: string; message?: string };
+    };
+    const code = candidate?.code ?? candidate?.driverError?.code;
+    const message = `${candidate?.message ?? ''} ${candidate?.driverError?.message ?? ''}`.toLowerCase();
+    const normalizedColumn = columnName.toLowerCase();
+    return (
+      code === '42703' ||
+      code === 'ER_BAD_FIELD_ERROR' ||
+      message.includes('column') ||
+      message.includes('unknown column') ||
+      message.includes('does not exist')
+    ) && message.includes(normalizedColumn);
   }
 
   private isDuplicateKey(error: unknown) {
