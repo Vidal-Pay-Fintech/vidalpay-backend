@@ -998,26 +998,14 @@ export class VidalpayService {
 
     const vtuStatus = this.providerStatusService.getStatus(vtuCapability);
     if (vtuStatus.enabled) {
-      const operation = await this.providerOperationRepository.save(
-        this.providerOperationRepository.create({
-          userId,
-          type,
-          idempotencyKey,
-          reference: idempotencyKey,
-          status: 'PENDING',
-          amount: this.normalizeAmount(payload.amount),
-          currency: Currency.NGN,
-          provider: 'VTU.ng',
-          requestPayload: this.redactPayload(payload),
-          responsePayload: null,
-          errorCode: null,
-          failureReason: null,
-          metadata: {
-            sandbox: true,
-            settlement: 'AWAITING_REQUERY_OR_WEBHOOK',
-          },
-        }),
+      const hold = await this.createVtuLedgerHold(
+        userId,
+        type,
+        payload,
+        idempotencyKey,
       );
+      if (!hold.created) return this.normalizeOperation(hold.operation);
+      const operation = hold.operation;
       try {
         const providerPayload = this.toVtuNgPurchasePayload(
           type,
@@ -1033,27 +1021,30 @@ export class VidalpayService {
           this.asString(response.request_id) ??
           this.asString(response.requestId) ??
           this.asString(response.reference) ??
+          this.asString(this.asRecord(response.data)?.request_id) ??
           idempotencyKey;
         operation.responsePayload = this.redactPayload(response);
         operation.metadata = {
           ...operation.metadata,
           providerContract: 'VTU_NG_V2',
-          ledgerFinalization: 'BLOCKED_UNTIL_REQUERY_OR_WEBHOOK_SUCCESS',
+          ledgerFinalization: 'PENDING_PROVIDER_SETTLEMENT',
         };
         await this.providerOperationRepository.save(operation);
         return this.normalizeOperation(operation);
       } catch (error) {
-        operation.status = 'FAILED';
-        operation.errorCode = 'PROVIDER_REQUEST_FAILED';
-        operation.failureReason = this.providerErrorMessage(error);
-        await this.providerOperationRepository.save(operation);
+        const failureReason = this.providerErrorMessage(error);
+        await this.reverseVtuLedgerHold(
+          operation,
+          'PROVIDER_REQUEST_FAILED',
+          failureReason,
+        );
         throw new ServiceUnavailableException(
           createBlockedResponse({
-            code: operation.errorCode,
+            code: 'PROVIDER_REQUEST_FAILED',
             feature: type,
             capability: vtuCapability,
             provider: 'VTU.ng',
-            reason: operation.failureReason,
+            reason: failureReason,
             retryable: true,
           }),
         );
@@ -3548,18 +3539,31 @@ export class VidalpayService {
       });
       if (operation) {
         operation.responsePayload = this.redactPayload(payload);
-        operation.status = this.mapVtuNgOperationStatus(
+        const mappedStatus = this.mapVtuNgOperationStatus(
           providerStatus ?? undefined,
           operation.status,
         );
-        operation.metadata = {
-          ...(operation.metadata ?? {}),
-          vtuWebhookReceived: true,
-          vtuWebhookStatus: providerStatus ?? null,
-          finalizationBlocked:
-            'Ledger/hold finalization is not enabled until VTU.ng requery/webhook settlement and reversal rules are live-tested.',
-        };
-        await this.providerOperationRepository.save(operation);
+        if (mappedStatus === 'COMPLETED') {
+          await this.completeVtuLedgerHold(operation, payload, providerStatus);
+        } else if (mappedStatus === 'REFUNDED' || mappedStatus === 'FAILED') {
+          await this.reverseVtuLedgerHold(
+            operation,
+            mappedStatus,
+            mappedStatus === 'REFUNDED'
+              ? 'VTU.ng reported this order as refunded.'
+              : 'VTU.ng reported this order as failed.',
+            payload,
+          );
+        } else {
+          operation.status = mappedStatus;
+          operation.metadata = {
+            ...(operation.metadata ?? {}),
+            vtuWebhookReceived: true,
+            vtuWebhookStatus: providerStatus ?? null,
+            ledgerFinalization: 'PENDING_PROVIDER_SETTLEMENT',
+          };
+          await this.providerOperationRepository.save(operation);
+        }
       }
     }
     return {
@@ -5301,6 +5305,264 @@ export class VidalpayService {
         this.asString(payload.meterNumber),
       amount: this.normalizeAmount(payload.amount),
     };
+  }
+
+  private async createVtuLedgerHold(
+    userId: string,
+    type: VtuServiceKind,
+    payload: AnyRecord,
+    idempotencyKey: string,
+  ) {
+    const amount = this.vtuSettlementAmount(type, payload);
+    if (amount <= 0) {
+      throw new BadRequestException('A valid amount is required');
+    }
+    return this.withOptionalTransaction(async (repositories) => {
+      const wallet = await this.findLockedWallet(
+        repositories.wallets,
+        userId,
+        Currency.NGN,
+      );
+      if (!wallet) {
+        throw new BadRequestException('NGN wallet is required for VTU purchases');
+      }
+      const balanceBefore = Number(wallet.balance ?? 0);
+      if (balanceBefore < amount) {
+        throw new PreconditionFailedException('Insufficient wallet balance');
+      }
+      const existing = await repositories.operations.findOne({
+        where: { userId, type, idempotencyKey },
+      });
+      if (existing) return { operation: existing, created: false };
+
+      wallet.balance = this.roundMoney(balanceBefore - amount);
+      wallet.availableBalance = wallet.balance;
+      wallet.ledgerBalance = wallet.balance;
+      await repositories.wallets.save(wallet);
+
+      const holdReference = `${idempotencyKey}_vtu_hold`;
+      const operation = await repositories.operations.save(
+        repositories.operations.create({
+          userId,
+          type,
+          idempotencyKey,
+          reference: idempotencyKey,
+          status: 'HELD',
+          amount,
+          currency: Currency.NGN,
+          provider: 'VTU.ng',
+          requestPayload: this.redactPayload(payload),
+          responsePayload: null,
+          errorCode: null,
+          failureReason: null,
+          metadata: {
+            sandbox: true,
+            settlement: 'LEDGER_HOLD_CREATED',
+            holdTransactionReference: holdReference,
+            walletId: wallet.id,
+          },
+        }),
+      );
+
+      await repositories.transactions.save(
+        repositories.transactions.create({
+          userId,
+          walletId: wallet.id,
+          reference: holdReference,
+          operationReference: idempotencyKey,
+          currency: Currency.NGN,
+          amount,
+          balanceBefore,
+          balanceAfter: wallet.balance,
+          type: 'debit',
+          status: 'PENDING',
+          info: 'VTU purchase hold',
+          description: `VTU.ng ${type} purchase hold`,
+          tag: 'vtu_purchase',
+          provider: 'VTU.ng',
+          providerReference: idempotencyKey,
+          idempotencyKey,
+          metadata: { serviceType: type, settlement: 'PENDING_PROVIDER' },
+        }),
+      );
+
+      return { operation, created: true };
+    });
+  }
+
+  private async completeVtuLedgerHold(
+    operation: ProviderOperation,
+    payload: AnyRecord,
+    providerStatus?: string | null,
+  ) {
+    await this.withOptionalTransaction(async (repositories) => {
+      const current =
+        (await repositories.operations.findOne({
+          where: { reference: operation.reference },
+        })) ?? operation;
+      const metadata = this.asRecord(current.metadata) ?? {};
+      if (metadata.ledgerFinalized === true) return current;
+      const holdReference = this.asString(metadata.holdTransactionReference);
+      if (holdReference) {
+        const holdTransaction = await repositories.transactions.findOne({
+          where: { reference: holdReference },
+        });
+        if (holdTransaction) {
+          holdTransaction.status = 'SUCCESS';
+          holdTransaction.providerReference =
+            current.providerReference ?? holdTransaction.providerReference;
+          holdTransaction.metadata = {
+            ...(holdTransaction.metadata ?? {}),
+            settlement: 'PROVIDER_COMPLETED',
+            providerStatus: providerStatus ?? null,
+          };
+          await repositories.transactions.save(holdTransaction);
+        }
+      }
+      current.status = 'COMPLETED';
+      current.responsePayload = this.redactPayload(payload);
+      current.metadata = {
+        ...metadata,
+        vtuWebhookReceived: true,
+        vtuWebhookStatus: providerStatus ?? null,
+        ledgerFinalization: 'COMPLETED',
+        ledgerFinalized: true,
+      };
+      await repositories.operations.save(current);
+      return current;
+    });
+  }
+
+  private async reverseVtuLedgerHold(
+    operation: ProviderOperation,
+    status: string,
+    reason: string,
+    payload?: AnyRecord,
+  ) {
+    await this.withOptionalTransaction(async (repositories) => {
+      const current =
+        (await repositories.operations.findOne({
+          where: { reference: operation.reference },
+        })) ?? operation;
+      const metadata = this.asRecord(current.metadata) ?? {};
+      if (metadata.ledgerReversed !== true) {
+        const walletId = this.asString(metadata.walletId);
+        const amount = Number(current.amount ?? 0);
+        const wallet = walletId
+          ? await this.findLockedWalletById(repositories.wallets, walletId)
+          : await this.findLockedWallet(
+              repositories.wallets,
+              current.userId,
+              Currency.NGN,
+            );
+        if (wallet && amount > 0) {
+          const balanceBefore = Number(wallet.balance ?? 0);
+          wallet.balance = this.roundMoney(balanceBefore + amount);
+          wallet.availableBalance = wallet.balance;
+          wallet.ledgerBalance = wallet.balance;
+          await repositories.wallets.save(wallet);
+          await repositories.transactions.save(
+            repositories.transactions.create({
+              userId: current.userId,
+              walletId: wallet.id,
+              reference: `${current.reference}_vtu_reversal`,
+              operationReference: current.reference,
+              currency: Currency.NGN,
+              amount,
+              balanceBefore,
+              balanceAfter: wallet.balance,
+              type: 'credit',
+              status: 'SUCCESS',
+              info: 'VTU purchase reversal',
+              description: reason,
+              tag: 'vtu_purchase_reversal',
+              provider: 'VTU.ng',
+              providerReference: current.providerReference ?? current.reference,
+              idempotencyKey: `${current.idempotencyKey}_reversal`,
+              metadata: { originalReference: current.reference, reason },
+            }),
+          );
+        }
+      }
+
+      current.status = status;
+      current.errorCode =
+        status === 'PROVIDER_REQUEST_FAILED' ? status : current.errorCode;
+      current.failureReason = reason;
+      current.responsePayload = payload
+        ? this.redactPayload(payload)
+        : current.responsePayload;
+      current.metadata = {
+        ...metadata,
+        ledgerFinalization: 'REVERSED',
+        ledgerReversed: true,
+        reversalReason: reason,
+      };
+      await repositories.operations.save(current);
+      return current;
+    });
+  }
+
+  private vtuSettlementAmount(type: VtuServiceKind, payload: AnyRecord) {
+    if (type === 'epins') {
+      const value = this.normalizeAmount(payload.value ?? payload.amount);
+      const quantity = Math.max(Number(payload.quantity ?? 1) || 1, 1);
+      return this.roundMoney(value * quantity);
+    }
+    return this.normalizeAmount(payload.amount);
+  }
+
+  private async withOptionalTransaction<T>(
+    work: (repositories: {
+      wallets: Repository<Wallet>;
+      operations: Repository<ProviderOperation>;
+      transactions: Repository<FinancialTransaction>;
+    }) => Promise<T>,
+  ) {
+    if (typeof this.dataSource?.transaction === 'function') {
+      return this.dataSource.transaction(async (manager) =>
+        work({
+          wallets: manager.getRepository(Wallet),
+          operations: manager.getRepository(ProviderOperation),
+          transactions: manager.getRepository(FinancialTransaction),
+        }),
+      );
+    }
+    return work({
+      wallets: this.walletRepository,
+      operations: this.providerOperationRepository,
+      transactions: this.transactionRepository,
+    });
+  }
+
+  private async findLockedWallet(
+    wallets: Repository<Wallet>,
+    userId: string,
+    currency: Currency,
+  ) {
+    const queryBuilder = wallets.createQueryBuilder?.('wallet');
+    if (queryBuilder?.setLock) {
+      return queryBuilder
+        .setLock('pessimistic_write')
+        .where('wallet.userId = :userId', { userId })
+        .andWhere('wallet.currency = :currency', { currency })
+        .getOne();
+    }
+    return wallets.findOne({ where: { userId, currency } });
+  }
+
+  private async findLockedWalletById(
+    wallets: Repository<Wallet>,
+    walletId: string,
+  ) {
+    const queryBuilder = wallets.createQueryBuilder?.('wallet');
+    if (queryBuilder?.setLock) {
+      return queryBuilder
+        .setLock('pessimistic_write')
+        .where('wallet.id = :walletId', { walletId })
+        .getOne();
+    }
+    return wallets.findOne({ where: { id: walletId } });
   }
 
   private async recordBlockedOperation(

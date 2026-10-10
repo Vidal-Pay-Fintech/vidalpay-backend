@@ -46,6 +46,7 @@ describe('VidalpayService', () => {
   let walletRepository: ReturnType<typeof repo>;
   let kycProfileRepository: ReturnType<typeof repo>;
   let providerOperationRepository: ReturnType<typeof repo>;
+  let transactionRepository: ReturnType<typeof repo>;
   let fincraWebhookEventRepository: ReturnType<typeof repo>;
   let rewardLedgerRepository: ReturnType<typeof repo>;
   let referralEventRepository: ReturnType<typeof repo>;
@@ -79,7 +80,7 @@ describe('VidalpayService', () => {
     userRepository = repo();
     walletRepository = repo();
     kycProfileRepository = repo();
-    const transactionRepository = repo();
+    transactionRepository = repo();
     providerOperationRepository = repo();
     fincraWebhookEventRepository = repo();
     rewardLedgerRepository = repo();
@@ -415,6 +416,15 @@ describe('VidalpayService', () => {
     providerOperationRepository.save.mockImplementation(
       async (payload: any) => payload,
     );
+    walletRepository.findOne.mockResolvedValue({
+      id: 'wallet-ngn-1',
+      userId: 'user-1',
+      currency: Currency.NGN,
+      balance: 5000,
+    });
+    walletRepository.save.mockImplementation(async (payload: any) => payload);
+    transactionRepository.create.mockImplementation((payload: any) => payload);
+    transactionRepository.save.mockImplementation(async (payload: any) => payload);
     sandboxProviderService.verifyFincraBvn.mockResolvedValue({
       data: { id: 'verify-1', status: 'verified' },
     });
@@ -1332,6 +1342,15 @@ describe('VidalpayService', () => {
     providerOperationRepository.save.mockImplementation(
       async (payload: any) => payload,
     );
+    walletRepository.findOne.mockResolvedValue({
+      id: 'wallet-ngn-1',
+      userId: 'user-1',
+      currency: Currency.NGN,
+      balance: 5000,
+    });
+    walletRepository.save.mockImplementation(async (payload: any) => payload);
+    transactionRepository.create.mockImplementation((payload: any) => payload);
+    transactionRepository.save.mockImplementation(async (payload: any) => payload);
     kycProfileRepository.findOne.mockResolvedValue(null);
     fincraWalletService.requestPermanentVirtualAccount.mockRejectedValue({
       response: {
@@ -1388,6 +1407,15 @@ describe('VidalpayService', () => {
     providerOperationRepository.save.mockImplementation(
       async (payload: any) => payload,
     );
+    walletRepository.findOne.mockResolvedValue({
+      id: 'wallet-ngn-1',
+      userId: 'user-1',
+      currency: Currency.NGN,
+      balance: 5000,
+    });
+    walletRepository.save.mockImplementation(async (payload: any) => payload);
+    transactionRepository.create.mockImplementation((payload: any) => payload);
+    transactionRepository.save.mockImplementation(async (payload: any) => payload);
     kycProfileRepository.findOne.mockResolvedValue(null);
     fincraWalletService.requestPermanentVirtualAccount.mockRejectedValue({
       response: {
@@ -2006,7 +2034,7 @@ describe('VidalpayService', () => {
     });
   });
 
-  it('submits VTU.ng purchases without wallet debit and waits for requery or webhook settlement', async () => {
+  it('creates a VTU.ng ledger hold before provider submission and finalizes later', async () => {
     const pin = await hash('1234', 4);
     userRepository.findOne.mockResolvedValue({
       id: 'user-1',
@@ -2020,6 +2048,15 @@ describe('VidalpayService', () => {
     providerOperationRepository.save.mockImplementation(
       async (payload: any) => payload,
     );
+    walletRepository.findOne.mockResolvedValue({
+      id: 'wallet-ngn-1',
+      userId: 'user-1',
+      currency: Currency.NGN,
+      balance: 5000,
+    });
+    walletRepository.save.mockImplementation(async (payload: any) => payload);
+    transactionRepository.create.mockImplementation((payload: any) => payload);
+    transactionRepository.save.mockImplementation(async (payload: any) => payload);
     providerStatusService.getStatus.mockImplementation(
       (capability: any) =>
         status({
@@ -2051,6 +2088,18 @@ describe('VidalpayService', () => {
         provider: 'VTU.ng',
       }),
     );
+    expect(walletRepository.save).toHaveBeenCalledWith(
+      expect.objectContaining({ balance: 4000 }),
+    );
+    expect(transactionRepository.save).toHaveBeenCalledWith(
+      expect.objectContaining({
+        reference: 'vtu-airtime-1_vtu_hold',
+        type: 'debit',
+        status: 'PENDING',
+        balanceBefore: 5000,
+        balanceAfter: 4000,
+      }),
+    );
     expect(providerOperationRepository.save).toHaveBeenCalledWith(
       expect.objectContaining({
         type: 'airtime',
@@ -2058,8 +2107,73 @@ describe('VidalpayService', () => {
         status: 'SUBMITTED',
         provider: 'VTU.ng',
         metadata: expect.objectContaining({
-          ledgerFinalization: 'BLOCKED_UNTIL_REQUERY_OR_WEBHOOK_SUCCESS',
+          ledgerFinalization: 'PENDING_PROVIDER_SETTLEMENT',
+          holdTransactionReference: 'vtu-airtime-1_vtu_hold',
         }),
+      }),
+    );
+  });
+
+
+  it('reverses a VTU.ng ledger hold when the provider reports a refund', async () => {
+    configService.get.mockImplementation((key: string) =>
+      key === 'VTU_USER_PIN' ? 'pin-secret' : undefined,
+    );
+    const operation = {
+      id: 'operation-1',
+      userId: 'user-1',
+      type: 'airtime',
+      idempotencyKey: 'vtu-airtime-1',
+      reference: 'vtu-airtime-1',
+      status: 'SUBMITTED',
+      amount: 1000,
+      currency: Currency.NGN,
+      provider: 'VTU.ng',
+      providerReference: 'vtu-airtime-1',
+      metadata: {
+        walletId: 'wallet-ngn-1',
+        holdTransactionReference: 'vtu-airtime-1_vtu_hold',
+      },
+    };
+    providerOperationRepository.findOne.mockResolvedValue(operation);
+    walletRepository.findOne.mockResolvedValue({
+      id: 'wallet-ngn-1',
+      userId: 'user-1',
+      currency: Currency.NGN,
+      balance: 4000,
+    });
+    walletRepository.save.mockImplementation(async (payload: any) => payload);
+    transactionRepository.create.mockImplementation((payload: any) => payload);
+    transactionRepository.save.mockImplementation(async (payload: any) => payload);
+    providerOperationRepository.save.mockImplementation(
+      async (payload: any) => payload,
+    );
+    const payload = { request_id: 'vtu-airtime-1', status: 'refunded' };
+    const signature = require('crypto')
+      .createHmac('sha256', 'pin-secret')
+      .update(JSON.stringify(payload))
+      .digest('hex');
+
+    await expect(service.handleVtuWebhook(payload, signature)).resolves.toEqual(
+      expect.objectContaining({ finalized: false, status: 'refunded' }),
+    );
+
+    expect(walletRepository.save).toHaveBeenCalledWith(
+      expect.objectContaining({ balance: 5000 }),
+    );
+    expect(transactionRepository.save).toHaveBeenCalledWith(
+      expect.objectContaining({
+        reference: 'vtu-airtime-1_vtu_reversal',
+        type: 'credit',
+        status: 'SUCCESS',
+        balanceBefore: 4000,
+        balanceAfter: 5000,
+      }),
+    );
+    expect(providerOperationRepository.save).toHaveBeenCalledWith(
+      expect.objectContaining({
+        status: 'REFUNDED',
+        metadata: expect.objectContaining({ ledgerReversed: true }),
       }),
     );
   });
@@ -2086,6 +2200,15 @@ describe('VidalpayService', () => {
     providerOperationRepository.save.mockImplementation(
       async (payload: any) => payload,
     );
+    walletRepository.findOne.mockResolvedValue({
+      id: 'wallet-ngn-1',
+      userId: 'user-1',
+      currency: Currency.NGN,
+      balance: 5000,
+    });
+    walletRepository.save.mockImplementation(async (payload: any) => payload);
+    transactionRepository.create.mockImplementation((payload: any) => payload);
+    transactionRepository.save.mockImplementation(async (payload: any) => payload);
 
     await expect(
       service.handleWhatsAppWebhook({ entry: [{ id: 'wa-event-1' }] }),
