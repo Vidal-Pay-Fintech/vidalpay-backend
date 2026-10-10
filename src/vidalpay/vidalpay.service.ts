@@ -621,14 +621,16 @@ export class VidalpayService {
     }
   }
 
-  async getWalletByCurrency(userId: string, currency: Currency) {
+  async getWalletByCurrency(userId: string, currency: Currency | string) {
     await this.findUser(userId);
-    const wallet = await this.ensureWallet(userId, currency);
+    const normalizedCurrency = this.normalizeCurrency(currency);
+    const wallet = await this.ensureWallet(userId, normalizedCurrency);
     return this.normalizeWallet(wallet);
   }
 
-  async getWalletAccountDetails(userId: string, currency: Currency) {
-    const wallet = await this.ensureWallet(userId, currency);
+  async getWalletAccountDetails(userId: string, currency: Currency | string) {
+    const normalizedCurrency = this.normalizeCurrency(currency);
+    const wallet = await this.ensureWallet(userId, normalizedCurrency);
     const normalized = this.normalizeWallet(wallet);
 
     if (!wallet.accountNumber) {
@@ -637,16 +639,18 @@ export class VidalpayService {
           accountName: normalized.accountName,
           accountNumber: normalized.accountNumber,
           bankName: normalized.bankName,
-          currency,
+          currency: normalizedCurrency,
           provider: normalized.provider,
           providerStatus:
             normalized.providerStatus ??
-            this.providerReadinessForCurrency(currency),
+            this.providerReadinessForCurrency(normalizedCurrency),
           isProvisioned: false,
           message:
-            currency === Currency.NGN
+            normalizedCurrency === Currency.NGN
               ? 'NGN account details require PayVessel virtual-account provisioning.'
-              : 'USD account details require Unit deposit-account provisioning.',
+              : normalizedCurrency === Currency.USD
+                ? 'USD account details require Unit deposit-account provisioning.'
+                : `${normalizedCurrency} account details require Fincra wallet activation or provider provisioning.`,
         },
         wallet: normalized,
       };
@@ -658,7 +662,7 @@ export class VidalpayService {
         accountNumber: normalized.accountNumber,
         bankName: normalized.bankName,
         routingNumber: normalized.routingNumber,
-        currency,
+        currency: normalizedCurrency,
         provider: normalized.provider,
         providerStatus: normalized.providerStatus,
         isProvisioned: true,
@@ -694,13 +698,24 @@ export class VidalpayService {
     await this.findUser(userId);
     const currency = this.normalizeCurrency(payload.currency);
     const capability =
-      currency === Currency.USD ? 'usd_account_details' : 'bank_transfer';
+      currency === Currency.USD
+        ? 'usd_account_details'
+        : currency === Currency.NGN
+          ? 'bank_transfer'
+          : 'wallet_activation';
     this.throwProviderUnavailable({
       feature: 'External transfer resolution',
       capability,
-      provider: currency === Currency.USD ? 'Unit.co' : 'PayVessel',
+      provider:
+        currency === Currency.USD
+          ? 'Unit.co'
+          : currency === Currency.NGN
+            ? 'PayVessel'
+            : 'Fincra',
       reason:
-        'External account resolution requires a live provider integration and credentials.',
+        currency === Currency.NGN || currency === Currency.USD
+          ? 'External account resolution requires a live provider integration and credentials.'
+          : `${currency} external account resolution and payouts require a live-tested Fincra payout/transfer integration.`,
       missingRequirements:
         this.providerStatusService.getStatus(capability).missingEnvVars,
     });
@@ -709,10 +724,17 @@ export class VidalpayService {
   async externalTransfer(userId: string, payload: AnyRecord) {
     const currency = this.normalizeCurrency(payload.currency);
     await this.recordBlockedOperation(userId, 'external_transfer', payload, {
-      provider: currency === Currency.USD ? 'Unit.co' : 'PayVessel',
-      capability: 'bank_transfer',
+      provider:
+        currency === Currency.USD
+          ? 'Unit.co'
+          : currency === Currency.NGN
+            ? 'PayVessel'
+            : 'Fincra',
+      capability: currency === Currency.NGN ? 'bank_transfer' : 'wallet_activation',
       reason:
-        'External transfers must be executed by Unit.co or PayVessel; no live-tested provider path is configured.',
+        currency === Currency.NGN || currency === Currency.USD
+          ? 'External transfers must be executed by Unit.co or PayVessel; no live-tested provider path is configured.'
+          : `${currency} external transfers require a live-tested Fincra payout/transfer integration before funds can leave the wallet.`,
     });
   }
 
@@ -1227,8 +1249,9 @@ export class VidalpayService {
     };
   }
 
-  async getTransactions(userId: string, currency?: Currency) {
-    const where = currency ? { userId, currency } : { userId };
+  async getTransactions(userId: string, currency?: Currency | string) {
+    const normalizedCurrency = currency ? this.normalizeCurrency(currency) : undefined;
+    const where = normalizedCurrency ? { userId, currency: normalizedCurrency } : { userId };
     try {
       const transactions = await this.transactionRepository.find({
         where,
@@ -4946,18 +4969,24 @@ export class VidalpayService {
   }
 
   private providerReadinessForCurrency(currency: string) {
-    const capability =
-      currency === Currency.USD ? 'usd_account_details' : 'ngn_account_details';
-    const status = this.providerStatusService.getStatus(capability);
+    if (currency === Currency.NGN) {
+      const status = this.providerStatusService.getStatus('ngn_account_details');
+      return status.enabled ? status.readinessStatus : 'MISSING_CREDENTIALS';
+    }
+    if (currency === Currency.USD) {
+      const status = this.providerStatusService.getStatus('usd_account_details');
+      return status.enabled ? status.readinessStatus : 'MISSING_CREDENTIALS';
+    }
+    const status = this.providerStatusService.getStatus('wallet_activation');
     return status.enabled ? status.readinessStatus : 'MISSING_CREDENTIALS';
   }
 
   private normalizeCurrency(value: unknown): Currency {
     const currency = this.asString(value)?.toUpperCase();
-    if (currency === Currency.NGN || currency === Currency.USD) {
-      return currency;
+    if (Object.values(Currency).includes(currency as Currency)) {
+      return currency as Currency;
     }
-    throw new BadRequestException('currency must be NGN or USD');
+    throw new BadRequestException('currency must be NGN, USD, GBP, or CAD');
   }
 
   private normalizeAmount(value: unknown): number {

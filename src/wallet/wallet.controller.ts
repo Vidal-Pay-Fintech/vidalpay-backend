@@ -141,6 +141,30 @@ export class WalletsController {
     return this.vidalpayService.getTransactions(user.sub, Currency.USD);
   }
 
+  @Get(':currency')
+  walletByCurrency(
+    @ActiveUser() user: ActiveUserData,
+    @Param('currency') currency: string,
+  ) {
+    return this.vidalpayService.getWalletByCurrency(user.sub, currency);
+  }
+
+  @Get(':currency/account-details')
+  accountDetailsByCurrency(
+    @ActiveUser() user: ActiveUserData,
+    @Param('currency') currency: string,
+  ) {
+    return this.vidalpayService.getWalletAccountDetails(user.sub, currency);
+  }
+
+  @Get(':currency/transactions')
+  transactionsByCurrency(
+    @ActiveUser() user: ActiveUserData,
+    @Param('currency') currency: string,
+  ) {
+    return this.vidalpayService.getTransactions(user.sub, currency);
+  }
+
   @Get(':currency/eligibility')
   eligibility(
     @ActiveUser() user: ActiveUserData,

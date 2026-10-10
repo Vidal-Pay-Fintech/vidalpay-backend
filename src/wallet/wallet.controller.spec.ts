@@ -15,6 +15,7 @@ describe('Wallet controllers', () => {
     getWalletEligibility: jest.fn(),
     activateWalletProduct: jest.fn(),
     getWalletTransactions: jest.fn(),
+    getTransactions: jest.fn(),
     getAllTransactions: jest.fn(),
     getBankCatalog: jest.fn(),
     resolveExternalTransfer: jest.fn(),
@@ -62,6 +63,26 @@ describe('Wallet controllers', () => {
     expect(vidalpayService.getAvailableWalletProducts).toHaveBeenCalledWith(
       'user-1',
     );
+  });
+
+  it('routes generic currency wallet reads, account details, and transactions', async () => {
+    vidalpayService.getWalletByCurrency.mockResolvedValue({ currency: 'CAD' });
+    vidalpayService.getWalletAccountDetails.mockResolvedValue({ accountDetails: { currency: 'CAD' } });
+    vidalpayService.getTransactions.mockResolvedValue({ transactions: [] });
+
+    await expect(
+      walletsController.walletByCurrency({ sub: 'user-1' } as any, 'cad'),
+    ).resolves.toEqual({ currency: 'CAD' });
+    await expect(
+      walletsController.accountDetailsByCurrency({ sub: 'user-1' } as any, 'cad'),
+    ).resolves.toEqual({ accountDetails: { currency: 'CAD' } });
+    await expect(
+      walletsController.transactionsByCurrency({ sub: 'user-1' } as any, 'cad'),
+    ).resolves.toEqual({ transactions: [] });
+
+    expect(vidalpayService.getWalletByCurrency).toHaveBeenCalledWith('user-1', 'cad');
+    expect(vidalpayService.getWalletAccountDetails).toHaveBeenCalledWith('user-1', 'cad');
+    expect(vidalpayService.getTransactions).toHaveBeenCalledWith('user-1', 'cad');
   });
 
   it('routes wallet eligibility and activation by requested currency', async () => {
