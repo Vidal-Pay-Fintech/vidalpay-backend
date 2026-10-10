@@ -110,4 +110,45 @@ describe('SandboxProviderService', () => {
       expect.objectContaining({ request_id: 'request-1' }),
     );
   });
+
+  it('uses VTU.ng v2 endpoints for TV, betting, ePIN and requery operations', async () => {
+    post
+      .mockResolvedValueOnce({ data: { token: 'vtu-token' } })
+      .mockResolvedValueOnce({ data: { request_id: 'tv-1' } })
+      .mockResolvedValueOnce({ data: { request_id: 'bet-1' } })
+      .mockResolvedValueOnce({ data: { request_id: 'epin-1' } })
+      .mockResolvedValueOnce({ data: { request_id: 'tv-1', status: 'completed-api' } });
+    const service = new SandboxProviderService(
+      config as unknown as ConfigService,
+      http as any,
+    );
+
+    await service.purchaseVtuNg('tv', {
+      request_id: 'tv-1',
+      service_id: 'dstv',
+      customer_id: '1234567890',
+      variation_id: 'compact',
+    });
+    await service.purchaseVtuNg('betting', {
+      request_id: 'bet-1',
+      service_id: 'bet9ja',
+      customer_id: '1234567890',
+      amount: 1000,
+    });
+    await service.purchaseVtuNg('epins', {
+      request_id: 'epin-1',
+      service_id: 'waec',
+      value: 5000,
+      quantity: 1,
+    });
+    await service.requeryVtuNg('tv-1');
+
+    expect(post).toHaveBeenNthCalledWith(2, '/api/v2/tv', expect.any(Object));
+    expect(post).toHaveBeenNthCalledWith(3, '/api/v2/betting', expect.any(Object));
+    expect(post).toHaveBeenNthCalledWith(4, '/api/v2/epins', expect.any(Object));
+    expect(post).toHaveBeenNthCalledWith(5, '/api/v2/requery', {
+      request_id: 'tv-1',
+    });
+  });
+
 });

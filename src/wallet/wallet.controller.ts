@@ -65,8 +65,31 @@ export class WalletController {
     return this.vidalpayService.getCatalog(user.sub, 'utilities');
   }
 
+  @Get('catalogs/tv')
+  tvCatalog(@ActiveUser() user: ActiveUserData) {
+    return this.vidalpayService.getCatalog(user.sub, 'tv');
+  }
+
+  @Get('catalogs/betting')
+  bettingCatalog(@ActiveUser() user: ActiveUserData) {
+    return this.vidalpayService.getCatalog(user.sub, 'betting');
+  }
+
+  @Get('catalogs/epins')
+  epinsCatalog(@ActiveUser() user: ActiveUserData) {
+    return this.vidalpayService.getCatalog(user.sub, 'epins');
+  }
+
   @Post('utilities/validate')
   validateUtility(
+    @ActiveUser() user: ActiveUserData,
+    @Body() body: Record<string, unknown>,
+  ) {
+    return this.vidalpayService.validateUtilityCustomer(user.sub, body);
+  }
+
+  @Post('services/verify')
+  verifyServiceCustomer(
     @ActiveUser() user: ActiveUserData,
     @Body() body: Record<string, unknown>,
   ) {
@@ -89,6 +112,35 @@ export class WalletController {
     @Body() body: Record<string, unknown>,
   ) {
     return this.vidalpayService.purchaseService(user.sub, 'utilities', body);
+  }
+
+  @Post('electricity')
+  electricity(
+    @ActiveUser() user: ActiveUserData,
+    @Body() body: Record<string, unknown>,
+  ) {
+    return this.vidalpayService.purchaseService(user.sub, 'electricity', body);
+  }
+
+  @Post('tv')
+  tv(@ActiveUser() user: ActiveUserData, @Body() body: Record<string, unknown>) {
+    return this.vidalpayService.purchaseService(user.sub, 'tv', body);
+  }
+
+  @Post('betting')
+  betting(
+    @ActiveUser() user: ActiveUserData,
+    @Body() body: Record<string, unknown>,
+  ) {
+    return this.vidalpayService.purchaseService(user.sub, 'betting', body);
+  }
+
+  @Post('epins')
+  epins(
+    @ActiveUser() user: ActiveUserData,
+    @Body() body: Record<string, unknown>,
+  ) {
+    return this.vidalpayService.purchaseService(user.sub, 'epins', body);
   }
 }
 

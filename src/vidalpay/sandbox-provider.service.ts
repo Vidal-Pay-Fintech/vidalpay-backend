@@ -5,7 +5,14 @@ import { ProviderHttpService } from './provider-http.service';
 type JsonRecord = Record<string, unknown>;
 type ReloadlyProduct = 'airtime' | 'data' | 'utilities';
 type FincraFxRateQuery = { baseCurrency?: string; quoteCurrency?: string };
-type VtuProduct = 'airtime' | 'data' | 'utilities';
+export type VtuProduct =
+  | 'airtime'
+  | 'data'
+  | 'utilities'
+  | 'electricity'
+  | 'tv'
+  | 'betting'
+  | 'epins';
 
 @Injectable()
 export class SandboxProviderService {
@@ -53,18 +60,71 @@ export class SandboxProviderService {
     product: VtuProduct,
     serviceId?: string,
   ): Promise<JsonRecord> {
-    if (product === 'data') {
+    const normalizedProduct = product === 'utilities' ? 'electricity' : product;
+    if (normalizedProduct === 'data' || normalizedProduct === 'tv') {
       const params = serviceId ? { service_id: serviceId } : undefined;
       const { data } = await this.http
         .vtuNgClient()
-        .get('/api/v2/variations/data', { params });
+        .get(`/api/v2/variations/${normalizedProduct}`, { params });
       return data as JsonRecord;
     }
-    if (product === 'utilities') {
-      const { data } = await this.http
-        .vtuNgClient()
-        .get('/api/v2/variations/electricity');
-      return data as JsonRecord;
+    if (normalizedProduct === 'electricity') {
+      return {
+        code: 'success',
+        message:
+          'VTU.ng electricity provider verification uses service_id and meter variation_id from the provider contract.',
+        data: [
+          { service_id: 'ikeja-electric', service_name: 'Ikeja Electric' },
+          { service_id: 'eko-electric', service_name: 'Eko Electric' },
+          { service_id: 'abuja-electric', service_name: 'Abuja Electric' },
+          { service_id: 'kano-electric', service_name: 'Kano Electric' },
+          {
+            service_id: 'portharcourt-electric',
+            service_name: 'Port Harcourt Electric',
+          },
+          { service_id: 'jos-electric', service_name: 'Jos Electric' },
+          { service_id: 'ibadan-electric', service_name: 'Ibadan Electric' },
+          { service_id: 'enugu-electric', service_name: 'Enugu Electric' },
+          { service_id: 'kaduna-electric', service_name: 'Kaduna Electric' },
+          { service_id: 'benin-electric', service_name: 'Benin Electric' },
+          { service_id: 'aba-electric', service_name: 'Aba Electric' },
+          { service_id: 'yola-electric', service_name: 'Yola Electric' },
+        ],
+      };
+    }
+    if (normalizedProduct === 'betting') {
+      return {
+        code: 'success',
+        message: 'VTU.ng betting services use verify-customer before funding.',
+        data: [
+          { service_id: '1xBet', service_name: '1xBet' },
+          { service_id: 'BangBet', service_name: 'BangBet' },
+          { service_id: 'Bet9ja', service_name: 'Bet9ja' },
+          { service_id: 'BetKing', service_name: 'BetKing' },
+          { service_id: 'BetLand', service_name: 'BetLand' },
+          { service_id: 'BetLion', service_name: 'BetLion' },
+          { service_id: 'BetWay', service_name: 'BetWay' },
+          { service_id: 'CloudBet', service_name: 'CloudBet' },
+          { service_id: 'LiveScoreBet', service_name: 'LiveScoreBet' },
+          { service_id: 'MerryBet', service_name: 'MerryBet' },
+          { service_id: 'NaijaBet', service_name: 'NaijaBet' },
+          { service_id: 'NairaBet', service_name: 'NairaBet' },
+          { service_id: 'SportyBet', service_name: 'SportyBet' },
+          { service_id: 'SupaBet', service_name: 'SupaBet' },
+        ],
+      };
+    }
+    if (normalizedProduct === 'epins') {
+      return {
+        code: 'success',
+        message: 'VTU.ng ePIN services require service_id, value and quantity.',
+        data: [
+          { service_id: 'mtn', service_name: 'MTN' },
+          { service_id: 'airtel', service_name: 'Airtel' },
+          { service_id: 'glo', service_name: 'Glo' },
+          { service_id: '9mobile', service_name: '9mobile' },
+        ],
+      };
     }
     return {
       code: 'success',
@@ -91,12 +151,17 @@ export class SandboxProviderService {
     payload: JsonRecord,
   ): Promise<JsonRecord> {
     const token = await this.vtuNgToken();
-    const endpoint =
-      product === 'airtime'
-        ? '/api/v2/airtime'
-        : product === 'data'
-          ? '/api/v2/data'
-          : '/api/v2/electricity';
+    const normalizedProduct = product === 'utilities' ? 'electricity' : product;
+    const endpointByProduct: Record<VtuProduct, string> = {
+      airtime: '/api/v2/airtime',
+      data: '/api/v2/data',
+      utilities: '/api/v2/electricity',
+      electricity: '/api/v2/electricity',
+      tv: '/api/v2/tv',
+      betting: '/api/v2/betting',
+      epins: '/api/v2/epins',
+    };
+    const endpoint = endpointByProduct[normalizedProduct];
     const { data } = await this.http.vtuNgClient(token).post(endpoint, payload);
     return data as JsonRecord;
   }

@@ -25,6 +25,8 @@ describe('Wallet controllers', () => {
     getBillCatalog: jest.fn(),
     validateUtilityCustomer: jest.fn(),
     purchaseBill: jest.fn(),
+    getCatalog: jest.fn(),
+    purchaseService: jest.fn(),
   };
 
   beforeEach(async () => {
@@ -132,4 +134,56 @@ describe('Wallet controllers', () => {
       { bankCode: '001', accountNumber: '1234567890' },
     );
   });
+
+  it('routes VTU.ng service catalogs and purchases through VidalpayService', async () => {
+    vidalpayService.getCatalog.mockResolvedValue({ provider: 'VTU.ng' });
+    vidalpayService.purchaseService.mockResolvedValue({ provider: 'VTU.ng' });
+
+    await walletController.tvCatalog({ sub: 'user-1' } as any);
+    await walletController.bettingCatalog({ sub: 'user-1' } as any);
+    await walletController.epinsCatalog({ sub: 'user-1' } as any);
+    await walletController.verifyServiceCustomer({ sub: 'user-1' } as any, {
+      serviceId: 'dstv',
+      customerId: '12345',
+    });
+    await walletController.electricity({ sub: 'user-1' } as any, {
+      idempotencyKey: 'electricity-1',
+    });
+    await walletController.tv({ sub: 'user-1' } as any, {
+      idempotencyKey: 'tv-1',
+    });
+    await walletController.betting({ sub: 'user-1' } as any, {
+      idempotencyKey: 'betting-1',
+    });
+    await walletController.epins({ sub: 'user-1' } as any, {
+      idempotencyKey: 'epin-1',
+    });
+
+    expect(vidalpayService.getCatalog).toHaveBeenCalledWith('user-1', 'tv');
+    expect(vidalpayService.getCatalog).toHaveBeenCalledWith('user-1', 'betting');
+    expect(vidalpayService.getCatalog).toHaveBeenCalledWith('user-1', 'epins');
+    expect(vidalpayService.validateUtilityCustomer).toHaveBeenCalledWith(
+      'user-1',
+      { serviceId: 'dstv', customerId: '12345' },
+    );
+    expect(vidalpayService.purchaseService).toHaveBeenCalledWith(
+      'user-1',
+      'electricity',
+      { idempotencyKey: 'electricity-1' },
+    );
+    expect(vidalpayService.purchaseService).toHaveBeenCalledWith('user-1', 'tv', {
+      idempotencyKey: 'tv-1',
+    });
+    expect(vidalpayService.purchaseService).toHaveBeenCalledWith(
+      'user-1',
+      'betting',
+      { idempotencyKey: 'betting-1' },
+    );
+    expect(vidalpayService.purchaseService).toHaveBeenCalledWith(
+      'user-1',
+      'epins',
+      { idempotencyKey: 'epin-1' },
+    );
+  });
+
 });

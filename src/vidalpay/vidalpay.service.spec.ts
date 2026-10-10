@@ -2239,7 +2239,7 @@ describe('VidalpayService', () => {
     expect(queryBuilder.andWhere).toHaveBeenCalledWith(
       expect.stringContaining('operation.type IN'),
       expect.objectContaining({
-        types: ['airtime', 'data', 'utilities', 'vtu_webhook'],
+        types: ['airtime', 'data', 'utilities', 'electricity', 'tv', 'betting', 'epins', 'vtu_webhook'],
       }),
     );
     expect(queryBuilder.andWhere).toHaveBeenCalledWith(

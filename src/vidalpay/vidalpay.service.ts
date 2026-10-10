@@ -56,6 +56,14 @@ import {
 } from './wallet-product-catalog.service';
 
 type AnyRecord = Record<string, unknown>;
+type VtuServiceKind =
+  | 'airtime'
+  | 'data'
+  | 'utilities'
+  | 'electricity'
+  | 'tv'
+  | 'betting'
+  | 'epins';
 
 const supportedCurrencies = [
   Currency.NGN,
@@ -773,11 +781,11 @@ export class VidalpayService {
     return this.normalizeOperation(operation);
   }
 
-  async getCatalog(userId: string, kind: 'airtime' | 'data' | 'utilities') {
+  async getCatalog(userId: string, kind: VtuServiceKind) {
     const user = await this.findUser(userId);
     if (this.inferRegion(user) !== 'NG') {
       const empty =
-        kind === 'utilities' ? { categories: [] } : { networks: [] };
+        this.emptyVtuCatalog(kind);
       return {
         region: this.inferRegion(user),
         provider: 'PayVessel',
@@ -788,15 +796,23 @@ export class VidalpayService {
       };
     }
 
-    const capabilityByKind: Record<typeof kind, ProviderCapability> = {
+    const capabilityByKind: Record<VtuServiceKind, ProviderCapability> = {
       airtime: 'airtime_catalog',
       data: 'data_catalog',
       utilities: 'utilities_catalog',
+      electricity: 'utilities_catalog',
+      tv: 'utilities_catalog',
+      betting: 'utilities_catalog',
+      epins: 'utilities_catalog',
     };
-    const vtuCapabilityByKind: Record<typeof kind, ProviderCapability> = {
+    const vtuCapabilityByKind: Record<VtuServiceKind, ProviderCapability> = {
       airtime: 'vtu_catalog',
       data: 'vtu_catalog',
       utilities: 'vtu_catalog',
+      electricity: 'vtu_catalog',
+      tv: 'vtu_catalog',
+      betting: 'vtu_catalog',
+      epins: 'vtu_catalog',
     };
     const vtuStatus = this.providerStatusService.getStatus(
       vtuCapabilityByKind[kind],
@@ -819,19 +835,21 @@ export class VidalpayService {
           provider: 'VTU.ng',
           source: 'PROVIDER_SANDBOX_ERROR',
           message: this.providerErrorMessage(error),
-          ...(kind === 'utilities' ? { categories: [] } : { networks: [] }),
+          ...(this.emptyVtuCatalog(kind)),
         };
       }
     }
 
     const status = this.providerStatusService.getStatus(capabilityByKind[kind]);
     if (
+      ['airtime', 'data', 'utilities'].includes(kind) &&
       this.configService.get<string>('RELOADLY_CLIENT_ID') &&
       this.configService.get<string>('RELOADLY_CLIENT_SECRET')
     ) {
       try {
-        const catalog =
-          await this.sandboxProviderService.getReloadlyCatalog(kind);
+        const catalog = await this.sandboxProviderService.getReloadlyCatalog(
+          kind as 'airtime' | 'data' | 'utilities',
+        );
         return {
           region: 'NG',
           provider: 'Reloadly',
@@ -844,7 +862,7 @@ export class VidalpayService {
           provider: 'Reloadly',
           source: 'PROVIDER_SANDBOX_ERROR',
           message: this.providerErrorMessage(error),
-          ...(kind === 'utilities' ? { categories: [] } : { networks: [] }),
+          ...(this.emptyVtuCatalog(kind)),
         };
       }
     }
@@ -860,11 +878,7 @@ export class VidalpayService {
         'Provider credentials are configured, but catalog retrieval has not been live-tested in this environment.',
     };
 
-    if (kind === 'utilities') {
-      return { ...base, categories: [] };
-    }
-
-    return { ...base, networks: [] };
+    return { ...base, ...this.emptyVtuCatalog(kind) };
   }
 
   async validateUtilityCustomer(userId: string, payload: AnyRecord) {
@@ -939,13 +953,17 @@ export class VidalpayService {
 
   async purchaseService(
     userId: string,
-    type: 'airtime' | 'data' | 'utilities',
+    type: VtuServiceKind,
     payload: AnyRecord,
   ) {
-    const capabilityByKind: Record<typeof type, ProviderCapability> = {
+    const capabilityByKind: Record<VtuServiceKind, ProviderCapability> = {
       airtime: 'airtime_purchase',
       data: 'data_purchase',
       utilities: 'utilities_payment',
+      electricity: 'utilities_payment',
+      tv: 'utilities_payment',
+      betting: 'utilities_payment',
+      epins: 'utilities_payment',
     };
     const vtuCapability: ProviderCapability = 'vtu_purchase';
     const user = await this.findUser(userId);
@@ -1043,6 +1061,7 @@ export class VidalpayService {
     }
 
     if (
+      ['airtime', 'data', 'utilities'].includes(type) &&
       this.configService.get<string>('RELOADLY_CLIENT_ID') &&
       this.configService.get<string>('RELOADLY_CLIENT_SECRET')
     ) {
@@ -1069,7 +1088,7 @@ export class VidalpayService {
         delete providerPayload.transactionPin;
         delete providerPayload.pin;
         const response = await this.sandboxProviderService.purchaseReloadly(
-          type,
+          type as 'airtime' | 'data' | 'utilities',
           providerPayload,
         );
         operation.status = 'SUBMITTED';
@@ -1832,7 +1851,7 @@ export class VidalpayService {
     query.andWhere(
       `(operation.type IN (:...types) OR LOWER(operation.provider) LIKE :provider)`,
       {
-        types: ['airtime', 'data', 'utilities', 'vtu_webhook'],
+        types: ['airtime', 'data', 'utilities', 'electricity', 'tv', 'betting', 'epins', 'vtu_webhook'],
         provider: '%vtu%',
       },
     );
@@ -3513,38 +3532,41 @@ export class VidalpayService {
   }
 
   async handleVtuWebhook(payload: AnyRecord, signature?: string) {
-    this.assertGenericWebhookSignature({
-      provider: 'VTU provider',
-      capability: 'vtu_requery',
-      secretKey: 'VTU_WEBHOOK_SECRET',
-      signature,
-      payload,
-      signaturePrefix: 'sha256=',
-      requiredInProduction: false,
-    });
+    this.assertVtuNgWebhookSignature(payload, signature);
     const reference =
       this.asString(payload.reference) ??
       this.asString(payload.request_id) ??
+      this.asString(payload.requestId) ??
       this.asString(payload.transactionId);
+    const providerStatus =
+      this.asString(payload.status) ??
+      this.asString(payload.event) ??
+      this.asString(payload.type);
     if (reference) {
       const operation = await this.providerOperationRepository.findOne({
         where: [{ reference }, { providerReference: reference }],
       });
       if (operation) {
         operation.responsePayload = this.redactPayload(payload);
+        operation.status = this.mapVtuNgOperationStatus(
+          providerStatus ?? undefined,
+          operation.status,
+        );
         operation.metadata = {
           ...(operation.metadata ?? {}),
           vtuWebhookReceived: true,
+          vtuWebhookStatus: providerStatus ?? null,
           finalizationBlocked:
-            'Ledger/hold finalization is not enabled until the VTU provider contract and reconciliation flow are live-tested.',
+            'Ledger/hold finalization is not enabled until VTU.ng requery/webhook settlement and reversal rules are live-tested.',
         };
         await this.providerOperationRepository.save(operation);
       }
     }
     return {
       received: true,
-      provider: 'VTU provider',
+      provider: 'VTU.ng',
       reference: reference ?? null,
+      status: providerStatus ?? null,
       finalized: false,
     };
   }
@@ -5017,7 +5039,7 @@ export class VidalpayService {
   }
 
   private normalizeReloadlyCatalog(
-    kind: 'airtime' | 'data' | 'utilities',
+    kind: VtuServiceKind,
     response: AnyRecord,
   ) {
     const content = Array.isArray(response.content)
@@ -5026,7 +5048,7 @@ export class VidalpayService {
         ? response.data
         : [];
 
-    if (kind !== 'utilities') {
+    if (kind !== 'utilities' && kind !== 'electricity') {
       return {
         networks: content.map((entry, index) => {
           const item = this.asRecord(entry) ?? {};
@@ -5087,8 +5109,14 @@ export class VidalpayService {
     return { categories: [...categories.values()] };
   }
 
+  private emptyVtuCatalog(kind: VtuServiceKind) {
+    return kind === 'utilities' || kind === 'electricity'
+      ? { categories: [] }
+      : { networks: [] };
+  }
+
   private normalizeVtuNgCatalog(
-    kind: 'airtime' | 'data' | 'utilities',
+    kind: VtuServiceKind,
     response: AnyRecord,
   ) {
     const content = Array.isArray(response.data)
@@ -5099,27 +5127,31 @@ export class VidalpayService {
           ? response.variations
           : [];
 
-    if (kind !== 'utilities') {
+    if (kind !== 'utilities' && kind !== 'electricity') {
       return {
         networks: content.map((entry, index) => {
           const item = this.asRecord(entry) ?? {};
           return {
             id:
               this.asString(item.service_id) ??
+              this.asString(item.variation_id) ??
               this.asString(item.variation_code) ??
               String(index + 1),
             code:
               this.asString(item.service_id) ??
+              this.asString(item.variation_id) ??
               this.asString(item.variation_code) ??
               `vtu-${index + 1}`,
             name:
               this.asString(item.service_name) ??
+              this.asString(item.data_plan) ??
               this.asString(item.name) ??
               this.asString(item.variation_name) ??
               `VTU ${index + 1}`,
             minAmount: item.min_amount ?? item.minAmount ?? null,
             maxAmount: item.max_amount ?? item.maxAmount ?? null,
-            amount: item.variation_amount ?? item.amount ?? null,
+            amount: item.price ?? item.variation_amount ?? item.amount ?? null,
+            available: item.availability ?? null,
             metadata: this.redactPayload(item),
           };
         }),
@@ -5162,16 +5194,24 @@ export class VidalpayService {
         this.asString(payload.service_id) ??
         this.asString(payload.serviceId) ??
         this.asString(payload.providerCode),
-      billersCode:
-        this.asString(payload.billersCode) ??
+      customer_id:
+        this.asString(payload.customer_id) ??
         this.asString(payload.customerId) ??
-        this.asString(payload.meterNumber),
-      type: this.asString(payload.type) ?? this.asString(payload.meterType),
+        this.asString(payload.billersCode) ??
+        this.asString(payload.meterNumber) ??
+        this.asString(payload.accountId),
+      variation_id:
+        this.asString(payload.variation_id) ??
+        this.asString(payload.variationId) ??
+        this.asString(payload.variation_code) ??
+        this.asString(payload.variationCode) ??
+        this.asString(payload.type) ??
+        this.asString(payload.meterType),
     };
   }
 
   private toVtuNgPurchasePayload(
-    type: 'airtime' | 'data' | 'utilities',
+    type: VtuServiceKind,
     payload: AnyRecord,
     requestId: string,
   ) {
@@ -5196,7 +5236,9 @@ export class VidalpayService {
           this.asString(payload.serviceId) ??
           this.asString(payload.network) ??
           this.asString(payload.operatorId),
-        variation_code:
+        variation_id:
+          this.asString(payload.variation_id) ??
+          this.asString(payload.variationId) ??
           this.asString(payload.variation_code) ??
           this.asString(payload.variationCode) ??
           this.asString(payload.planCode),
@@ -5204,22 +5246,60 @@ export class VidalpayService {
           this.asString(payload.phone) ?? this.asString(payload.recipientPhone),
       };
     }
-    return {
+    const base = {
       request_id: requestId,
       service_id:
         this.asString(payload.service_id) ??
         this.asString(payload.serviceId) ??
         this.asString(payload.providerCode),
-      variation_code:
+    };
+    if (type === 'tv') {
+      return {
+        ...base,
+        customer_id:
+          this.asString(payload.customer_id) ??
+          this.asString(payload.customerId) ??
+          this.asString(payload.smartCardNumber) ??
+          this.asString(payload.decoderNumber),
+        variation_id:
+          this.asString(payload.variation_id) ??
+          this.asString(payload.variationId) ??
+          this.asString(payload.variation_code) ??
+          this.asString(payload.variationCode) ??
+          this.asString(payload.planCode),
+      };
+    }
+    if (type === 'betting') {
+      return {
+        ...base,
+        customer_id:
+          this.asString(payload.customer_id) ??
+          this.asString(payload.customerId) ??
+          this.asString(payload.accountId),
+        amount: this.normalizeAmount(payload.amount),
+      };
+    }
+    if (type === 'epins') {
+      return {
+        ...base,
+        value: this.normalizeAmount(payload.value ?? payload.amount),
+        quantity: Number(payload.quantity ?? 1),
+      };
+    }
+    return {
+      ...base,
+      variation_id:
+        this.asString(payload.variation_id) ??
+        this.asString(payload.variationId) ??
         this.asString(payload.variation_code) ??
-        this.asString(payload.variationCode),
-      billersCode:
-        this.asString(payload.billersCode) ??
+        this.asString(payload.variationCode) ??
+        this.asString(payload.meterType),
+      customer_id:
+        this.asString(payload.customer_id) ??
         this.asString(payload.customerId) ??
+        this.asString(payload.billersCode) ??
         this.asString(payload.meterNumber),
       amount: this.normalizeAmount(payload.amount),
-      phone:
-        this.asString(payload.phone) ?? this.asString(payload.customerPhone),
     };
   }
 
@@ -5975,6 +6055,54 @@ export class VidalpayService {
     ) {
       throw new UnauthorizedException('Invalid FINCRA webhook signature');
     }
+  }
+
+
+  private assertVtuNgWebhookSignature(payload: AnyRecord, signature?: string) {
+    const secret =
+      this.configService.get<string>('VTU_USER_PIN') ??
+      this.configService.get<string>('VTU_WEBHOOK_SECRET');
+    const environment =
+      this.configService.get<string>('NODE_ENV') ?? 'development';
+    if (!secret) {
+      if (environment === 'production') {
+        this.throwProviderUnavailable({
+          code: 'PROVIDER_WEBHOOK_NOT_CONFIGURED',
+          feature: 'VTU.ng webhook',
+          capability: 'vtu_requery',
+          provider: 'VTU.ng',
+          reason:
+            'VTU.ng webhook signing secret is not configured. Set VTU_USER_PIN or VTU_WEBHOOK_SECRET.',
+          missingRequirements: ['VTU_USER_PIN'],
+        });
+      }
+      return;
+    }
+    if (!signature) {
+      throw new UnauthorizedException('VTU.ng webhook signature is required');
+    }
+    const expected = createHmac('sha256', secret)
+      .update(JSON.stringify(payload))
+      .digest('hex');
+    const provided = signature.replace(/^sha256=/i, '').trim();
+    const expectedBuffer = Buffer.from(expected, 'utf8');
+    const providedBuffer = Buffer.from(provided, 'utf8');
+    if (
+      expectedBuffer.length !== providedBuffer.length ||
+      !timingSafeEqual(expectedBuffer, providedBuffer)
+    ) {
+      throw new UnauthorizedException('Invalid VTU.ng webhook signature');
+    }
+  }
+
+  private mapVtuNgOperationStatus(status?: string, fallback = 'SUBMITTED') {
+    const normalized = String(status ?? '').toLowerCase();
+    if (normalized.includes('completed')) return 'COMPLETED';
+    if (normalized.includes('refund')) return 'REFUNDED';
+    if (normalized.includes('processing')) return 'PROCESSING';
+    if (normalized.includes('initiated')) return 'SUBMITTED';
+    if (normalized.includes('failed')) return 'FAILED';
+    return fallback;
   }
 
   private assertGenericWebhookSignature(input: {
