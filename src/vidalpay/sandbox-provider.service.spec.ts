@@ -6,6 +6,8 @@ describe('SandboxProviderService', () => {
   const get = jest.fn();
   const http = {
     sudoClient: jest.fn(() => ({ post })),
+    fincraClient: jest.fn(() => ({ get, post })),
+    vtuNgClient: jest.fn(() => ({ get, post })),
     reloadlyAuthClient: jest.fn(() => ({ post })),
     reloadlyAirtimeClient: jest.fn(() => ({ get, post })),
     reloadlyUtilitiesClient: jest.fn(() => ({ get, post })),
@@ -67,6 +69,45 @@ describe('SandboxProviderService', () => {
     );
     expect(get).toHaveBeenCalledWith(
       '/operators/countries/NG?includeBundles=true',
+    );
+  });
+
+  it('loads Fincra read-only treasury rates without mutating provider resources', async () => {
+    get.mockResolvedValueOnce({ data: { data: [] } });
+    const service = new SandboxProviderService(
+      config as unknown as ConfigService,
+      http as any,
+    );
+    await expect(service.getFincraRates()).resolves.toEqual({ data: [] });
+    expect(get).toHaveBeenCalledWith('/quotes/treasury-orders/rates', {
+      params: {},
+    });
+  });
+
+  it('uses VTU.ng v2 JWT auth for purchase submissions', async () => {
+    post
+      .mockResolvedValueOnce({ data: { token: 'vtu-token' } })
+      .mockResolvedValueOnce({ data: { request_id: 'request-1' } });
+    const service = new SandboxProviderService(
+      config as unknown as ConfigService,
+      http as any,
+    );
+    await expect(
+      service.purchaseVtuNg('airtime', {
+        request_id: 'request-1',
+        service_id: 'mtn',
+        phone: '08030000000',
+        amount: 100,
+      }),
+    ).resolves.toEqual({ request_id: 'request-1' });
+    expect(post).toHaveBeenNthCalledWith(1, '/jwt-auth/v1/token', {
+      username: undefined,
+      password: undefined,
+    });
+    expect(post).toHaveBeenNthCalledWith(
+      2,
+      '/api/v2/airtime',
+      expect.objectContaining({ request_id: 'request-1' }),
     );
   });
 });

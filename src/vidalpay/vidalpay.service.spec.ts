@@ -61,6 +61,11 @@ describe('VidalpayService', () => {
     getReloadlyCatalog: jest.Mock;
     validateReloadlyUtility: jest.Mock;
     purchaseReloadly: jest.Mock;
+    verifyFincraBvn: jest.Mock;
+    getFincraRates: jest.Mock;
+    getVtuNgCatalog: jest.Mock;
+    validateVtuNgCustomer: jest.Mock;
+    purchaseVtuNg: jest.Mock;
   };
   let configService: { get: jest.Mock };
   let providerStatusService: jest.Mocked<
@@ -108,6 +113,11 @@ describe('VidalpayService', () => {
       getReloadlyCatalog: jest.fn(),
       validateReloadlyUtility: jest.fn(),
       purchaseReloadly: jest.fn(),
+      verifyFincraBvn: jest.fn(),
+      getFincraRates: jest.fn(),
+      getVtuNgCatalog: jest.fn(),
+      validateVtuNgCustomer: jest.fn(),
+      purchaseVtuNg: jest.fn(),
     };
     configService = { get: jest.fn() };
 
@@ -132,7 +142,9 @@ describe('VidalpayService', () => {
       { probeReadOnly: jest.fn() } as unknown as FincraSandboxService,
       fincraWalletService as unknown as FincraWalletService,
       new ProductEligibilityService(new JurisdictionService()),
-      new WalletProductCatalogService(configService as unknown as ConfigService),
+      new WalletProductCatalogService(
+        configService as unknown as ConfigService,
+      ),
       sandboxProviderService as any,
       configService as unknown as ConfigService,
       {} as any,
@@ -343,6 +355,140 @@ describe('VidalpayService', () => {
       kycStatus: 'IN_PROGRESS',
     });
     expect(kycProfileRepository.save).not.toHaveBeenCalled();
+  });
+
+  it('starts Fincra KYC as primary when Fincra KYC is configured and keeps MetaMap as fallback', async () => {
+    userRepository.findOne.mockResolvedValue({
+      id: 'user-1',
+      kycStatus: 'NOT_STARTED',
+      countryCode: 'NG',
+    });
+    kycProfileRepository.findOne.mockResolvedValue(null);
+    kycProfileRepository.save.mockImplementation(async (payload: any) => ({
+      id: 'kyc-1',
+      ...payload,
+    }));
+    configService.get.mockImplementation(
+      (key: string) =>
+        ({
+          FINCRA_KYC_ENABLED: 'true',
+          FINCRA_API_KEY: 'fincra-key',
+          FINCRA_BUSINESS_ID: 'business-1',
+          METAMAP_CLIENT_ID: 'metamap-client',
+          METAMAP_WORKFLOW_ID: 'metamap-workflow',
+        })[key],
+    );
+
+    await expect(service.startKyc('user-1')).resolves.toEqual(
+      expect.objectContaining({
+        provider: 'FINCRA',
+        mode: 'BACKEND_VERIFICATION',
+        fallbackProvider: 'METAMAP',
+        requirements: expect.arrayContaining(['bvn', 'government_id']),
+        metadata: expect.objectContaining({ provider: 'FINCRA' }),
+      }),
+    );
+  });
+
+  it('submits BVN verification through Fincra without storing the raw BVN in provider operations', async () => {
+    userRepository.findOne.mockResolvedValue({
+      id: 'user-1',
+      countryCode: 'NG',
+      kycStatus: 'IN_PROGRESS',
+    });
+    kycProfileRepository.findOne.mockResolvedValue({
+      id: 'kyc-1',
+      userId: 'user-1',
+      region: 'NG',
+      provider: 'FINCRA',
+      status: 'IN_PROGRESS',
+      sections: {},
+      identity: {},
+      uploads: [],
+      capabilities: {},
+      limits: {},
+    });
+    providerOperationRepository.findOne.mockResolvedValue(null);
+    providerOperationRepository.create.mockImplementation(
+      (payload: any) => payload,
+    );
+    providerOperationRepository.save.mockImplementation(
+      async (payload: any) => payload,
+    );
+    sandboxProviderService.verifyFincraBvn.mockResolvedValue({
+      data: { id: 'verify-1', status: 'verified' },
+    });
+    configService.get.mockImplementation(
+      (key: string) =>
+        ({
+          FINCRA_KYC_ENABLED: 'true',
+          FINCRA_API_KEY: 'fincra-key',
+          FINCRA_BUSINESS_ID: 'business-1',
+        })[key],
+    );
+
+    await expect(
+      service.submitKycSection('user-1', 'GOVERNMENT_ID', {
+        bvn: '22222222222',
+        idType: 'BVN',
+      }),
+    ).resolves.toEqual(expect.objectContaining({ provider: 'FINCRA' }));
+    expect(sandboxProviderService.verifyFincraBvn).toHaveBeenCalledWith({
+      bvn: '22222222222',
+      businessId: 'business-1',
+    });
+    expect(providerOperationRepository.save).toHaveBeenCalledWith(
+      expect.objectContaining({
+        type: 'kyc_fincra_bvn',
+        requestPayload: expect.not.objectContaining({ bvn: '22222222222' }),
+      }),
+    );
+  });
+
+  it('returns read-only Fincra rates on the home contract and FX quotes without executing conversion', async () => {
+    userRepository.findOne.mockResolvedValue({
+      id: 'user-1',
+      countryCode: 'NG',
+      kycStatus: 'VERIFIED',
+      pin: 'hashed',
+    });
+    kycProfileRepository.findOne.mockResolvedValue(null);
+    sandboxProviderService.getFincraRates.mockResolvedValue({
+      data: [
+        {
+          baseCurrency: 'NGN',
+          quoteCurrency: 'USD',
+          rate: 0.001,
+        },
+      ],
+    });
+    configService.get.mockImplementation((key: string) =>
+      key === 'FINCRA_API_KEY' ? 'fincra-key' : undefined,
+    );
+
+    await expect(service.getHomeOverview('user-1')).resolves.toEqual(
+      expect.objectContaining({
+        exchangeRates: expect.objectContaining({
+          provider: 'Fincra',
+          rates: expect.arrayContaining([
+            expect.objectContaining({ fromCurrency: 'NGN', toCurrency: 'USD' }),
+          ]),
+        }),
+      }),
+    );
+    await expect(
+      service.getFxQuote('user-1', {
+        fromCurrency: 'NGN',
+        toCurrency: 'USD',
+        amount: 1000,
+      }),
+    ).resolves.toEqual(
+      expect.objectContaining({
+        executable: false,
+        status: 'QUOTE_ONLY',
+        estimatedAmount: 1,
+      }),
+    );
   });
 
   it('starts MetaMap when KYC profile storage has missing legacy columns', async () => {
@@ -756,18 +902,27 @@ describe('VidalpayService', () => {
     expect(providerOperationRepository.save).not.toHaveBeenCalled();
   });
 
-
-
   it('returns available wallet products excluding active wallets', async () => {
     userRepository.findOne.mockResolvedValue({ id: 'user-1', region: 'NG' });
-    walletRepository.find.mockResolvedValue([{ id: 'ngn-wallet', userId: 'user-1', currency: Currency.NGN, balance: 0 }]);
+    walletRepository.find.mockResolvedValue([
+      {
+        id: 'ngn-wallet',
+        userId: 'user-1',
+        currency: Currency.NGN,
+        balance: 0,
+      },
+    ]);
     providerOperationRepository.findOne.mockResolvedValue(null);
     kycProfileRepository.findOne.mockResolvedValue(null);
 
     const result = await service.getAvailableWalletProducts('user-1');
 
-    expect(result.products.map((product) => product.currency)).not.toContain('NGN');
-    expect(result.products.map((product) => product.currency)).toEqual(expect.arrayContaining(['USD', 'GBP']));
+    expect(result.products.map((product) => product.currency)).not.toContain(
+      'NGN',
+    );
+    expect(result.products.map((product) => product.currency)).toEqual(
+      expect.arrayContaining(['USD', 'GBP']),
+    );
     expect(walletRepository.save).not.toHaveBeenCalled();
   });
 
@@ -775,15 +930,24 @@ describe('VidalpayService', () => {
     userRepository.findOne.mockResolvedValue({ id: 'user-1', region: 'NG' });
     walletRepository.find.mockResolvedValue([]);
     kycProfileRepository.findOne.mockResolvedValue(null);
-    providerOperationRepository.findOne.mockImplementation(async ({ where }: any) =>
-      where?.idempotencyKey === 'wallet_activation:user-1:GBP'
-        ? { id: 'op-1', reference: 'op-1', status: 'PENDING', currency: 'GBP', provider: 'FINCRA' }
-        : null,
+    providerOperationRepository.findOne.mockImplementation(
+      async ({ where }: any) =>
+        where?.idempotencyKey === 'wallet_activation:user-1:GBP'
+          ? {
+              id: 'op-1',
+              reference: 'op-1',
+              status: 'PENDING',
+              currency: 'GBP',
+              provider: 'FINCRA',
+            }
+          : null,
     );
 
     const result = await service.getAvailableWalletProducts('user-1');
 
-    expect(result.products.map((product) => product.currency)).not.toContain('GBP');
+    expect(result.products.map((product) => product.currency)).not.toContain(
+      'GBP',
+    );
   });
 
   it('returns additional enabled Fincra currency products from explicit catalogue config', async () => {
@@ -799,7 +963,12 @@ describe('VidalpayService', () => {
               requirementsConfigured: true,
               requirements: [],
             },
-            { currency: 'EUR', enabled: true, tier: 'ADDITIONAL', supportedJurisdictions: ['NG'] },
+            {
+              currency: 'EUR',
+              enabled: true,
+              tier: 'ADDITIONAL',
+              supportedJurisdictions: ['NG'],
+            },
           ])
         : undefined,
     );
@@ -811,7 +980,9 @@ describe('VidalpayService', () => {
     const result = await service.getAvailableWalletProducts('user-1');
 
     expect(result.products.map((product) => product.currency)).toContain('CAD');
-    expect(result.products.map((product) => product.currency)).not.toContain('EUR');
+    expect(result.products.map((product) => product.currency)).not.toContain(
+      'EUR',
+    );
   });
 
   it('evaluates fully satisfied wallet product requirements individually', async () => {
@@ -826,16 +997,34 @@ describe('VidalpayService', () => {
               canProvision: false,
               requirementsConfigured: true,
               requirements: [
-                { key: 'legal_name', label: 'Legal name', source: 'VIDALPAY_PROFILE' },
-                { key: 'date_of_birth', label: 'Date of birth', source: 'VIDALPAY_PROFILE' },
+                {
+                  key: 'legal_name',
+                  label: 'Legal name',
+                  source: 'VIDALPAY_PROFILE',
+                },
+                {
+                  key: 'date_of_birth',
+                  label: 'Date of birth',
+                  source: 'VIDALPAY_PROFILE',
+                },
                 { key: 'address', label: 'Address', source: 'METAMAP' },
-                { key: 'government_id', label: 'Government ID', source: 'METAMAP' },
+                {
+                  key: 'government_id',
+                  label: 'Government ID',
+                  source: 'METAMAP',
+                },
               ],
             },
           ])
         : undefined,
     );
-    userRepository.findOne.mockResolvedValue({ id: 'user-1', region: 'NG', firstName: 'Ada', lastName: 'Lovelace', dateOfBirth: '1990-01-01' });
+    userRepository.findOne.mockResolvedValue({
+      id: 'user-1',
+      region: 'NG',
+      firstName: 'Ada',
+      lastName: 'Lovelace',
+      dateOfBirth: '1990-01-01',
+    });
     walletRepository.find.mockResolvedValue([]);
     providerOperationRepository.findOne.mockResolvedValue(null);
     kycProfileRepository.findOne.mockResolvedValue({
@@ -850,7 +1039,12 @@ describe('VidalpayService', () => {
 
     expect(result.missingRequirements).toEqual([]);
     expect(result.satisfiedRequirements.map((item) => item.key)).toEqual(
-      expect.arrayContaining(['legal_name', 'date_of_birth', 'address', 'government_id']),
+      expect.arrayContaining([
+        'legal_name',
+        'date_of_birth',
+        'address',
+        'government_id',
+      ]),
     );
   });
 
@@ -866,14 +1060,28 @@ describe('VidalpayService', () => {
               canProvision: false,
               requirementsConfigured: true,
               requirements: [
-                { key: 'legal_name', label: 'Legal name', source: 'VIDALPAY_PROFILE' },
-                { key: 'proof_of_address', label: 'Proof of address', source: 'FINCRA' },
+                {
+                  key: 'legal_name',
+                  label: 'Legal name',
+                  source: 'VIDALPAY_PROFILE',
+                },
+                {
+                  key: 'proof_of_address',
+                  label: 'Proof of address',
+                  source: 'FINCRA',
+                },
               ],
             },
           ])
         : undefined,
     );
-    userRepository.findOne.mockResolvedValue({ id: 'user-1', region: 'NG', firstName: 'Ada', lastName: 'Lovelace', kycStatus: 'VERIFIED' });
+    userRepository.findOne.mockResolvedValue({
+      id: 'user-1',
+      region: 'NG',
+      firstName: 'Ada',
+      lastName: 'Lovelace',
+      kycStatus: 'VERIFIED',
+    });
     walletRepository.find.mockResolvedValue([]);
     providerOperationRepository.findOne.mockResolvedValue(null);
     kycProfileRepository.findOne.mockResolvedValue({
@@ -887,7 +1095,9 @@ describe('VidalpayService', () => {
     const result = await service.getWalletEligibility('user-1', 'GBP');
 
     expect(result.status).toBe('REQUIRES_INFORMATION');
-    expect(result.satisfiedRequirements.map((item) => item.key)).toContain('legal_name');
+    expect(result.satisfiedRequirements.map((item) => item.key)).toContain(
+      'legal_name',
+    );
     expect(result.missingRequirements).toEqual([
       expect.objectContaining({ key: 'proof_of_address' }),
     ]);
@@ -915,7 +1125,13 @@ describe('VidalpayService', () => {
               canProvision: true,
               providerProductId: 'gbp-product',
               requirementsConfigured: true,
-              requirements: [{ key: 'proof_of_address', label: 'Proof of address', source: 'FINCRA' }],
+              requirements: [
+                {
+                  key: 'proof_of_address',
+                  label: 'Proof of address',
+                  source: 'FINCRA',
+                },
+              ],
             },
           ])
         : 'configured',
@@ -923,7 +1139,13 @@ describe('VidalpayService', () => {
     userRepository.findOne.mockResolvedValue({ id: 'user-1', region: 'NG' });
     walletRepository.find.mockResolvedValue([]);
     providerOperationRepository.findOne.mockResolvedValue(null);
-    kycProfileRepository.findOne.mockResolvedValue({ userId: 'user-1', status: 'VERIFIED', identity: {}, uploads: [], sections: [] });
+    kycProfileRepository.findOne.mockResolvedValue({
+      userId: 'user-1',
+      status: 'VERIFIED',
+      identity: {},
+      uploads: [],
+      sections: [],
+    });
 
     const result = await service.activateWalletProduct('user-1', 'GBP', {});
 
@@ -934,7 +1156,9 @@ describe('VidalpayService', () => {
 
   it('does not recreate an already-active wallet', async () => {
     userRepository.findOne.mockResolvedValue({ id: 'user-1', region: 'NG' });
-    walletRepository.find.mockResolvedValue([{ id: 'gbp-wallet', userId: 'user-1', currency: 'GBP', balance: 0 }]);
+    walletRepository.find.mockResolvedValue([
+      { id: 'gbp-wallet', userId: 'user-1', currency: 'GBP', balance: 0 },
+    ]);
     providerOperationRepository.findOne.mockResolvedValue(null);
     kycProfileRepository.findOne.mockResolvedValue(null);
 
@@ -947,7 +1171,13 @@ describe('VidalpayService', () => {
   it('does not create duplicate activation when one is pending', async () => {
     userRepository.findOne.mockResolvedValue({ id: 'user-1', region: 'NG' });
     walletRepository.find.mockResolvedValue([]);
-    providerOperationRepository.findOne.mockResolvedValue({ id: 'op-1', reference: 'op-1', status: 'PENDING', currency: 'GBP', provider: 'FINCRA' });
+    providerOperationRepository.findOne.mockResolvedValue({
+      id: 'op-1',
+      reference: 'op-1',
+      status: 'PENDING',
+      currency: 'GBP',
+      provider: 'FINCRA',
+    });
     kycProfileRepository.findOne.mockResolvedValue(null);
 
     const result = await service.activateWalletProduct('user-1', 'GBP', {});
@@ -1004,15 +1234,22 @@ describe('VidalpayService', () => {
     });
     walletRepository.find.mockResolvedValue([]);
     providerOperationRepository.findOne.mockResolvedValue(null);
-    providerOperationRepository.create.mockImplementation((payload: any) => payload);
-    providerOperationRepository.save.mockImplementation(async (payload: any) => ({
-      ...payload,
-      metadata: payload.metadata ? { ...payload.metadata } : payload.metadata,
-    }));
+    providerOperationRepository.create.mockImplementation(
+      (payload: any) => payload,
+    );
+    providerOperationRepository.save.mockImplementation(
+      async (payload: any) => ({
+        ...payload,
+        metadata: payload.metadata ? { ...payload.metadata } : payload.metadata,
+      }),
+    );
     kycProfileRepository.findOne.mockResolvedValue(null);
     fincraWalletService.requestPermanentVirtualAccount.mockResolvedValue({
       status: 200,
-      data: { success: true, data: { id: 'fincra-request-1', status: 'pending' } },
+      data: {
+        success: true,
+        data: { id: 'fincra-request-1', status: 'pending' },
+      },
       providerReference: 'fincra-request-1',
       requestStatus: 'PENDING',
     });
@@ -1021,7 +1258,9 @@ describe('VidalpayService', () => {
       termsAccepted: true,
     });
 
-    expect(fincraWalletService.requestPermanentVirtualAccount).toHaveBeenCalledWith(
+    expect(
+      fincraWalletService.requestPermanentVirtualAccount,
+    ).toHaveBeenCalledWith(
       expect.objectContaining({
         currency: 'GBP',
         accountType: 'individual',
@@ -1042,7 +1281,11 @@ describe('VidalpayService', () => {
         provider: 'FINCRA',
         requestPayload: expect.objectContaining({
           hasKycInformation: true,
-          suppliedKycFields: expect.arrayContaining(['firstName', 'lastName', 'email']),
+          suppliedKycFields: expect.arrayContaining([
+            'firstName',
+            'lastName',
+            'email',
+          ]),
         }),
       }),
     );
@@ -1083,8 +1326,12 @@ describe('VidalpayService', () => {
     userRepository.findOne.mockResolvedValue({ id: 'user-1', region: 'NG' });
     walletRepository.find.mockResolvedValue([]);
     providerOperationRepository.findOne.mockResolvedValue(null);
-    providerOperationRepository.create.mockImplementation((payload: any) => payload);
-    providerOperationRepository.save.mockImplementation(async (payload: any) => payload);
+    providerOperationRepository.create.mockImplementation(
+      (payload: any) => payload,
+    );
+    providerOperationRepository.save.mockImplementation(
+      async (payload: any) => payload,
+    );
     kycProfileRepository.findOne.mockResolvedValue(null);
     fincraWalletService.requestPermanentVirtualAccount.mockRejectedValue({
       response: {
@@ -1135,8 +1382,12 @@ describe('VidalpayService', () => {
     userRepository.findOne.mockResolvedValue({ id: 'user-1', region: 'NG' });
     walletRepository.find.mockResolvedValue([]);
     providerOperationRepository.findOne.mockResolvedValue(null);
-    providerOperationRepository.create.mockImplementation((payload: any) => payload);
-    providerOperationRepository.save.mockImplementation(async (payload: any) => payload);
+    providerOperationRepository.create.mockImplementation(
+      (payload: any) => payload,
+    );
+    providerOperationRepository.save.mockImplementation(
+      async (payload: any) => payload,
+    );
     kycProfileRepository.findOne.mockResolvedValue(null);
     fincraWalletService.requestPermanentVirtualAccount.mockRejectedValue({
       response: {
@@ -1167,7 +1418,11 @@ describe('VidalpayService', () => {
       data: {
         id: 'fincra-request-1',
         status: 'approved',
-        account: { accountNumber: '1234567890', accountName: 'Ada Lovelace', bankName: 'Fincra Bank' },
+        account: {
+          accountNumber: '1234567890',
+          accountName: 'Ada Lovelace',
+          bankName: 'Fincra Bank',
+        },
       },
     };
     configService.get.mockImplementation((key: string) =>
@@ -1188,9 +1443,13 @@ describe('VidalpayService', () => {
       currency: 'CAD',
       metadata: {},
     });
-    providerOperationRepository.save.mockImplementation(async (payload: any) => payload);
+    providerOperationRepository.save.mockImplementation(
+      async (payload: any) => payload,
+    );
 
-    await expect(service.handleFincraWebhook(payload, signature)).resolves.toEqual(
+    await expect(
+      service.handleFincraWebhook(payload, signature),
+    ).resolves.toEqual(
       expect.objectContaining({
         received: true,
         provider: 'FINCRA',
@@ -1252,7 +1511,9 @@ describe('VidalpayService', () => {
       metadata: { providerWebhookEventIds: ['event-1'] },
     });
 
-    await expect(service.handleFincraWebhook(payload, signature)).resolves.toEqual(
+    await expect(
+      service.handleFincraWebhook(payload, signature),
+    ).resolves.toEqual(
       expect.objectContaining({
         received: true,
         provider: 'FINCRA',
@@ -1269,22 +1530,51 @@ describe('VidalpayService', () => {
     (configService.get as jest.Mock).mockImplementation((key: string) =>
       key === 'FINCRA_WALLET_PRODUCTS_JSON'
         ? JSON.stringify([
-            { currency: 'CAD', enabled: true, tier: 'ADDITIONAL', supportedJurisdictions: ['NG'], canProvision: false, requirementsConfigured: true, requirements: [] },
+            {
+              currency: 'CAD',
+              enabled: true,
+              tier: 'ADDITIONAL',
+              supportedJurisdictions: ['NG'],
+              canProvision: false,
+              requirementsConfigured: true,
+              requirements: [],
+            },
           ])
         : undefined,
     );
-    userRepository.findOne.mockResolvedValue({ id: 'user-1', region: 'NG', country: 'Nigeria', phoneNumber: '+2348012345678', kycStatus: 'VERIFIED' });
-    walletRepository.find.mockResolvedValue([{ id: 'usd-wallet', userId: 'user-1', currency: Currency.USD, balance: 0 }]);
+    userRepository.findOne.mockResolvedValue({
+      id: 'user-1',
+      region: 'NG',
+      country: 'Nigeria',
+      phoneNumber: '+2348012345678',
+      kycStatus: 'VERIFIED',
+    });
+    walletRepository.find.mockResolvedValue([
+      {
+        id: 'usd-wallet',
+        userId: 'user-1',
+        currency: Currency.USD,
+        balance: 0,
+      },
+    ]);
     providerOperationRepository.findOne.mockResolvedValue(null);
     kycProfileRepository.findOne.mockResolvedValue(null);
 
-    await expect(service.getWalletEligibility('user-1', 'EUR')).resolves.toEqual(
-      expect.objectContaining({ currency: 'EUR' }),
-    );
-    await expect(service.cryptoOverview('user-1')).rejects.toMatchObject({ response: expect.objectContaining({ capability: 'crypto' }) });
-    await expect(service.investmentsOverview('user-1')).rejects.toMatchObject({ response: expect.objectContaining({ capability: 'investments' }) });
-    await expect(service.loanOverview('user-1')).rejects.toMatchObject({ response: expect.objectContaining({ capability: 'lending' }) });
-    await expect(service.taxStatus('user-1')).rejects.toMatchObject({ response: expect.objectContaining({ capability: 'foreign_tax' }) });
+    await expect(
+      service.getWalletEligibility('user-1', 'EUR'),
+    ).resolves.toEqual(expect.objectContaining({ currency: 'EUR' }));
+    await expect(service.cryptoOverview('user-1')).rejects.toMatchObject({
+      response: expect.objectContaining({ capability: 'crypto' }),
+    });
+    await expect(service.investmentsOverview('user-1')).rejects.toMatchObject({
+      response: expect.objectContaining({ capability: 'investments' }),
+    });
+    await expect(service.loanOverview('user-1')).rejects.toMatchObject({
+      response: expect.objectContaining({ capability: 'lending' }),
+    });
+    await expect(service.taxStatus('user-1')).rejects.toMatchObject({
+      response: expect.objectContaining({ capability: 'foreign_tax' }),
+    });
   });
 
   it('closes accounts by deactivating the real user after backend password verification', async () => {
@@ -1692,7 +1982,9 @@ describe('VidalpayService', () => {
       id: 'ticket-1',
       ...payload,
     }));
-    supportTicketRepository.save.mockImplementation(async (payload: any) => payload);
+    supportTicketRepository.save.mockImplementation(
+      async (payload: any) => payload,
+    );
     providerStatusService.getStatus.mockReturnValue(
       status({
         capability: 'zendesk_support',
@@ -1714,7 +2006,7 @@ describe('VidalpayService', () => {
     });
   });
 
-  it('blocks VTU purchases even when configured until provider contract and ledger finalization are implemented', async () => {
+  it('submits VTU.ng purchases without wallet debit and waits for requery or webhook settlement', async () => {
     const pin = await hash('1234', 4);
     userRepository.findOne.mockResolvedValue({
       id: 'user-1',
@@ -1722,16 +2014,26 @@ describe('VidalpayService', () => {
       pin,
     });
     providerOperationRepository.findOne.mockResolvedValue(null);
-    providerOperationRepository.create.mockImplementation((payload: any) => payload);
-    providerOperationRepository.save.mockImplementation(async (payload: any) => payload);
-    providerStatusService.getStatus.mockImplementation((capability: any) =>
-      status({
-        capability,
-        provider: capability === 'vtu_purchase' ? 'VTU provider' : 'Unit.co',
-        enabled: capability === 'vtu_purchase',
-        missingEnvVars: [],
-      }) as any,
+    providerOperationRepository.create.mockImplementation(
+      (payload: any) => payload,
     );
+    providerOperationRepository.save.mockImplementation(
+      async (payload: any) => payload,
+    );
+    providerStatusService.getStatus.mockImplementation(
+      (capability: any) =>
+        status({
+          capability,
+          provider: capability === 'vtu_purchase' ? 'VTU.ng' : 'Unit.co',
+          enabled: capability === 'vtu_purchase',
+          missingEnvVars: [],
+        }) as any,
+    );
+
+    sandboxProviderService.purchaseVtuNg.mockResolvedValue({
+      request_id: 'vtu-airtime-1',
+      code: 'success',
+    });
 
     await expect(
       service.purchaseService('user-1', 'airtime', {
@@ -1739,14 +2041,25 @@ describe('VidalpayService', () => {
         currency: 'NGN',
         transactionPin: '1234',
         idempotencyKey: 'vtu-airtime-1',
+        serviceId: 'mtn',
+        phone: '08030000000',
       }),
-    ).rejects.toBeInstanceOf(ServiceUnavailableException);
+    ).resolves.toEqual(
+      expect.objectContaining({
+        reference: 'vtu-airtime-1',
+        status: 'SUBMITTED',
+        provider: 'VTU.ng',
+      }),
+    );
     expect(providerOperationRepository.save).toHaveBeenCalledWith(
       expect.objectContaining({
         type: 'airtime',
         idempotencyKey: 'vtu-airtime-1',
-        status: 'BLOCKED',
-        provider: 'VTU provider',
+        status: 'SUBMITTED',
+        provider: 'VTU.ng',
+        metadata: expect.objectContaining({
+          ledgerFinalization: 'BLOCKED_UNTIL_REQUERY_OR_WEBHOOK_SUCCESS',
+        }),
       }),
     );
   });
@@ -1767,8 +2080,12 @@ describe('VidalpayService', () => {
 
   it('deduplicates WhatsApp webhooks in provider operations without exposing message storage as ready', async () => {
     providerOperationRepository.findOne.mockResolvedValue(null);
-    providerOperationRepository.create.mockImplementation((payload: any) => payload);
-    providerOperationRepository.save.mockImplementation(async (payload: any) => payload);
+    providerOperationRepository.create.mockImplementation(
+      (payload: any) => payload,
+    );
+    providerOperationRepository.save.mockImplementation(
+      async (payload: any) => payload,
+    );
 
     await expect(
       service.handleWhatsAppWebhook({ entry: [{ id: 'wa-event-1' }] }),
@@ -1819,7 +2136,6 @@ describe('VidalpayService', () => {
     expect(sandboxProviderService.purchaseReloadly).not.toHaveBeenCalled();
   });
 
-
   it('lists admin support tickets without exposing provider sync as a fake success', async () => {
     const supportTicketRepository = (service as any).supportTicketRepository;
     const ticket = {
@@ -1863,9 +2179,12 @@ describe('VidalpayService', () => {
       expect.stringContaining('LOWER(ticket.id)'),
       { search: '%wallet%' },
     );
-    expect(queryBuilder.andWhere).toHaveBeenCalledWith('ticket.status = :status', {
-      status: 'OPEN',
-    });
+    expect(queryBuilder.andWhere).toHaveBeenCalledWith(
+      'ticket.status = :status',
+      {
+        status: 'OPEN',
+      },
+    );
   });
 
   it('filters admin WhatsApp and VTU operation readers through stored provider operations', async () => {
@@ -1895,27 +2214,39 @@ describe('VidalpayService', () => {
       take: jest.fn().mockReturnThis(),
       getManyAndCount: jest.fn().mockResolvedValue([[operation], 1]),
     };
-    providerOperationRepository.createQueryBuilder.mockReturnValue(queryBuilder);
+    providerOperationRepository.createQueryBuilder.mockReturnValue(
+      queryBuilder,
+    );
 
     await expect(
       service.listAdminWhatsAppConversations({ page: '1' }),
     ).resolves.toMatchObject({
       items: [{ id: 'op-1', operationType: 'whatsapp_webhook' }],
     });
-    expect(queryBuilder.andWhere).toHaveBeenCalledWith('operation.type = :type', {
-      type: 'whatsapp_webhook',
-    });
+    expect(queryBuilder.andWhere).toHaveBeenCalledWith(
+      'operation.type = :type',
+      {
+        type: 'whatsapp_webhook',
+      },
+    );
 
     queryBuilder.andWhere.mockClear();
-    await expect(service.listAdminVtuOperations({ userId: 'user-1' })).resolves.toMatchObject({
+    await expect(
+      service.listAdminVtuOperations({ userId: 'user-1' }),
+    ).resolves.toMatchObject({
       items: [{ id: 'op-1' }],
     });
     expect(queryBuilder.andWhere).toHaveBeenCalledWith(
       expect.stringContaining('operation.type IN'),
-      expect.objectContaining({ types: ['airtime', 'data', 'utilities', 'vtu_webhook'] }),
+      expect.objectContaining({
+        types: ['airtime', 'data', 'utilities', 'vtu_webhook'],
+      }),
     );
-    expect(queryBuilder.andWhere).toHaveBeenCalledWith('operation.userId = :userId', {
-      userId: 'user-1',
-    });
+    expect(queryBuilder.andWhere).toHaveBeenCalledWith(
+      'operation.userId = :userId',
+      {
+        userId: 'user-1',
+      },
+    );
   });
 });

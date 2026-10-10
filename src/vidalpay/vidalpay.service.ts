@@ -57,7 +57,13 @@ import {
 
 type AnyRecord = Record<string, unknown>;
 
-const supportedCurrencies = [Currency.NGN, Currency.USD] as const;
+const supportedCurrencies = [
+  Currency.NGN,
+  Currency.USD,
+  Currency.GBP,
+  Currency.CAD,
+] as const;
+const fxCurrencies = ['NGN', 'USD', 'GBP', 'CAD'] as const;
 
 @Injectable()
 export class VidalpayService {
@@ -136,10 +142,12 @@ export class VidalpayService {
   }
 
   async getHomeOverview(userId: string) {
-    await this.findUser(userId);
+    const user = await this.findUser(userId);
+    const kyc = await this.getKycProfileForSession(user);
     return {
       promotions: [],
-      pendingActions: [],
+      pendingActions: this.buildPendingActions(user, kyc),
+      exchangeRates: await this.getFxRates(userId),
     };
   }
 
@@ -558,12 +566,14 @@ export class VidalpayService {
     );
 
     try {
-      const result = await this.fincraWalletService.requestPermanentVirtualAccount(
-        fincraRequest,
-      );
+      const result =
+        await this.fincraWalletService.requestPermanentVirtualAccount(
+          fincraRequest,
+        );
       operation.status = 'PENDING';
       operation.providerReference = result.providerReference;
-      operation.responsePayload = this.safeFincraActivationResponsePayload(result);
+      operation.responsePayload =
+        this.safeFincraActivationResponsePayload(result);
       operation.metadata = {
         ...(operation.metadata ?? {}),
         providerRequestStatus: result.requestStatus,
@@ -598,7 +608,9 @@ export class VidalpayService {
       operation.failureReason =
         this.asString(failure?.message) ??
         'Fincra virtual account request failed.';
-      operation.responsePayload = failure ?? { message: operation.failureReason };
+      operation.responsePayload = failure ?? {
+        message: operation.failureReason,
+      };
       operation.metadata = {
         ...(operation.metadata ?? {}),
         providerRequestStatus: operation.status,
@@ -730,7 +742,8 @@ export class VidalpayService {
           : currency === Currency.NGN
             ? 'PayVessel'
             : 'Fincra',
-      capability: currency === Currency.NGN ? 'bank_transfer' : 'wallet_activation',
+      capability:
+        currency === Currency.NGN ? 'bank_transfer' : 'wallet_activation',
       reason:
         currency === Currency.NGN || currency === Currency.USD
           ? 'External transfers must be executed by Unit.co or PayVessel; no live-tested provider path is configured.'
@@ -789,14 +802,26 @@ export class VidalpayService {
       vtuCapabilityByKind[kind],
     );
     if (vtuStatus.enabled) {
-      return {
-        region: 'NG',
-        provider: vtuStatus.provider,
-        source: 'PROVIDER_CONFIGURED_NOT_LIVE_TESTED',
-        message:
-          'VTU provider credentials are configured, but the exact provider catalog contract has not been implemented and live-tested yet.',
-        ...(kind === 'utilities' ? { categories: [] } : { networks: [] }),
-      };
+      try {
+        const catalog = await this.sandboxProviderService.getVtuNgCatalog(
+          kind,
+          undefined,
+        );
+        return {
+          region: 'NG',
+          provider: 'VTU.ng',
+          source: 'PROVIDER_SANDBOX',
+          ...this.normalizeVtuNgCatalog(kind, catalog),
+        };
+      } catch (error) {
+        return {
+          region: 'NG',
+          provider: 'VTU.ng',
+          source: 'PROVIDER_SANDBOX_ERROR',
+          message: this.providerErrorMessage(error),
+          ...(kind === 'utilities' ? { categories: [] } : { networks: [] }),
+        };
+      }
     }
 
     const status = this.providerStatusService.getStatus(capabilityByKind[kind]);
@@ -855,18 +880,26 @@ export class VidalpayService {
     }
     const vtuStatus = this.providerStatusService.getStatus('vtu_validate');
     if (vtuStatus.enabled) {
-      throw new ServiceUnavailableException(
-        createBlockedResponse({
-          code: 'VTU_ADAPTER_NOT_IMPLEMENTED',
-          feature: 'Utility customer validation',
-          capability: 'vtu_validate',
-          provider: vtuStatus.provider,
-          reason:
-            'VTU credentials are configured, but the exact provider validation request and response contract has not been implemented and live-tested yet.',
-          missingRequirements: ['VTU_PROVIDER_API_DOCUMENTATION'],
-          retryable: false,
-        }),
-      );
+      try {
+        return {
+          provider: 'VTU.ng',
+          status: 'VALIDATED',
+          result: await this.sandboxProviderService.validateVtuNgCustomer(
+            this.toVtuNgValidationPayload(payload),
+          ),
+        };
+      } catch (error) {
+        throw new ServiceUnavailableException(
+          createBlockedResponse({
+            code: 'PROVIDER_REQUEST_FAILED',
+            feature: 'Utility customer validation',
+            capability: 'vtu_validate',
+            provider: 'VTU.ng',
+            reason: this.providerErrorMessage(error),
+            retryable: true,
+          }),
+        );
+      }
     }
     if (
       this.configService.get<string>('RELOADLY_CLIENT_ID') &&
@@ -947,12 +980,66 @@ export class VidalpayService {
 
     const vtuStatus = this.providerStatusService.getStatus(vtuCapability);
     if (vtuStatus.enabled) {
-      await this.recordBlockedOperation(userId, type, payload, {
-        provider: vtuStatus.provider,
-        capability: vtuCapability,
-        reason:
-          'VTU credentials are configured, but production recharge/bill payment remains blocked until the exact provider API contract, requery flow, wallet hold, ledger finalization, and reversal behavior are implemented and tested.',
-      });
+      const operation = await this.providerOperationRepository.save(
+        this.providerOperationRepository.create({
+          userId,
+          type,
+          idempotencyKey,
+          reference: idempotencyKey,
+          status: 'PENDING',
+          amount: this.normalizeAmount(payload.amount),
+          currency: Currency.NGN,
+          provider: 'VTU.ng',
+          requestPayload: this.redactPayload(payload),
+          responsePayload: null,
+          errorCode: null,
+          failureReason: null,
+          metadata: {
+            sandbox: true,
+            settlement: 'AWAITING_REQUERY_OR_WEBHOOK',
+          },
+        }),
+      );
+      try {
+        const providerPayload = this.toVtuNgPurchasePayload(
+          type,
+          payload,
+          idempotencyKey,
+        );
+        const response = await this.sandboxProviderService.purchaseVtuNg(
+          type,
+          providerPayload,
+        );
+        operation.status = 'SUBMITTED';
+        operation.providerReference =
+          this.asString(response.request_id) ??
+          this.asString(response.requestId) ??
+          this.asString(response.reference) ??
+          idempotencyKey;
+        operation.responsePayload = this.redactPayload(response);
+        operation.metadata = {
+          ...operation.metadata,
+          providerContract: 'VTU_NG_V2',
+          ledgerFinalization: 'BLOCKED_UNTIL_REQUERY_OR_WEBHOOK_SUCCESS',
+        };
+        await this.providerOperationRepository.save(operation);
+        return this.normalizeOperation(operation);
+      } catch (error) {
+        operation.status = 'FAILED';
+        operation.errorCode = 'PROVIDER_REQUEST_FAILED';
+        operation.failureReason = this.providerErrorMessage(error);
+        await this.providerOperationRepository.save(operation);
+        throw new ServiceUnavailableException(
+          createBlockedResponse({
+            code: operation.errorCode,
+            feature: type,
+            capability: vtuCapability,
+            provider: 'VTU.ng',
+            reason: operation.failureReason,
+            retryable: true,
+          }),
+        );
+      }
     }
 
     if (
@@ -1018,25 +1105,100 @@ export class VidalpayService {
     });
   }
 
+  async getFxRates(userId: string) {
+    await this.findUser(userId);
+    const pairs = this.fxCurrencyPairs();
+    const providerStatus = this.providerStatusService.getStatus('fx_quote');
+    if (!this.configService.get<string>('FINCRA_API_KEY')) {
+      return {
+        provider: 'Fincra',
+        status: 'UNAVAILABLE',
+        readinessStatus: providerStatus.readinessStatus,
+        baseCurrencies: [...fxCurrencies],
+        quoteCurrencies: [...fxCurrencies],
+        rates: [],
+        missingRequirements: ['FINCRA_API_KEY'],
+        message:
+          'Live exchange rates require the backend Fincra sandbox API key.',
+      };
+    }
+
+    try {
+      const raw = await this.sandboxProviderService.getFincraRates();
+      return {
+        provider: 'Fincra',
+        status: 'AVAILABLE',
+        readinessStatus: 'CONFIGURED_NOT_LIVE_TESTED',
+        baseCurrencies: [...fxCurrencies],
+        quoteCurrencies: [...fxCurrencies],
+        rates: this.normalizeFincraRates(raw, pairs),
+        fetchedAt: new Date().toISOString(),
+        source: 'FINCRA_TREASURY_RATES',
+      };
+    } catch (error) {
+      return {
+        provider: 'Fincra',
+        status: 'UNAVAILABLE',
+        readinessStatus: 'PROVIDER_ERROR',
+        baseCurrencies: [...fxCurrencies],
+        quoteCurrencies: [...fxCurrencies],
+        rates: [],
+        message: this.providerErrorMessage(error),
+      };
+    }
+  }
+
   async getFxQuote(userId: string, payload: AnyRecord) {
     await this.findUser(userId);
-    this.throwProviderUnavailable({
-      feature: 'FX quote',
-      capability: 'fx_quote',
-      provider: 'FX provider',
-      reason:
-        'The backend has no configured FX quote provider, so it cannot compute a final executable rate.',
-      missingRequirements:
-        this.providerStatusService.getStatus('fx_quote').missingEnvVars,
-    });
+    const fromCurrency = this.normalizeFxCurrency(
+      payload.fromCurrency ?? payload.sourceCurrency,
+    );
+    const toCurrency = this.normalizeFxCurrency(
+      payload.toCurrency ?? payload.destinationCurrency,
+    );
+    const amount = this.normalizeAmount(payload.amount);
+    if (fromCurrency === toCurrency) {
+      throw new BadRequestException(
+        'fromCurrency and toCurrency must be different',
+      );
+    }
+    const rates = await this.getFxRates(userId);
+    const rate = this.findFxRate(rates, fromCurrency, toCurrency);
+    if (!rate) {
+      this.throwProviderUnavailable({
+        code: 'FX_RATE_UNAVAILABLE',
+        feature: 'FX quote',
+        capability: 'fx_quote',
+        provider: 'Fincra',
+        reason:
+          'Fincra did not return a usable read-only rate for this currency pair.',
+        missingRequirements: [`${fromCurrency}_${toCurrency}_RATE`],
+      });
+    }
+    const quoteId = `fx_quote_${randomUUID()}`;
+    return {
+      quoteId,
+      provider: 'Fincra',
+      executable: false,
+      status: 'QUOTE_ONLY',
+      fromCurrency,
+      toCurrency,
+      amount,
+      rate: rate.rate,
+      side: rate.side ?? null,
+      estimatedAmount: Number((amount * Number(rate.rate)).toFixed(2)),
+      expiresAt: new Date(Date.now() + 60_000).toISOString(),
+      message:
+        'This is a read-only provider rate quote. Conversion execution remains blocked until ledger holds, settlement, and reversal handling are enabled.',
+    };
   }
 
   async convertFx(userId: string, payload: AnyRecord) {
     await this.recordBlockedOperation(userId, 'fx_convert', payload, {
-      provider: 'FX provider',
+      provider: 'Fincra',
       capability: 'fx_convert',
       reason:
-        'Currency conversion requires a provider quote and backend recomputation of final amounts.',
+        'Currency conversion execution remains blocked until wallet debit holds, provider conversion settlement, reconciliation, and reversal handling are implemented.',
     });
   }
 
@@ -1250,8 +1412,12 @@ export class VidalpayService {
   }
 
   async getTransactions(userId: string, currency?: Currency | string) {
-    const normalizedCurrency = currency ? this.normalizeCurrency(currency) : undefined;
-    const where = normalizedCurrency ? { userId, currency: normalizedCurrency } : { userId };
+    const normalizedCurrency = currency
+      ? this.normalizeCurrency(currency)
+      : undefined;
+    const where = normalizedCurrency
+      ? { userId, currency: normalizedCurrency }
+      : { userId };
     try {
       const transactions = await this.transactionRepository.find({
         where,
@@ -1971,6 +2137,36 @@ export class VidalpayService {
       );
     }
 
+    if (this.fincraKycEnabled(region)) {
+      profile.region = region;
+      profile.provider = 'FINCRA';
+      profile.status =
+        profile.status === 'NOT_STARTED' ? 'IN_PROGRESS' : profile.status;
+      const kycStorageAvailable = await this.persistKycStartState(
+        userId,
+        profile,
+      );
+      return {
+        provider: 'FINCRA',
+        mode: 'BACKEND_VERIFICATION',
+        status: profile.status,
+        requirements: this.fincraKycRequirements(region),
+        submission: {
+          identity: '/api/v1/user/kyc/identity',
+          address: '/api/v1/user/kyc/address',
+          liveness: '/api/v1/user/kyc/liveness',
+        },
+        fallbackProvider: this.metamapConfigured() ? 'METAMAP' : null,
+        metadata: {
+          userId,
+          profileId: kycStorageAvailable ? (profile.id ?? null) : null,
+          region,
+          provider: 'FINCRA',
+          storageAvailable: kycStorageAvailable,
+        },
+      };
+    }
+
     const clientId =
       this.configService.get<string>('METAMAP_CLIENT_ID') ??
       this.configService.get<string>('METAMAP_MERCHANT_TOKEN');
@@ -1983,9 +2179,12 @@ export class VidalpayService {
         code: 'KYC_PROVIDER_UNAVAILABLE',
         feature: 'KYC',
         capability: 'kyc_start',
-        provider: 'MetaMap',
-        reason: 'MetaMap client and workflow credentials are not configured.',
+        provider: 'Fincra/MetaMap',
+        reason: 'Neither Fincra KYC nor MetaMap KYC is configured.',
         missingRequirements: [
+          'FINCRA_KYC_ENABLED',
+          'FINCRA_API_KEY',
+          'FINCRA_BUSINESS_ID',
           'METAMAP_CLIENT_ID',
           'METAMAP_WORKFLOW_ID',
         ].filter((key) => !this.configService.get<string>(key)),
@@ -1996,26 +2195,13 @@ export class VidalpayService {
     profile.provider = 'METAMAP';
     profile.status =
       profile.status === 'NOT_STARTED' ? 'IN_PROGRESS' : profile.status;
-    let kycStorageAvailable = Boolean(profile.id);
-    if (profile.id) {
-      try {
-        await this.kycProfileRepository.save(profile);
-      } catch (error) {
-        if (!this.isKycProfileStorageUnavailable(error)) {
-          throw error;
-        }
-        kycStorageAvailable = false;
-      }
-    }
-    try {
-      await this.userRepository.update(userId, { kycStatus: profile.status });
-    } catch (error) {
-      if (!this.isMissingColumn(error, 'kycStatus')) {
-        throw error;
-      }
-    }
+    const kycStorageAvailable = await this.persistKycStartState(
+      userId,
+      profile,
+    );
 
     return {
+      provider: 'METAMAP',
       clientId,
       workflowId,
       metadata: {
@@ -2055,6 +2241,16 @@ export class VidalpayService {
       ...(profile.identity ?? {}),
       ...this.redactPayload(payload),
     };
+    if (
+      section === 'GOVERNMENT_ID' &&
+      profile.provider === 'FINCRA' &&
+      this.fincraKycEnabled(profile.region ?? this.inferRegion(user))
+    ) {
+      profile.identity = {
+        ...profile.identity,
+        fincra: await this.verifyFincraIdentity(userId, user, payload),
+      };
+    }
     profile.sections = this.updateKycSection(
       profile.sections,
       section,
@@ -2655,9 +2851,8 @@ export class VidalpayService {
   }
 
   async createSupportTicket(userId: string, payload: AnyRecord) {
-    const zendeskStatus = this.providerStatusService.getStatus(
-      'zendesk_support',
-    );
+    const zendeskStatus =
+      this.providerStatusService.getStatus('zendesk_support');
     const metadata = this.redactPayload({
       ...(this.asRecord(payload.metadata) ?? {}),
       zendesk: {
@@ -3106,7 +3301,9 @@ export class VidalpayService {
 
   verifyWhatsAppWebhook(query: AnyRecord) {
     const mode = this.asString(query['hub.mode'] ?? query.mode);
-    const token = this.asString(query['hub.verify_token'] ?? query.verify_token);
+    const token = this.asString(
+      query['hub.verify_token'] ?? query.verify_token,
+    );
     const challenge = this.asString(query['hub.challenge'] ?? query.challenge);
     const expected = this.configService.get<string>(
       'WHATSAPP_WEBHOOK_VERIFY_TOKEN',
@@ -3655,7 +3852,8 @@ export class VidalpayService {
 
   private fincraWebhookReference(payload: AnyRecord) {
     const data = this.asRecord(payload.data) ?? {};
-    const account = this.asRecord(data.account) ?? this.asRecord(payload.account) ?? {};
+    const account =
+      this.asRecord(data.account) ?? this.asRecord(payload.account) ?? {};
     return (
       this.asString(payload.reference) ??
       this.asString(payload.providerReference) ??
@@ -3718,12 +3916,13 @@ export class VidalpayService {
 
   private fincraWebhookHasAccountDetails(payload: AnyRecord) {
     const data = this.asRecord(payload.data) ?? {};
-    const account = this.asRecord(data.account) ?? this.asRecord(payload.account) ?? {};
+    const account =
+      this.asRecord(data.account) ?? this.asRecord(payload.account) ?? {};
     return Boolean(
       this.asString(account.accountNumber) ??
-        this.asString(account.account_number) ??
-        this.asString(data.accountNumber) ??
-        this.asString(data.account_number),
+      this.asString(account.account_number) ??
+      this.asString(data.accountNumber) ??
+      this.asString(data.account_number),
     );
   }
 
@@ -3763,16 +3962,28 @@ export class VidalpayService {
   ) {
     const details = this.fincraWebhookAccountDetails(payload);
     if (!this.isFincraWalletActiveStatus(status) || !details.accountNumber) {
-      return { persisted: false, status: 'NO_APPROVED_ACCOUNT_DETAILS', walletId: null };
+      return {
+        persisted: false,
+        status: 'NO_APPROVED_ACCOUNT_DETAILS',
+        walletId: null,
+      };
     }
     if (!operation.userId || !operation.currency) {
-      return { persisted: false, status: 'MISSING_OPERATION_OWNER_OR_CURRENCY', walletId: null };
+      return {
+        persisted: false,
+        status: 'MISSING_OPERATION_OWNER_OR_CURRENCY',
+        walletId: null,
+      };
     }
     const currency = this.walletProductCatalogService.normalizeCurrency(
       operation.currency,
     );
     if (!currency || !Object.values(Currency).includes(currency as Currency)) {
-      return { persisted: false, status: 'UNSUPPORTED_WALLET_CURRENCY', walletId: null };
+      return {
+        persisted: false,
+        status: 'UNSUPPORTED_WALLET_CURRENCY',
+        walletId: null,
+      };
     }
 
     let wallet = await this.walletRepository.findOne({
@@ -3790,14 +4001,19 @@ export class VidalpayService {
     wallet.accountNumber = details.accountNumber;
     wallet.accountName = details.accountName ?? wallet.accountName ?? null;
     wallet.bankName = details.bankName ?? wallet.bankName ?? null;
-    wallet.routingNumber = details.routingNumber ?? wallet.routingNumber ?? null;
+    wallet.routingNumber =
+      details.routingNumber ?? wallet.routingNumber ?? null;
     wallet.sortCode = details.sortCode ?? wallet.sortCode ?? null;
     wallet.address = details.address ?? wallet.address ?? null;
     wallet.provider = 'FINCRA';
-    wallet.providerAccountId = details.providerAccountId ?? wallet.providerAccountId ?? null;
+    wallet.providerAccountId =
+      details.providerAccountId ?? wallet.providerAccountId ?? null;
     wallet.providerVirtualAccountId =
-      details.providerVirtualAccountId ?? wallet.providerVirtualAccountId ?? null;
-    wallet.providerReference = operation.providerReference ?? operation.reference;
+      details.providerVirtualAccountId ??
+      wallet.providerVirtualAccountId ??
+      null;
+    wallet.providerReference =
+      operation.providerReference ?? operation.reference;
     wallet.providerStatus = 'ACTIVE';
     wallet.metadata = {
       ...(wallet.metadata ?? {}),
@@ -3809,12 +4025,17 @@ export class VidalpayService {
     };
 
     const saved = await this.walletRepository.save(wallet);
-    return { persisted: true, status: 'PERSISTED', walletId: saved.id ?? wallet.id ?? null };
+    return {
+      persisted: true,
+      status: 'PERSISTED',
+      walletId: saved.id ?? wallet.id ?? null,
+    };
   }
 
   private fincraWebhookAccountDetails(payload: AnyRecord) {
     const data = this.asRecord(payload.data) ?? {};
-    const account = this.asRecord(data.account) ?? this.asRecord(payload.account) ?? {};
+    const account =
+      this.asRecord(data.account) ?? this.asRecord(payload.account) ?? {};
     const bank = this.asRecord(account.bank) ?? this.asRecord(data.bank) ?? {};
     return {
       accountNumber:
@@ -3843,7 +4064,8 @@ export class VidalpayService {
         this.asString(account.sortCode) ??
         this.asString(account.sort_code) ??
         null,
-      address: this.asString(account.address) ?? this.asString(data.address) ?? null,
+      address:
+        this.asString(account.address) ?? this.asString(data.address) ?? null,
       providerAccountId:
         this.asString(account.id) ??
         this.asString(account._id) ??
@@ -3939,7 +4161,9 @@ export class VidalpayService {
       currency: payload.currency,
       accountType: payload.accountType,
       hasKycInformation: Boolean(this.asRecord(payload.KYCInformation)),
-      suppliedKycFields: Object.keys(this.asRecord(payload.KYCInformation) ?? {}),
+      suppliedKycFields: Object.keys(
+        this.asRecord(payload.KYCInformation) ?? {},
+      ),
       suppliedDocuments: {
         utilityBill: Boolean(payload.utilityBill),
         bankStatement: Boolean(payload.bankStatement),
@@ -4269,15 +4493,17 @@ export class VidalpayService {
       driverError?: { code?: string; message?: string };
     };
     const code = candidate?.code ?? candidate?.driverError?.code;
-    const message = `${candidate?.message ?? ''} ${candidate?.driverError?.message ?? ''}`.toLowerCase();
+    const message =
+      `${candidate?.message ?? ''} ${candidate?.driverError?.message ?? ''}`.toLowerCase();
     const normalizedColumn = columnName.toLowerCase();
     return (
-      code === '42703' ||
-      code === 'ER_BAD_FIELD_ERROR' ||
-      message.includes('column') ||
-      message.includes('unknown column') ||
-      message.includes('does not exist')
-    ) && message.includes(normalizedColumn);
+      (code === '42703' ||
+        code === 'ER_BAD_FIELD_ERROR' ||
+        message.includes('column') ||
+        message.includes('unknown column') ||
+        message.includes('does not exist')) &&
+      message.includes(normalizedColumn)
+    );
   }
 
   private isDuplicateKey(error: unknown) {
@@ -4287,8 +4513,13 @@ export class VidalpayService {
       driverError?: { code?: string; message?: string };
     };
     const code = candidate?.code ?? candidate?.driverError?.code;
-    const message = `${candidate?.message ?? ''} ${candidate?.driverError?.message ?? ''}`.toLowerCase();
-    return code === '23505' || code === 'ER_DUP_ENTRY' || message.includes('duplicate key');
+    const message =
+      `${candidate?.message ?? ''} ${candidate?.driverError?.message ?? ''}`.toLowerCase();
+    return (
+      code === '23505' ||
+      code === 'ER_DUP_ENTRY' ||
+      message.includes('duplicate key')
+    );
   }
 
   private throwMissingFeatureStorage(
@@ -4856,6 +5087,142 @@ export class VidalpayService {
     return { categories: [...categories.values()] };
   }
 
+  private normalizeVtuNgCatalog(
+    kind: 'airtime' | 'data' | 'utilities',
+    response: AnyRecord,
+  ) {
+    const content = Array.isArray(response.data)
+      ? response.data
+      : Array.isArray(response.content)
+        ? response.content
+        : Array.isArray(response.variations)
+          ? response.variations
+          : [];
+
+    if (kind !== 'utilities') {
+      return {
+        networks: content.map((entry, index) => {
+          const item = this.asRecord(entry) ?? {};
+          return {
+            id:
+              this.asString(item.service_id) ??
+              this.asString(item.variation_code) ??
+              String(index + 1),
+            code:
+              this.asString(item.service_id) ??
+              this.asString(item.variation_code) ??
+              `vtu-${index + 1}`,
+            name:
+              this.asString(item.service_name) ??
+              this.asString(item.name) ??
+              this.asString(item.variation_name) ??
+              `VTU ${index + 1}`,
+            minAmount: item.min_amount ?? item.minAmount ?? null,
+            maxAmount: item.max_amount ?? item.maxAmount ?? null,
+            amount: item.variation_amount ?? item.amount ?? null,
+            metadata: this.redactPayload(item),
+          };
+        }),
+      };
+    }
+
+    return {
+      categories: [
+        {
+          id: 'electricity',
+          code: 'electricity',
+          title: 'Electricity',
+          providers: content.map((entry, index) => {
+            const item = this.asRecord(entry) ?? {};
+            return {
+              id:
+                this.asString(item.service_id) ??
+                this.asString(item.variation_code) ??
+                String(index + 1),
+              code:
+                this.asString(item.service_id) ??
+                this.asString(item.variation_code) ??
+                `electricity-${index + 1}`,
+              name:
+                this.asString(item.service_name) ??
+                this.asString(item.name) ??
+                this.asString(item.variation_name) ??
+                `Electricity ${index + 1}`,
+              metadata: this.redactPayload(item),
+            };
+          }),
+        },
+      ],
+    };
+  }
+
+  private toVtuNgValidationPayload(payload: AnyRecord) {
+    return {
+      service_id:
+        this.asString(payload.service_id) ??
+        this.asString(payload.serviceId) ??
+        this.asString(payload.providerCode),
+      billersCode:
+        this.asString(payload.billersCode) ??
+        this.asString(payload.customerId) ??
+        this.asString(payload.meterNumber),
+      type: this.asString(payload.type) ?? this.asString(payload.meterType),
+    };
+  }
+
+  private toVtuNgPurchasePayload(
+    type: 'airtime' | 'data' | 'utilities',
+    payload: AnyRecord,
+    requestId: string,
+  ) {
+    if (type === 'airtime') {
+      return {
+        request_id: requestId,
+        service_id:
+          this.asString(payload.service_id) ??
+          this.asString(payload.serviceId) ??
+          this.asString(payload.network) ??
+          this.asString(payload.operatorId),
+        amount: this.normalizeAmount(payload.amount),
+        phone:
+          this.asString(payload.phone) ?? this.asString(payload.recipientPhone),
+      };
+    }
+    if (type === 'data') {
+      return {
+        request_id: requestId,
+        service_id:
+          this.asString(payload.service_id) ??
+          this.asString(payload.serviceId) ??
+          this.asString(payload.network) ??
+          this.asString(payload.operatorId),
+        variation_code:
+          this.asString(payload.variation_code) ??
+          this.asString(payload.variationCode) ??
+          this.asString(payload.planCode),
+        phone:
+          this.asString(payload.phone) ?? this.asString(payload.recipientPhone),
+      };
+    }
+    return {
+      request_id: requestId,
+      service_id:
+        this.asString(payload.service_id) ??
+        this.asString(payload.serviceId) ??
+        this.asString(payload.providerCode),
+      variation_code:
+        this.asString(payload.variation_code) ??
+        this.asString(payload.variationCode),
+      billersCode:
+        this.asString(payload.billersCode) ??
+        this.asString(payload.customerId) ??
+        this.asString(payload.meterNumber),
+      amount: this.normalizeAmount(payload.amount),
+      phone:
+        this.asString(payload.phone) ?? this.asString(payload.customerPhone),
+    };
+  }
+
   private async recordBlockedOperation(
     userId: string,
     type: string,
@@ -4948,6 +5315,273 @@ export class VidalpayService {
     return null;
   }
 
+  private async persistKycStartState(userId: string, profile: KycProfile) {
+    let kycStorageAvailable = Boolean(profile.id);
+    if (profile.id) {
+      try {
+        await this.kycProfileRepository.save(profile);
+      } catch (error) {
+        if (!this.isKycProfileStorageUnavailable(error)) {
+          throw error;
+        }
+        kycStorageAvailable = false;
+      }
+    }
+    try {
+      await this.userRepository.update(userId, { kycStatus: profile.status });
+    } catch (error) {
+      if (!this.isMissingColumn(error, 'kycStatus')) {
+        throw error;
+      }
+    }
+    return kycStorageAvailable;
+  }
+
+  private fincraKycEnabled(region?: string | null) {
+    return (
+      region === 'NG' &&
+      ['true', '1', 'yes'].includes(
+        (
+          this.configService.get<string>('FINCRA_KYC_ENABLED') ?? ''
+        ).toLowerCase(),
+      ) &&
+      Boolean(this.configService.get<string>('FINCRA_API_KEY')) &&
+      Boolean(this.configService.get<string>('FINCRA_BUSINESS_ID'))
+    );
+  }
+
+  private metamapConfigured() {
+    return Boolean(
+      (this.configService.get<string>('METAMAP_CLIENT_ID') ??
+        this.configService.get<string>('METAMAP_MERCHANT_TOKEN')) &&
+      (this.configService.get<string>('METAMAP_WORKFLOW_ID') ??
+        this.configService.get<string>('METAMAP_FLOW_ID')),
+    );
+  }
+
+  private fincraKycRequirements(region?: string | null) {
+    if (region !== 'NG') {
+      return [
+        'legal_name',
+        'date_of_birth',
+        'address',
+        'government_id',
+        'proof_of_address',
+      ];
+    }
+    return [
+      'legal_name',
+      'date_of_birth',
+      'bvn',
+      'address',
+      'government_id',
+      'liveness_or_manual_review',
+    ];
+  }
+
+  private async verifyFincraIdentity(
+    userId: string,
+    user: User,
+    payload: AnyRecord,
+  ) {
+    const bvn = this.asString(payload.bvn ?? payload.BVN);
+    if (!bvn) {
+      return {
+        provider: 'FINCRA',
+        status: 'REQUIRES_INFORMATION',
+        missingRequirements: ['bvn'],
+        message: 'BVN is required before Fincra identity verification can run.',
+      };
+    }
+    const businessId = this.configService.get<string>('FINCRA_BUSINESS_ID');
+    if (!businessId) {
+      return {
+        provider: 'FINCRA',
+        status: 'PROVIDER_NOT_CONFIGURED',
+        missingRequirements: ['FINCRA_BUSINESS_ID'],
+      };
+    }
+    const reference = `fincra_kyc_${userId}_${createHash('sha256')
+      .update(bvn)
+      .digest('hex')
+      .slice(0, 16)}`;
+    const existing = await this.providerOperationRepository.findOne({
+      where: { userId, type: 'kyc_fincra_bvn', idempotencyKey: reference },
+    });
+    if (existing) {
+      return {
+        provider: 'FINCRA',
+        status: existing.status,
+        providerReference: existing.providerReference ?? null,
+        cached: true,
+      };
+    }
+    const operation = await this.providerOperationRepository.save(
+      this.providerOperationRepository.create({
+        userId,
+        type: 'kyc_fincra_bvn',
+        idempotencyKey: reference,
+        reference,
+        status: 'PENDING',
+        provider: 'Fincra',
+        requestPayload: {
+          business: businessId,
+          bvnFingerprint: createHash('sha256').update(bvn).digest('hex'),
+          user: {
+            countryCode: user.countryCode ?? null,
+            residency: user.residency ?? null,
+          },
+        },
+        responsePayload: null,
+        metadata: { source: 'FINCRA_BVN_VERIFICATION' },
+      }),
+    );
+    try {
+      const response = await this.sandboxProviderService.verifyFincraBvn({
+        bvn,
+        businessId,
+      });
+      operation.status = 'SUBMITTED';
+      operation.providerReference =
+        this.asString(response.reference) ??
+        this.asString(response.id) ??
+        this.asString(this.asRecord(response.data)?.id) ??
+        null;
+      operation.responsePayload = this.safeKycProviderResponse(response);
+      await this.providerOperationRepository.save(operation);
+      return {
+        provider: 'FINCRA',
+        status: 'SUBMITTED',
+        providerReference: operation.providerReference,
+        response: operation.responsePayload,
+      };
+    } catch (error) {
+      operation.status = 'FAILED';
+      operation.errorCode = 'FINCRA_KYC_REQUEST_FAILED';
+      operation.failureReason = this.providerErrorMessage(error);
+      await this.providerOperationRepository.save(operation);
+      return {
+        provider: 'FINCRA',
+        status: 'FAILED',
+        reason: operation.failureReason,
+        fallbackProvider: this.metamapConfigured() ? 'METAMAP' : null,
+      };
+    }
+  }
+
+  private safeKycProviderResponse(response: AnyRecord) {
+    const data = this.asRecord(response.data) ?? response;
+    return {
+      status:
+        this.asString(data.status) ??
+        this.asString(data.verificationStatus) ??
+        this.asString(response.status) ??
+        null,
+      reference:
+        this.asString(data.reference) ??
+        this.asString(response.reference) ??
+        null,
+      id: this.asString(data.id) ?? this.asString(response.id) ?? null,
+      message:
+        this.asString(data.message) ?? this.asString(response.message) ?? null,
+    };
+  }
+
+  private fxCurrencyPairs() {
+    const pairs: Array<{ fromCurrency: string; toCurrency: string }> = [];
+    fxCurrencies.forEach((fromCurrency) => {
+      fxCurrencies.forEach((toCurrency) => {
+        if (fromCurrency !== toCurrency)
+          pairs.push({ fromCurrency, toCurrency });
+      });
+    });
+    return pairs;
+  }
+
+  private normalizeFxCurrency(value: unknown) {
+    const currency = this.asString(value)?.toUpperCase();
+    if (
+      !currency ||
+      !fxCurrencies.includes(currency as (typeof fxCurrencies)[number])
+    ) {
+      throw new BadRequestException('currency must be NGN, USD, GBP, or CAD');
+    }
+    return currency;
+  }
+
+  private normalizeFincraRates(
+    raw: AnyRecord,
+    pairs: Array<{ fromCurrency: string; toCurrency: string }>,
+  ) {
+    const candidates = this.collectRateRecords(raw);
+    return pairs
+      .map((pair) => {
+        const match = candidates.find((item) => {
+          const record = this.asRecord(item);
+          if (!record) return false;
+          const from = this.asString(
+            record.fromCurrency ??
+              record.sourceCurrency ??
+              record.baseCurrency ??
+              record.currency,
+          )?.toUpperCase();
+          const to = this.asString(
+            record.toCurrency ??
+              record.destinationCurrency ??
+              record.quoteCurrency ??
+              record.counterCurrency,
+          )?.toUpperCase();
+          return from === pair.fromCurrency && to === pair.toCurrency;
+        });
+        const record = this.asRecord(match);
+        const rate = record
+          ? Number(
+              record.rate ?? record.buyRate ?? record.sellRate ?? record.value,
+            )
+          : NaN;
+        if (!Number.isFinite(rate) || rate <= 0) return null;
+        return {
+          fromCurrency: pair.fromCurrency,
+          toCurrency: pair.toCurrency,
+          rate,
+          side: this.asString(record?.side) ?? null,
+          rawProviderStatus: this.asString(record?.status) ?? null,
+        };
+      })
+      .filter((item): item is NonNullable<typeof item> => Boolean(item));
+  }
+
+  private collectRateRecords(value: unknown): unknown[] {
+    if (Array.isArray(value)) return value;
+    const record = this.asRecord(value);
+    if (!record) return [];
+    const directKeys = ['data', 'rates', 'items', 'content', 'result'];
+    for (const key of directKeys) {
+      const nested = record[key];
+      if (Array.isArray(nested)) return nested;
+      const nestedRecord = this.asRecord(nested);
+      if (nestedRecord) {
+        const nestedItems = this.collectRateRecords(nestedRecord);
+        if (nestedItems.length) return nestedItems;
+      }
+    }
+    return [record];
+  }
+
+  private findFxRate(
+    ratesResponse: AnyRecord,
+    fromCurrency: string,
+    toCurrency: string,
+  ) {
+    const rates = Array.isArray(ratesResponse.rates)
+      ? (ratesResponse.rates as AnyRecord[])
+      : [];
+    return rates.find(
+      (rate) =>
+        rate.fromCurrency === fromCurrency && rate.toCurrency === toCurrency,
+    ) as AnyRecord | undefined;
+  }
+
   private throwProviderUnavailable(input: {
     code?: string;
     feature: string;
@@ -4970,11 +5604,15 @@ export class VidalpayService {
 
   private providerReadinessForCurrency(currency: string) {
     if (currency === Currency.NGN) {
-      const status = this.providerStatusService.getStatus('ngn_account_details');
+      const status = this.providerStatusService.getStatus(
+        'ngn_account_details',
+      );
       return status.enabled ? status.readinessStatus : 'MISSING_CREDENTIALS';
     }
     if (currency === Currency.USD) {
-      const status = this.providerStatusService.getStatus('usd_account_details');
+      const status = this.providerStatusService.getStatus(
+        'usd_account_details',
+      );
       return status.enabled ? status.readinessStatus : 'MISSING_CREDENTIALS';
     }
     const status = this.providerStatusService.getStatus('wallet_activation');
@@ -5381,7 +6019,9 @@ export class VidalpayService {
       expectedBuffer.length !== providedBuffer.length ||
       !timingSafeEqual(expectedBuffer, providedBuffer)
     ) {
-      throw new UnauthorizedException(`Invalid ${input.provider} webhook signature`);
+      throw new UnauthorizedException(
+        `Invalid ${input.provider} webhook signature`,
+      );
     }
   }
 

@@ -117,9 +117,23 @@ export class ProviderHttpService {
     });
   }
 
+  vtuNgClient(accessToken?: string): AxiosInstance {
+    return axios.create({
+      baseURL: this.baseUrl('VTU_BASE_URL', 'https://vtu.ng/wp-json'),
+      headers: {
+        ...(accessToken ? { Authorization: `Bearer ${accessToken}` } : {}),
+        Accept: 'application/json',
+        'Content-Type': 'application/json',
+      },
+      timeout: this.timeout(),
+    });
+  }
+
   private fincraSandboxBaseUrl(): string {
     const fallback = 'https://sandboxapi.fincra.com';
-    const configured = this.configService.get<string>('FINCRA_BASE_URL')?.trim();
+    const configured = this.configService
+      .get<string>('FINCRA_BASE_URL')
+      ?.trim();
     if (!configured) return fallback;
     try {
       const url = new URL(configured);

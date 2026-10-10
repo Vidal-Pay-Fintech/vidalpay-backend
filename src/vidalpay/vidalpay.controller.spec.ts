@@ -2,6 +2,7 @@ import {
   AdminController,
   AdminKycController,
   CardsController,
+  FxController,
   KycController,
   MeController,
   NotificationsController,
@@ -46,6 +47,8 @@ describe('VidalPay mobile contract controllers', () => {
     handleProviderWebhook: jest.fn(),
     handleFincraWebhook: jest.fn(),
     handleKycWebhook: jest.fn(),
+    getFxRates: jest.fn(),
+    getFxQuote: jest.fn(),
     rewardsDashboard: jest.fn(),
     rewardsHistory: jest.fn(),
     redeemRewards: jest.fn(),
@@ -226,6 +229,20 @@ describe('VidalPay mobile contract controllers', () => {
     expect(service.internalTransfer).toHaveBeenCalledWith('user-1', body);
   });
 
+  it('routes read-only FX rates and quotes through backend services', () => {
+    const controller = new FxController(service as VidalpayService);
+    const user = { sub: 'user-1' } as any;
+
+    controller.rates(user);
+    controller.quotes(user, { fromCurrency: 'NGN', toCurrency: 'USD' });
+
+    expect(service.getFxRates).toHaveBeenCalledWith('user-1');
+    expect(service.getFxQuote).toHaveBeenCalledWith('user-1', {
+      fromCurrency: 'NGN',
+      toCurrency: 'USD',
+    });
+  });
+
   it('routes card creation and lifecycle actions through provider-aware service methods', () => {
     const controller = new CardsController(service as VidalpayService);
 
@@ -282,7 +299,11 @@ describe('VidalPay mobile contract controllers', () => {
     const controller = new WebhooksController(service as VidalpayService);
 
     controller.unit({ reference: 'unit-ref' });
-    controller.fincra({ reference: 'fincra-ref' }, 'fincra-signature', undefined);
+    controller.fincra(
+      { reference: 'fincra-ref' },
+      'fincra-signature',
+      undefined,
+    );
     controller.payvessel({ reference: 'payvessel-ref' });
 
     expect(service.handleProviderWebhook).toHaveBeenCalledWith(

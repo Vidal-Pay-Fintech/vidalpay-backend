@@ -249,6 +249,11 @@ export class TransactionController {
 export class FxController {
   constructor(private readonly vidalpayService: VidalpayService) {}
 
+  @Get('rates')
+  rates(@ActiveUser() user: ActiveUserData) {
+    return this.vidalpayService.getFxRates(user.sub);
+  }
+
   @Get('quotes')
   quotes(@ActiveUser() user: ActiveUserData, @Query() query: AnyRecord) {
     return this.vidalpayService.getFxQuote(user.sub, query);
