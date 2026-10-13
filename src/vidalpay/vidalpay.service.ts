@@ -49,6 +49,7 @@ import {
   ProductEligibilityService,
 } from './product-eligibility.service';
 import { SandboxProviderService } from './sandbox-provider.service';
+import { YellowCardService } from './yellow-card.service';
 import {
   WalletProduct,
   WalletProductCatalogService,
@@ -114,6 +115,7 @@ export class VidalpayService {
     private readonly productEligibilityService: ProductEligibilityService,
     private readonly walletProductCatalogService: WalletProductCatalogService,
     private readonly sandboxProviderService: SandboxProviderService,
+    private readonly yellowCardService: YellowCardService,
     private readonly configService: ConfigService,
     private readonly mailService: MailService,
     private readonly dataSource: DataSource,
@@ -2958,24 +2960,36 @@ export class VidalpayService {
 
   async cryptoOverview(userId: string) {
     await this.assertProductAccess(userId, 'crypto');
+    const overviewStatus = this.providerStatusService.getStatus('crypto_overview');
+    const quoteStatus = this.providerStatusService.getStatus('crypto_quote');
     return {
-      enabled: false,
-      comingSoon: true,
+      enabled: overviewStatus.enabled,
+      comingSoon: !overviewStatus.enabled,
       message:
-        'Crypto is not enabled because no crypto provider is configured in the backend.',
+        overviewStatus.failureReason ??
+        'Yellow Card stablecoin provider is configured for read-only discovery and quote checks.',
       region: null,
-      provider: null,
+      provider: 'Yellow Card',
       productAvailability: {
-        crypto: false,
+        crypto: overviewStatus.enabled,
         staking: false,
         microLoans: false,
       },
+      supportedFiatCurrencies: ['NGN', 'USD', 'KES'],
+      supportedStablecoins: ['USDT', 'USDC'],
+      executionEnabled: false,
+      quoteEnabled: quoteStatus.enabled,
       portfolio: {
         totalValue: null,
         currency: null,
         positions: [],
       },
       features: [
+        {
+          code: 'crypto_quote',
+          title: 'Stablecoin quote',
+          enabled: quoteStatus.enabled,
+        },
         { code: 'crypto_deposit', title: 'Crypto deposits', enabled: false },
         {
           code: 'crypto_withdrawal',
@@ -2988,7 +3002,86 @@ export class VidalpayService {
 
   async cryptoAssets(userId: string) {
     await this.assertProductAccess(userId, 'crypto');
-    return { assets: [] };
+    const status = this.providerStatusService.getStatus('crypto_assets');
+    if (!status.enabled) {
+      return {
+        provider: 'Yellow Card',
+        configured: false,
+        assets: [],
+        currencies: [],
+        missingRequirements: status.missingEnvVars,
+        message: status.failureReason,
+      };
+    }
+
+    const [assets, currencies] = await Promise.allSettled([
+      this.yellowCardService.supportedAssets(),
+      this.yellowCardService.supportedCurrencies(),
+    ]);
+
+    return {
+      provider: 'Yellow Card',
+      configured: true,
+      assets:
+        assets.status === 'fulfilled'
+          ? this.normalizeProviderRecords(assets.value)
+          : [],
+      currencies:
+        currencies.status === 'fulfilled'
+          ? this.normalizeProviderRecords(currencies.value)
+          : [],
+      unavailableResources: [
+        assets.status === 'rejected' ? 'assets' : null,
+        currencies.status === 'rejected' ? 'currencies' : null,
+      ].filter(Boolean),
+      executionEnabled: false,
+    };
+  }
+
+  async cryptoRates(userId: string, query: AnyRecord) {
+    await this.assertProductAccess(userId, 'crypto');
+    const status = this.providerStatusService.getStatus('crypto_rates');
+    if (!status.enabled) {
+      return {
+        provider: 'Yellow Card',
+        configured: false,
+        rates: [],
+        missingRequirements: status.missingEnvVars,
+        message: status.failureReason,
+      };
+    }
+    const rates = await this.yellowCardService.rates(query);
+    return {
+      provider: 'Yellow Card',
+      configured: true,
+      executionEnabled: false,
+      rates: this.normalizeProviderRecords(rates),
+      rawShape: this.providerShape(rates),
+    };
+  }
+
+  async cryptoQuote(userId: string, payload: AnyRecord) {
+    await this.assertProductAccess(userId, 'crypto');
+    const status = this.providerStatusService.getStatus('crypto_quote');
+    if (!status.enabled) {
+      return {
+        provider: 'Yellow Card',
+        configured: false,
+        executable: false,
+        missingRequirements: status.missingEnvVars,
+        message: status.failureReason,
+      };
+    }
+    const quote = await this.yellowCardService.quote(payload);
+    return {
+      provider: 'Yellow Card',
+      configured: true,
+      executable: false,
+      quoteOnly: true,
+      quote: this.safeProviderPayload(quote),
+      message:
+        'This quote is read-only. Buy, sell, send and receive execution remain blocked until ledger holds, settlement, webhook verification and reversal handling are enabled.',
+    };
   }
 
   async investmentsOverview(userId: string) {
@@ -6089,6 +6182,85 @@ export class VidalpayService {
       },
     );
     return redacted;
+  }
+
+  private safeProviderPayload(payload: unknown): unknown {
+    if (Array.isArray(payload)) {
+      return payload.map((item) => this.safeProviderPayload(item));
+    }
+    if (!payload || typeof payload !== 'object') {
+      return payload;
+    }
+    const record = payload as AnyRecord;
+    const allowedKeys = [
+      'id',
+      'reference',
+      'status',
+      'type',
+      'asset',
+      'currency',
+      'code',
+      'name',
+      'network',
+      'networks',
+      'country',
+      'countryCode',
+      'sourceCurrency',
+      'destinationCurrency',
+      'baseCurrency',
+      'quoteCurrency',
+      'rate',
+      'amount',
+      'sourceAmount',
+      'destinationAmount',
+      'fee',
+      'expiresAt',
+      'createdAt',
+      'updatedAt',
+    ];
+    return allowedKeys.reduce<AnyRecord>((safe, key) => {
+      if (Object.prototype.hasOwnProperty.call(record, key)) {
+        safe[key] = this.safeProviderPayload(record[key]);
+      }
+      return safe;
+    }, {});
+  }
+
+  private normalizeProviderRecords(payload: unknown): unknown[] {
+    const records = this.collectProviderRecords(payload);
+    return records.map((record) => this.safeProviderPayload(record));
+  }
+
+  private collectProviderRecords(payload: unknown): AnyRecord[] {
+    if (Array.isArray(payload)) {
+      return payload.filter(
+        (item): item is AnyRecord => Boolean(item) && typeof item === 'object',
+      );
+    }
+    if (!payload || typeof payload !== 'object') {
+      return [];
+    }
+    const record = payload as AnyRecord;
+    for (const key of ['data', 'items', 'results', 'currencies', 'assets']) {
+      const child = record[key];
+      if (Array.isArray(child)) {
+        return this.collectProviderRecords(child);
+      }
+    }
+    return [record];
+  }
+
+  private providerShape(payload: unknown) {
+    if (Array.isArray(payload)) {
+      return { type: 'array', count: payload.length };
+    }
+    if (!payload || typeof payload !== 'object') {
+      return { type: typeof payload };
+    }
+    return {
+      type: 'object',
+      keys: Object.keys(payload as AnyRecord).slice(0, 20),
+    };
   }
 
   private inferRegion(user: User): string | null {

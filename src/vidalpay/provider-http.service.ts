@@ -1,6 +1,7 @@
 import { Injectable } from '@nestjs/common';
 import { ConfigService } from '@nestjs/config';
 import axios, { AxiosInstance } from 'axios';
+import { createHmac } from 'crypto';
 
 @Injectable()
 export class ProviderHttpService {
@@ -127,6 +128,54 @@ export class ProviderHttpService {
       },
       timeout: this.timeout(),
     });
+  }
+
+  yellowCardClient(): AxiosInstance {
+    const baseURL = this.baseUrl(
+      'YELLOWCARD_BASE_URL',
+      'https://sandbox.api.yellowcard.io',
+    );
+    const apiKey = this.configService.get<string>('YELLOWCARD_API_KEY') ?? '';
+    const secret =
+      this.configService.get<string>('YELLOWCARD_SECRET_KEY') ??
+      this.configService.get<string>('YELLOWCARD_API_SECRET') ??
+      '';
+    const client = axios.create({
+      baseURL,
+      headers: {
+        Accept: 'application/json',
+        'Content-Type': 'application/json',
+        ...(apiKey ? { 'X-YC-API-Key': apiKey } : {}),
+      },
+      timeout: this.timeout(),
+    });
+
+    client.interceptors.request.use((config) => {
+      if (!secret) return config;
+      const timestamp = `${Date.now()}`;
+      const method = (config.method ?? 'get').toUpperCase();
+      const path = this.requestPath(baseURL, config.url);
+      const body =
+        config.data && typeof config.data !== 'string'
+          ? JSON.stringify(config.data)
+          : (config.data ?? '');
+      const signature = createHmac('sha256', secret)
+        .update(`${timestamp}${method}${path}${body}`)
+        .digest('hex');
+      config.headers.set('X-YC-Timestamp', timestamp);
+      config.headers.set('X-YC-Signature', signature);
+      return config;
+    });
+
+    return client;
+  }
+
+  private requestPath(baseURL: string, requestUrl?: string) {
+    try {
+      return new URL(requestUrl ?? '/', `${baseURL}/`).pathname;
+    } catch {
+      return requestUrl ?? '/';
+    }
   }
 
   private fincraSandboxBaseUrl(): string {

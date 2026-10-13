@@ -75,6 +75,8 @@ export const REQUIRED_PROVIDER_CAPABILITIES = [
   'tag_transfer',
   'crypto_overview',
   'crypto_assets',
+  'crypto_rates',
+  'crypto_quote',
   'crypto_deposit',
   'crypto_withdrawal',
   'investments_account',

@@ -2,6 +2,7 @@ import {
   AdminController,
   AdminKycController,
   CardsController,
+  CryptoController,
   FxController,
   KycController,
   MeController,
@@ -49,6 +50,9 @@ describe('VidalPay mobile contract controllers', () => {
     handleKycWebhook: jest.fn(),
     getFxRates: jest.fn(),
     getFxQuote: jest.fn(),
+    cryptoAssets: jest.fn(),
+    cryptoRates: jest.fn(),
+    cryptoQuote: jest.fn(),
     rewardsDashboard: jest.fn(),
     rewardsHistory: jest.fn(),
     redeemRewards: jest.fn(),
@@ -241,6 +245,26 @@ describe('VidalPay mobile contract controllers', () => {
       fromCurrency: 'NGN',
       toCurrency: 'USD',
     });
+  });
+
+  it('routes Yellow Card crypto discovery and quote through backend services', () => {
+    const controller = new CryptoController(service as VidalpayService);
+    const quoteBody = {
+      sourceCurrency: 'NGN',
+      destinationCurrency: 'USDT',
+      amount: 10000,
+    };
+
+    controller.assets(user);
+    controller.rates(user, { sourceCurrency: 'NGN', destinationCurrency: 'USDT' });
+    controller.quote(user, quoteBody);
+
+    expect(service.cryptoAssets).toHaveBeenCalledWith('user-1');
+    expect(service.cryptoRates).toHaveBeenCalledWith('user-1', {
+      sourceCurrency: 'NGN',
+      destinationCurrency: 'USDT',
+    });
+    expect(service.cryptoQuote).toHaveBeenCalledWith('user-1', quoteBody);
   });
 
   it('routes card creation and lifecycle actions through provider-aware service methods', () => {

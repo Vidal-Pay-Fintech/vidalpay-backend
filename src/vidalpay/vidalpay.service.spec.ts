@@ -68,6 +68,12 @@ describe('VidalpayService', () => {
     validateVtuNgCustomer: jest.Mock;
     purchaseVtuNg: jest.Mock;
   };
+  let yellowCardService: {
+    supportedAssets: jest.Mock;
+    supportedCurrencies: jest.Mock;
+    rates: jest.Mock;
+    quote: jest.Mock;
+  };
   let configService: { get: jest.Mock };
   let providerStatusService: jest.Mocked<
     Pick<
@@ -120,6 +126,12 @@ describe('VidalpayService', () => {
       validateVtuNgCustomer: jest.fn(),
       purchaseVtuNg: jest.fn(),
     };
+    yellowCardService = {
+      supportedAssets: jest.fn(),
+      supportedCurrencies: jest.fn(),
+      rates: jest.fn(),
+      quote: jest.fn(),
+    };
     configService = { get: jest.fn() };
 
     service = new VidalpayService(
@@ -147,6 +159,7 @@ describe('VidalpayService', () => {
         configService as unknown as ConfigService,
       ),
       sandboxProviderService as any,
+      yellowCardService as any,
       configService as unknown as ConfigService,
       {} as any,
       {} as DataSource,
@@ -853,6 +866,94 @@ describe('VidalpayService', () => {
     expect(overview.enabled).toBe(false);
     expect(overview.portfolio.totalValue).toBeNull();
     expect(overview.portfolio.positions).toEqual([]);
+  });
+
+  it('returns Yellow Card assets and currencies without creating crypto wallets', async () => {
+    userRepository.findOne.mockResolvedValue({
+      id: 'user-1',
+      countryCode: 'US',
+      region: 'US',
+    });
+    providerStatusService.getStatus.mockImplementation((capability: any) =>
+      status({
+        capability,
+        provider: 'Yellow Card',
+        enabled: true,
+        envConfigured: true,
+        missingEnvVars: [],
+      }),
+    );
+    yellowCardService.supportedAssets.mockResolvedValue({
+      data: [
+        {
+          asset: 'USDT',
+          network: 'TRC20',
+          token: 'must-not-return',
+        },
+      ],
+    });
+    yellowCardService.supportedCurrencies.mockResolvedValue({
+      data: [{ currency: 'NGN', name: 'Nigerian Naira' }],
+    });
+
+    await expect(service.cryptoAssets('user-1')).resolves.toEqual(
+      expect.objectContaining({
+        provider: 'Yellow Card',
+        configured: true,
+        executionEnabled: false,
+        assets: [expect.objectContaining({ asset: 'USDT', network: 'TRC20' })],
+        currencies: [expect.objectContaining({ currency: 'NGN' })],
+      }),
+    );
+    expect(walletRepository.save).not.toHaveBeenCalled();
+    expect(transactionRepository.save).not.toHaveBeenCalled();
+  });
+
+  it('returns a Yellow Card quote as non-executable and does not debit wallets', async () => {
+    userRepository.findOne.mockResolvedValue({
+      id: 'user-1',
+      countryCode: 'US',
+      region: 'US',
+    });
+    providerStatusService.getStatus.mockImplementation((capability: any) =>
+      status({
+        capability,
+        provider: 'Yellow Card',
+        enabled: true,
+        envConfigured: true,
+        missingEnvVars: [],
+      }),
+    );
+    yellowCardService.quote.mockResolvedValue({
+      id: 'quote-1',
+      sourceCurrency: 'NGN',
+      destinationCurrency: 'USDT',
+      rate: '1500',
+      secret: 'must-not-return',
+    });
+
+    await expect(
+      service.cryptoQuote('user-1', {
+        sourceCurrency: 'NGN',
+        destinationCurrency: 'USDT',
+        amount: 10000,
+      }),
+    ).resolves.toEqual(
+      expect.objectContaining({
+        provider: 'Yellow Card',
+        configured: true,
+        executable: false,
+        quoteOnly: true,
+        quote: expect.objectContaining({
+          id: 'quote-1',
+          sourceCurrency: 'NGN',
+          destinationCurrency: 'USDT',
+        }),
+      }),
+    );
+    expect(walletRepository.update).not.toHaveBeenCalled();
+    expect(transactionRepository.save).not.toHaveBeenCalled();
+    expect(providerOperationRepository.save).not.toHaveBeenCalled();
   });
 
   it('blocks Nigeria-based users from restricted products even after KYC verification', async () => {

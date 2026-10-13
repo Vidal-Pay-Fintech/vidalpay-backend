@@ -505,6 +505,16 @@ export class CryptoController {
     return this.vidalpayService.cryptoAssets(user.sub);
   }
 
+  @Get('rates')
+  rates(@ActiveUser() user: ActiveUserData, @Query() query: AnyRecord) {
+    return this.vidalpayService.cryptoRates(user.sub, query);
+  }
+
+  @Post('quote')
+  quote(@ActiveUser() user: ActiveUserData, @Body() body: AnyRecord) {
+    return this.vidalpayService.cryptoQuote(user.sub, body);
+  }
+
   @Post('deposit-address')
   deposit(@ActiveUser() user: ActiveUserData, @Body() body: AnyRecord) {
     return this.vidalpayService.blockGenericOperation(

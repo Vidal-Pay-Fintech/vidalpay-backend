@@ -89,7 +89,25 @@ describe('ProviderStatusService', () => {
     expect(service.getStatus('crypto_overview')).toEqual(
       expect.objectContaining({
         enabled: false,
-        missingEnvVars: ['ZERO_HASH_API_KEY'],
+        provider: 'Yellow Card',
+        missingEnvVars: ['YELLOWCARD_BASE_URL', 'YELLOWCARD_API_KEY'],
+      }),
+    );
+  });
+
+  it('marks Yellow Card crypto readiness configured from sandbox env values', () => {
+    const service = buildService({
+      YELLOWCARD_BASE_URL: 'https://sandbox.api.yellowcard.io',
+      YELLOWCARD_API_KEY: 'yellowcard-api-key',
+    });
+
+    expect(service.getStatus('crypto_quote')).toEqual(
+      expect.objectContaining({
+        provider: 'Yellow Card',
+        enabled: true,
+        envConfigured: true,
+        readinessStatus: 'CONFIGURED_NOT_LIVE_TESTED',
+        missingEnvVars: [],
       }),
     );
   });

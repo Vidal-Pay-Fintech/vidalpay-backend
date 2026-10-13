@@ -51,6 +51,7 @@ import { JurisdictionService } from './jurisdiction.service';
 import { SandboxProviderService } from './sandbox-provider.service';
 import { VidalpayService } from './vidalpay.service';
 import { WalletProductCatalogService } from './wallet-product-catalog.service';
+import { YellowCardService } from './yellow-card.service';
 
 @Global()
 @Module({
@@ -109,6 +110,7 @@ import { WalletProductCatalogService } from './wallet-product-catalog.service';
     JurisdictionService,
     WalletProductCatalogService,
     SandboxProviderService,
+    YellowCardService,
     VidalpayService,
   ],
   exports: [ProviderStatusService, VidalpayService],
