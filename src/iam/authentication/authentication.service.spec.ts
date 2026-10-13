@@ -260,6 +260,60 @@ describe('AuthenticationService', () => {
     expect(hashingService.compare).toHaveBeenCalledWith('1234', 'hashed-pin');
   });
 
+  it('returns backend session identity for mobile biometric candidate binding', async () => {
+    const existingSession = {
+      id: 'session-1',
+      familyId: 'family-1',
+      userId: 'user-1',
+      refreshTokenHash: null,
+      deviceId: 'device-1',
+      deviceName: 'Pixel 8',
+      platform: 'android',
+      ipAddress: '127.0.0.1',
+      userAgent: 'jest',
+      lastUsedAt: new Date('2026-01-01T00:00:00.000Z'),
+      expiresAt: new Date('2026-02-01T00:00:00.000Z'),
+      revokedAt: null,
+    } as AuthSession;
+    hashingService.hash.mockResolvedValue('hashed-refresh-token');
+    jwtService.signAsync
+      .mockResolvedValueOnce('access-token')
+      .mockResolvedValueOnce('refresh-token');
+
+    await expect(
+      service.generateToken(
+        {
+          id: 'user-1',
+          email: 'user@example.com',
+          role: UserRole.CUSTOMER,
+        } as User,
+        undefined,
+        existingSession,
+      ),
+    ).resolves.toEqual(
+      expect.objectContaining({
+        accessToken: 'access-token',
+        refreshToken: 'refresh-token',
+        session: {
+          id: 'session-1',
+          familyId: 'family-1',
+          deviceId: 'device-1',
+          deviceName: 'Pixel 8',
+          platform: 'android',
+          lastUsedAt: expect.any(Date),
+          expiresAt: expect.any(Date),
+        },
+      }),
+    );
+    expect(authSessionRepository.save).toHaveBeenCalledWith(
+      expect.objectContaining({
+        id: 'session-1',
+        familyId: 'family-1',
+        refreshTokenHash: 'hashed-refresh-token',
+      }),
+    );
+  });
+
   it('creates and emails transaction PIN reset OTPs', async () => {
     userRepository.findUserById.mockResolvedValue({ id: 'user-1' });
     tokenService.create.mockResolvedValue({ id: 'token-1' });

@@ -409,7 +409,12 @@ export class AuthenticationService {
       throw error;
     }
 
-    return { accessToken, refreshToken: refreashToken, refreashToken };
+    return {
+      accessToken,
+      refreshToken: refreashToken,
+      refreashToken,
+      session: this.buildSessionResponse(session),
+    };
   }
 
   private async generateStatelessTokens(user: User) {
@@ -433,6 +438,7 @@ export class AuthenticationService {
       refreshToken: refreashToken,
       refreashToken,
       sessionMode: 'stateless',
+      session: null,
     };
   }
 
@@ -1069,6 +1075,18 @@ export class AuthenticationService {
         request?.socket?.remoteAddress ??
         null,
       userAgent: request?.headers?.['user-agent']?.toString() ?? null,
+    };
+  }
+
+  private buildSessionResponse(session: AuthSession) {
+    return {
+      id: session.id,
+      familyId: session.familyId,
+      deviceId: session.deviceId,
+      deviceName: session.deviceName,
+      platform: session.platform,
+      lastUsedAt: session.lastUsedAt,
+      expiresAt: session.expiresAt,
     };
   }
 
