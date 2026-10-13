@@ -14,6 +14,9 @@ export class SignInDto {
   @IsOptional()
   email: string;
 
+  @IsOptional()
+  emailOrPhone?: string;
+
   // @IsNotEmpty()
   @IsOptional()
   phoneNumber: string;

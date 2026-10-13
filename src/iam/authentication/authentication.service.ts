@@ -234,11 +234,18 @@ export class AuthenticationService {
   }
 
   async signIn(signInDto: SignInDto, request?: Request) {
-    const { email, phoneNumber, password } = signInDto;
-    const user = email
-      ? await this.userRepository.findUserByEmail(email)
-      : phoneNumber
-        ? await this.findUserByPhoneVariants(phoneNumber)
+    const { email, phoneNumber, emailOrPhone, password } = signInDto;
+    const identifier = this.normalizeLoginIdentifier(emailOrPhone);
+    const emailIdentifier =
+      this.normalizeLoginIdentifier(email) ??
+      (identifier?.includes('@') ? identifier : null);
+    const phoneIdentifier =
+      this.normalizeLoginIdentifier(phoneNumber) ??
+      (!identifier?.includes('@') ? identifier : null);
+    const user = emailIdentifier
+      ? await this.userRepository.findUserByEmail(emailIdentifier)
+      : phoneIdentifier
+        ? await this.findUserByPhoneVariants(phoneIdentifier)
         : null;
     if (!user) {
       throw new BadRequestException(API_MESSAGES.INVALID_LOGIN_CREDENTIALS);
@@ -286,8 +293,13 @@ export class AuthenticationService {
   }
 
   async adminSignIn(signInDto: SignInDto, request?: Request) {
-    const { email, password } = signInDto;
-    const admin = await this.userRepository.findUserByEmail(email);
+    const { email, emailOrPhone, password } = signInDto;
+    const emailIdentifier =
+      this.normalizeLoginIdentifier(email) ??
+      this.normalizeLoginIdentifier(emailOrPhone);
+    const admin = emailIdentifier
+      ? await this.userRepository.findUserByEmail(emailIdentifier)
+      : null;
     if (!admin) {
       throw new BadRequestException(API_MESSAGES.USER_NOT_FOUND);
     }
@@ -1318,6 +1330,11 @@ export class AuthenticationService {
     }
 
     return this.findUserByPhoneVariants(value);
+  }
+
+  private normalizeLoginIdentifier(value?: string | null) {
+    const normalized = typeof value === 'string' ? value.trim() : '';
+    return normalized || null;
   }
 
   private async findUserByPhoneVariants(phoneNumber: string) {

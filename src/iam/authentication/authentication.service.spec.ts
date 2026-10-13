@@ -151,6 +151,36 @@ describe('AuthenticationService', () => {
     );
   });
 
+  it('allows admin login with the legacy emailOrPhone field when it contains an email', async () => {
+    const admin = {
+      id: 'admin-1',
+      email: 'admin@example.com',
+      password: 'hashed-password',
+      role: UserRole.SUPER_ADMIN,
+      status: AccountStatus.ACTIVE,
+    } as User;
+    userRepository.findUserByEmail.mockResolvedValue(admin);
+    hashingService.compare.mockResolvedValue(true);
+    jwtService.signAsync
+      .mockResolvedValueOnce('access-token')
+      .mockResolvedValueOnce('refresh-token');
+
+    await expect(
+      service.adminSignIn({
+        emailOrPhone: ' admin@example.com ',
+        password: 'secret',
+      } as any),
+    ).resolves.toEqual(
+      expect.objectContaining({
+        accessToken: 'access-token',
+        refreshToken: 'refresh-token',
+      }),
+    );
+    expect(userRepository.findUserByEmail).toHaveBeenCalledWith(
+      'admin@example.com',
+    );
+  });
+
   it('still rejects customer accounts from the admin login endpoint', async () => {
     userRepository.findUserByEmail.mockResolvedValue({
       id: 'user-1',
@@ -403,6 +433,70 @@ describe('AuthenticationService', () => {
       }),
     );
     expect(userRepository.findUserByPhone).toHaveBeenCalledWith('+15551234567');
+  });
+
+  it('accepts the legacy emailOrPhone field for customer email login', async () => {
+    const user = {
+      id: 'user-1',
+      email: 'user@example.com',
+      password: 'hashed-password',
+      role: UserRole.CUSTOMER,
+      isVerified: true,
+      status: AccountStatus.ACTIVE,
+    } as User;
+    userRepository.findUserByEmail.mockResolvedValue(user);
+    hashingService.compare.mockResolvedValue(true);
+    jwtService.signAsync
+      .mockResolvedValueOnce('access-token')
+      .mockResolvedValueOnce('refresh-token');
+
+    await expect(
+      service.signIn({
+        emailOrPhone: ' user@example.com ',
+        password: 'secret',
+      } as any),
+    ).resolves.toEqual(
+      expect.objectContaining({
+        accessToken: 'access-token',
+        refreshToken: 'refresh-token',
+      }),
+    );
+    expect(userRepository.findUserByEmail).toHaveBeenCalledWith(
+      'user@example.com',
+    );
+  });
+
+  it('accepts the legacy emailOrPhone field for customer phone login', async () => {
+    const user = {
+      id: 'user-1',
+      password: 'hashed-password',
+      role: UserRole.CUSTOMER,
+      isVerified: true,
+      status: AccountStatus.ACTIVE,
+      phoneNumber: '+2349039730138',
+    };
+    userRepository.findUserByPhone.mockImplementation(async (phone: string) =>
+      phone === '+2349039730138' ? user : null,
+    );
+    hashingService.compare.mockResolvedValue(true);
+    jwtService.signAsync
+      .mockResolvedValueOnce('access-token')
+      .mockResolvedValueOnce('refresh-token');
+
+    await expect(
+      service.signIn({
+        emailOrPhone: '09039730138',
+        password: 'secret',
+      } as any),
+    ).resolves.toEqual(
+      expect.objectContaining({
+        accessToken: 'access-token',
+        refreshToken: 'refresh-token',
+      }),
+    );
+    expect(userRepository.findUserByPhone).toHaveBeenCalledWith(
+      '+2349039730138',
+    );
   });
 
   it('falls back to stateless tokens when the auth session table is missing', async () => {
