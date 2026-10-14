@@ -41,6 +41,29 @@ export type WalletProduct = {
   providerMetadata: Record<string, unknown>;
 };
 
+const DEFAULT_FINCRA_REQUIREMENTS: WalletProductRequirement[] = [
+  {
+    key: 'legal_name',
+    label: 'Legal name',
+    source: 'VIDALPAY_PROFILE',
+  },
+  {
+    key: 'date_of_birth',
+    label: 'Date of birth',
+    source: 'VIDALPAY_PROFILE',
+  },
+  {
+    key: 'address',
+    label: 'Address',
+    source: 'VIDALPAY_PROFILE',
+  },
+  {
+    key: 'government_id',
+    label: 'Government ID',
+    source: 'FINCRA',
+  },
+];
+
 @Injectable()
 export class WalletProductCatalogService {
   constructor(private readonly configService: ConfigService) {}
@@ -110,6 +133,10 @@ export class WalletProductCatalogService {
   }
 
   private defaultProducts(): WalletProduct[] {
+    const sandboxTestMode = this.truthy(
+      this.configService.get<string>('FINCRA_WALLET_TEST_MODE') ??
+        this.configService.get<string>('FINCRA_SANDBOX_WALLET_TEST_MODE'),
+    );
     return ['NGN', 'USD', 'GBP', 'CAD'].map((currency) => ({
       currency,
       provider: 'FINCRA' as const,
@@ -117,16 +144,36 @@ export class WalletProductCatalogService {
       accountType: 'VIRTUAL_ACCOUNT' as const,
       tier: 'PRIMARY' as const,
       supportedJurisdictions: ['NG', 'US'],
-      canProvision: false,
-      requirementsConfigured: false,
-      requirements: [],
+      canProvision:
+        sandboxTestMode ||
+        this.truthy(
+          this.configService.get<string>(`FINCRA_${currency}_CAN_PROVISION`),
+        ),
+      requirementsConfigured:
+        sandboxTestMode ||
+        this.truthy(
+          this.configService.get<string>(
+            `FINCRA_${currency}_REQUIREMENTS_CONFIGURED`,
+          ),
+        ),
+      requirements: sandboxTestMode ? DEFAULT_FINCRA_REQUIREMENTS : [],
       providerProductId:
         this.configService.get<string>(`FINCRA_${currency}_PRODUCT_ID`) ?? null,
       providerMetadata: {
         source: 'DEFAULT_PRIMARY_CATALOGUE',
-        requirementsSource: 'NOT_CONFIGURED',
+        requirementsSource: sandboxTestMode
+          ? 'SANDBOX_TEST_MODE_DEFAULTS'
+          : 'NOT_CONFIGURED',
       },
     }));
+  }
+
+  private truthy(value?: string | null) {
+    return ['true', '1', 'yes', 'enabled'].includes(
+      String(value ?? '')
+        .trim()
+        .toLowerCase(),
+    );
   }
 
   private mergeConfiguredProducts(defaults: WalletProduct[]) {

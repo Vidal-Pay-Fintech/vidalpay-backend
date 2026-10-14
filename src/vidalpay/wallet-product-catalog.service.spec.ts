@@ -65,4 +65,35 @@ describe('WalletProductCatalogService', () => {
     expect(service.compatibleProducts('NG').map((product) => product.currency)).toContain('CAD');
     expect(service.find('CAD')).toEqual(expect.objectContaining({ tier: 'ADDITIONAL' }));
   });
+
+  it('enables sandbox wallet test-mode products without requiring a large JSON catalogue', () => {
+    const service = new WalletProductCatalogService(
+      config({
+        FINCRA_WALLET_TEST_MODE: 'true',
+        FINCRA_API_KEY: 'fincra-key',
+      }),
+    );
+
+    expect(service.find('GBP')).toEqual(
+      expect.objectContaining({
+        currency: 'GBP',
+        canProvision: true,
+        requirementsConfigured: true,
+        providerMetadata: expect.objectContaining({
+          requirementsSource: 'SANDBOX_TEST_MODE_DEFAULTS',
+        }),
+      }),
+    );
+    expect(service.providerConfigured(service.find('GBP')!).configured).toBe(
+      true,
+    );
+    expect(service.find('GBP')?.requirements.map((item) => item.key)).toEqual(
+      expect.arrayContaining([
+        'legal_name',
+        'date_of_birth',
+        'address',
+        'government_id',
+      ]),
+    );
+  });
 });
