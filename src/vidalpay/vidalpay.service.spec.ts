@@ -1218,7 +1218,7 @@ describe('VidalpayService', () => {
     userRepository.findOne.mockResolvedValue({ id: 'user-1', region: 'NG' });
     walletRepository.find.mockResolvedValue([]);
 
-    const result = await service.getWalletEligibility('user-1', 'CAD');
+    const result = await service.getWalletEligibility('user-1', 'EUR');
 
     expect(result.status).toBe('PRODUCT_UNAVAILABLE');
     expect(result.eligible).toBe(false);

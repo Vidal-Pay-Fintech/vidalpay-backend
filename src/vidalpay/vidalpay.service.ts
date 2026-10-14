@@ -232,10 +232,16 @@ export class VidalpayService {
       );
     }
 
+    const inferredRegion = this.inferRegion({ ...user, ...update } as User);
+    if (inferredRegion) {
+      update.region = inferredRegion;
+    }
+
     await this.userRepository.update(
       user.id,
       update as QueryDeepPartialEntity<User>,
     );
+    await this.syncKycProfileRegionAfterProfileUpdate(user.id, inferredRegion);
     return this.getCurrentUser(user.id);
   }
 
@@ -5770,6 +5776,50 @@ export class VidalpayService {
       }
     }
     return kycStorageAvailable;
+  }
+
+  private async syncKycProfileRegionAfterProfileUpdate(
+    userId: string,
+    region: string | null,
+  ) {
+    if (!region || !['NG', 'US'].includes(region)) {
+      return;
+    }
+
+    try {
+      const profile = await this.kycProfileRepository.findOne({
+        where: { userId },
+      });
+      if (!profile) {
+        return;
+      }
+
+      const mutableStatuses = [
+        'NOT_STARTED',
+        'REGION_REQUIRED',
+        'REGION_CONFLICT',
+        'UNSUPPORTED',
+      ];
+      if (!mutableStatuses.includes(profile.status ?? 'NOT_STARTED')) {
+        return;
+      }
+
+      profile.region = region;
+      profile.status =
+        profile.status === 'REGION_REQUIRED' ||
+        profile.status === 'REGION_CONFLICT' ||
+        profile.status === 'UNSUPPORTED'
+          ? 'NOT_STARTED'
+          : profile.status;
+      profile.sections = this.defaultKycSections(region, profile.status);
+      profile.capabilities = this.capabilitiesForKycStatus(profile.status);
+      profile.limits = profile.limits ?? this.defaultLimits(profile.status);
+      await this.kycProfileRepository.save(profile);
+    } catch (error) {
+      if (!this.isKycProfileStorageUnavailable(error)) {
+        throw error;
+      }
+    }
   }
 
   private fincraKycEnabled(region?: string | null) {

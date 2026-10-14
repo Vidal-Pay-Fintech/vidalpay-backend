@@ -5,12 +5,13 @@ const config = (values: Record<string, string | undefined> = {}) =>
   ({ get: jest.fn((key: string) => values[key]) }) as unknown as ConfigService;
 
 describe('WalletProductCatalogService', () => {
-  it('includes NGN, USD, and GBP as primary Fincra products', () => {
+  it('includes NGN, USD, GBP, and CAD as primary Fincra products', () => {
     const service = new WalletProductCatalogService(config());
 
     expect(service.find('NGN')).toEqual(expect.objectContaining({ currency: 'NGN', tier: 'PRIMARY', enabled: true }));
     expect(service.find('USD')).toEqual(expect.objectContaining({ currency: 'USD', tier: 'PRIMARY', enabled: true }));
     expect(service.find('GBP')).toEqual(expect.objectContaining({ currency: 'GBP', tier: 'PRIMARY', enabled: true }));
+    expect(service.find('CAD')).toEqual(expect.objectContaining({ currency: 'CAD', tier: 'PRIMARY', enabled: true }));
   });
 
   it('ignores configured currencies outside the approved Fincra sandbox wallet set', () => {
@@ -41,7 +42,7 @@ describe('WalletProductCatalogService', () => {
   it('does not include arbitrary ISO currencies without explicit Fincra catalogue config', () => {
     const service = new WalletProductCatalogService(config());
 
-    expect(service.find('CAD')).toBeNull();
+    expect(service.find('EUR')).toBeNull();
   });
 
   it('includes additional enabled Fincra currencies from explicit catalogue config', () => {

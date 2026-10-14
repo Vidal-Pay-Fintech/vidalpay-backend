@@ -79,27 +79,18 @@ export class User extends AbstractEntity {
   @Column({
     type: 'varchar',
     nullable: true,
-    select: false,
-    insert: false,
-    update: false,
   })
   countryCode: string;
 
   @Column({
     type: 'varchar',
     nullable: true,
-    select: false,
-    insert: false,
-    update: false,
   })
   residency: string;
 
   @Column({
     type: 'varchar',
     nullable: true,
-    select: false,
-    insert: false,
-    update: false,
   })
   region: string;
 

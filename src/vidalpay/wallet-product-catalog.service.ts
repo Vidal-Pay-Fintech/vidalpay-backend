@@ -67,7 +67,7 @@ export class WalletProductCatalogService {
   }
 
   providerConfigured(product: WalletProduct) {
-    const missingEnvVars = ['FINCRA_API_KEY', 'FINCRA_BASE_URL'].filter(
+    const missingEnvVars = ['FINCRA_API_KEY'].filter(
       (key) => !this.configService.get<string>(key),
     );
     const missingProductConfig = product.canProvision
@@ -110,7 +110,7 @@ export class WalletProductCatalogService {
   }
 
   private defaultProducts(): WalletProduct[] {
-    return ['NGN', 'USD', 'GBP'].map((currency) => ({
+    return ['NGN', 'USD', 'GBP', 'CAD'].map((currency) => ({
       currency,
       provider: 'FINCRA' as const,
       enabled: true,
