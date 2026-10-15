@@ -1,6 +1,7 @@
 import { ServiceUnavailableException } from '@nestjs/common';
 import { ConfigService } from '@nestjs/config';
 import { hash } from 'bcrypt';
+import { createHmac } from 'crypto';
 import { DataSource } from 'typeorm';
 import { AccountStatus } from 'src/database/entities/user.entity';
 import { VidalpayService } from './vidalpay.service';
@@ -12,6 +13,8 @@ import { ProductEligibilityService } from './product-eligibility.service';
 import { WalletProductCatalogService } from './wallet-product-catalog.service';
 import { Currency } from 'src/utils/enums/wallet.enum';
 import { TagIdGenerator } from 'src/utils/tagIdGenerator';
+import { fincraIdentityFingerprint } from './fincra-identity';
+import { UserRole } from 'src/utils/enums/user.enum';
 
 const repo = () => ({
   find: jest.fn(),
@@ -164,6 +167,178 @@ describe('VidalpayService', () => {
       {} as any,
       {} as DataSource,
     );
+  });
+
+  describe('KYC spending policy', () => {
+    const restricted = ['NOT_STARTED', 'IN_PROGRESS', 'SUBMITTED', 'UNDER_REVIEW', 'MANUAL_REVIEW', 'RETRY_REQUIRED', 'REJECTED', 'FAILED', 'EXPIRED', 'UNSUPPORTED'];
+
+    it.each(restricted)('blocks every spending path for %s before any side effect', async (kycStatus) => {
+      userRepository.findOne.mockResolvedValue({ id: 'user-1', isVerified: true, kycStatus: 'VERIFIED' });
+      kycProfileRepository.findOne.mockResolvedValue({ id: 'kyc-1', userId: 'user-1', status: kycStatus });
+      const attempts = [
+        () => service.internalTransfer('user-1', {}),
+        () => service.externalTransfer('user-1', {}),
+        () => service.purchaseService('user-1', 'airtime', {}),
+        () => service.purchaseService('user-1', 'data', {}),
+        () => service.purchaseService('user-1', 'utilities', {}),
+        () => service.convertFx('user-1', {}),
+        () => service.createCard('user-1', 'virtual', {}),
+        () => service.createCardTopUpIntent('user-1', {}),
+        () => service.blockCardOperation('user-1', 'card-1', 'fund', {}),
+        () => service.blockLoanOperation('user-1', {}, 'repayment'),
+        () => service.blockInvestmentOperation('user-1', {}, 'buy'),
+      ];
+      for (const attempt of attempts) {
+        await expect(attempt()).rejects.toMatchObject({ status: 403, response: { code: 'KYC_REQUIRED', kycStatus } });
+      }
+      expect(walletRepository.save).not.toHaveBeenCalled();
+      expect(providerOperationRepository.save).not.toHaveBeenCalled();
+      expect(transactionRepository.save).not.toHaveBeenCalled();
+      expect(sandboxProviderService.purchaseVtuNg).not.toHaveBeenCalled();
+      expect(sandboxProviderService.createSudoCard).not.toHaveBeenCalled();
+    });
+
+    it('approval updates permissions and rejection removes them despite stored flags', async () => {
+      userRepository.findOne.mockResolvedValue({ id: 'user-1', isVerified: true });
+      const profile = { id: 'kyc-1', userId: 'user-1', region: 'NG', status: 'VERIFIED', capabilities: { canTagTransfer: false }, limits: {} };
+      kycProfileRepository.findOne.mockResolvedValue(profile);
+      await expect(service.getKycStatus('user-1')).resolves.toMatchObject({ status: 'VERIFIED', capabilities: { canTagTransfer: true, canBankTransfer: true } });
+      profile.status = 'REJECTED';
+      profile.capabilities.canTagTransfer = true;
+      await expect(service.getKycStatus('user-1')).resolves.toMatchObject({ status: 'REJECTED', capabilities: { canTagTransfer: false, canBankTransfer: false } });
+    });
+
+    it('a verified account does not restart or downgrade from client submissions', async () => {
+      userRepository.findOne.mockResolvedValue({ id: 'user-1', kycStatus: 'VERIFIED' });
+      kycProfileRepository.findOne.mockResolvedValue({ id: 'kyc-1', userId: 'user-1', status: 'VERIFIED', region: 'US' });
+      await expect(service.startKyc('user-1')).resolves.toMatchObject({ mode: 'STATUS_ONLY', status: 'VERIFIED' });
+      await expect(service.submitKycProfile('user-1', {})).resolves.toMatchObject({ status: 'VERIFIED' });
+      expect(kycProfileRepository.save).not.toHaveBeenCalled();
+    });
+  });
+
+  describe('Fincra, MetaMap and final review journey', () => {
+    const customer = { id: 'user-1', countryCode: 'NG', firstName: 'Jane', lastName: 'Doe', dateOfBirth: '1990-01-02' };
+    const fincraEvidence = () => ({ status: 'VERIFIED', metadata: { identityMatched: true, identityFingerprint: fincraIdentityFingerprint(customer), environment: 'sandbox' } });
+    const metamapEvidence = () => ({ status: 'APPLIED', providerReference: 'verification-1', metadata: { providerStatus: 'VERIFIED' } });
+
+    beforeEach(() => {
+      userRepository.findOne.mockImplementation(async ({ where }) => where.id === 'admin-1'
+        ? { id: 'admin-1', role: UserRole.SUPER_ADMIN } : { ...customer });
+      kycProfileRepository.findOne.mockResolvedValue({ id: 'kyc-1', userId: customer.id, region: 'NG', status: 'MANUAL_REVIEW', providerReference: 'verification-1', updatedAt: new Date(), identity: {} });
+      kycProfileRepository.update.mockResolvedValue({ affected: 1 });
+      providerOperationRepository.findOne.mockImplementation(async ({ where }) => where.type === 'kyc_webhook' ? metamapEvidence() : fincraEvidence());
+      notificationPreferenceRepository.findOne.mockResolvedValue({ preferences: { push: false } });
+      notificationDeviceRepository.find.mockResolvedValue([]);
+      notificationRepository.find.mockResolvedValue([]);
+    });
+
+    it('rejects non-super-admin approval before changing any state', async () => {
+      userRepository.findOne.mockResolvedValue({ id: 'admin-1', role: UserRole.ADMIN });
+      await expect(service.reviewKyc('admin-1', 'user-1', 'VERIFIED')).rejects.toMatchObject({ status: 403 });
+      expect(kycProfileRepository.update).not.toHaveBeenCalled();
+    });
+
+    it.each([null, { status: 'FAILED' }, { status: 'VERIFIED', metadata: { ...fincraEvidence().metadata, environment: 'live' } },
+      { status: 'VERIFIED', metadata: { ...fincraEvidence().metadata, identityFingerprint: 'outdated' } },
+    ])('refuses final approval without matching Fincra evidence', async (evidence) => {
+      providerOperationRepository.findOne.mockImplementation(async ({ where }) => where.type === 'kyc_webhook' ? metamapEvidence() : evidence);
+      await expect(service.reviewKyc('admin-1', 'user-1', 'VERIFIED')).rejects.toMatchObject({ response: { code: 'FINCRA_KYC_CHECK_REQUIRED' } });
+      expect(kycProfileRepository.update).not.toHaveBeenCalled();
+    });
+
+    it('requires persistent MetaMap evidence and cannot use client identity flags as approval', async () => {
+      providerOperationRepository.findOne.mockResolvedValue(null);
+      await service.submitKycProfile('user-1', { identity: { fincra: { status: 'VERIFIED' }, metamapSessionId: 'fake', actionRequired: { reviewedBy: 'admin-1' }, status: 'VERIFIED' } });
+      expect(kycProfileRepository.save).toHaveBeenCalledWith(expect.objectContaining({ identity: {} }));
+      const profile = await kycProfileRepository.findOne({});
+      profile.status = 'MANUAL_REVIEW';
+      await expect(service.reviewKyc('admin-1', 'user-1', 'VERIFIED')).rejects.toMatchObject({ response: { code: 'KYC_PROVIDER_CHECK_REQUIRED' } });
+    });
+
+    it('does not overwrite a provider decision that changed during admin review', async () => {
+      kycProfileRepository.update.mockResolvedValue({ affected: 0 });
+      await expect(service.reviewKyc('admin-1', 'user-1', 'VERIFIED')).rejects.toMatchObject({ status: 412 });
+      expect(userRepository.update).not.toHaveBeenCalled();
+    });
+
+    it('runs the Nigerian stage sequence with mocked provider responses and a signed webhook', async () => {
+      const profile = { id: 'kyc-1', userId: customer.id, region: 'NG', status: 'NOT_STARTED', provider: null, providerReference: null, identity: {}, sections: [], updatedAt: new Date() };
+      const operations: any[] = [];
+      kycProfileRepository.findOne.mockResolvedValue(profile);
+      providerOperationRepository.findOne.mockImplementation(async ({ where }) => operations.slice().reverse().find((operation) => Object.entries(where).every(([key, value]) => operation[key] === value)) ?? null);
+      providerOperationRepository.save.mockImplementation(async (operation) => { if (!operations.includes(operation)) operations.push(operation); return operation; });
+      configService.get.mockImplementation((key) => ({ FINCRA_KYC_ENABLED: 'true', FINCRA_API_KEY: 'test-key', FINCRA_BUSINESS_ID: 'business-1', METAMAP_CLIENT_ID: 'client', METAMAP_WORKFLOW_ID: 'workflow', METAMAP_WEBHOOK_SECRET: 'webhook-secret' })[key]);
+      sandboxProviderService.verifyFincraBvn.mockResolvedValue({ success: true, data: { verificationStatus: 'verified', response: { firstName: 'JANE', lastName: 'DOE', dateOfBirth: '02-Jan-1990' } } });
+
+      await expect(service.startKyc(customer.id)).resolves.toMatchObject({ provider: 'FINCRA', mode: 'BACKEND_VERIFICATION' });
+      await service.submitKycSection(customer.id, 'GOVERNMENT_ID', { bvn: '22222222222' });
+      expect(profile.status).toBe('IN_PROGRESS');
+      const config = await service.startKyc(customer.id);
+      expect(config.provider).toBe('METAMAP');
+      const payload = { eventId: 'final-event', verificationId: 'verification-1', status: 'verified', metadata: (config as any).metadata };
+      const signature = createHmac('sha256', 'webhook-secret').update(JSON.stringify(payload)).digest('hex');
+      await expect(service.handleKycWebhook(payload, signature)).resolves.toMatchObject({ status: 'MANUAL_REVIEW' });
+      await expect(service.internalTransfer(customer.id, {})).rejects.toMatchObject({ response: { code: 'KYC_REQUIRED' } });
+      await expect(service.reviewKyc('admin-1', customer.id, 'VERIFIED')).resolves.toMatchObject({ kyc: { status: 'VERIFIED' } });
+      expect(kycProfileRepository.update).toHaveBeenCalledWith(expect.objectContaining({ status: 'MANUAL_REVIEW' }), expect.objectContaining({ status: 'VERIFIED' }));
+    });
+  });
+
+  describe('KYC webhook decisions', () => {
+    const secret = 'test-webhook-secret';
+    const signature = (payload: object) => createHmac('sha256', secret).update(JSON.stringify(payload)).digest('hex');
+
+    beforeEach(() => {
+      configService.get.mockImplementation((key: string) => key === 'METAMAP_WEBHOOK_SECRET' ? secret : undefined);
+      notificationDeviceRepository.find.mockResolvedValue([]);
+      userRepository.findOne.mockResolvedValue({ id: 'user-1', kycStatus: 'IN_PROGRESS' });
+      kycProfileRepository.findOne.mockResolvedValue({ id: 'kyc-1', userId: 'user-1', status: 'IN_PROGRESS', region: 'NG', provider: 'METAMAP', identity: { metamapSessionId: 'session-1' } });
+      const events = new Map();
+      providerOperationRepository.findOne.mockImplementation(async ({ where }) => events.get(where.idempotencyKey) ?? null);
+      providerOperationRepository.save.mockImplementation(async (operation) => { events.set(operation.idempotencyKey, operation); return operation; });
+    });
+
+    it('requires final review after progress events with the same verification id', async () => {
+      const base = { verificationId: 'verification-1', metadata: { userId: 'user-1', metamapSessionId: 'session-1' } };
+      const started = { ...base, eventName: 'verification_started' };
+      const completed = { ...base, eventName: 'verification_completed', status: 'verified' };
+      await service.handleKycWebhook(started, signature(started));
+      await expect(service.handleKycWebhook(completed, signature(completed))).resolves.toMatchObject({ updated: true, status: 'MANUAL_REVIEW' });
+      await expect(service.handleKycWebhook(completed, signature(completed))).resolves.toMatchObject({ duplicate: true });
+    });
+
+    it('uses updated identityStatus to revoke a previous approval', async () => {
+      const payload = { eventName: 'verification_updated', verificationId: 'verification-1', userId: 'user-1', metadata: { metamapSessionId: 'session-1' }, status: 'verified', identityStatus: 'rejected' };
+      await expect(service.handleKycWebhook(payload, signature(payload))).resolves.toMatchObject({ status: 'REJECTED' });
+      await expect(service.internalTransfer('user-1', {})).rejects.toMatchObject({ response: { code: 'KYC_REQUIRED' } });
+    });
+
+    it('does not mistake SDK completion or a step result for identity approval', async () => {
+      for (const payload of [
+        { userId: 'user-1', eventName: 'verification_inputs_completed' },
+        { userId: 'user-1', eventName: 'step_completed', status: 'verified' },
+        { userId: 'user-1', eventName: 'verification_completed' },
+      ]) {
+        const result = await service.handleKycWebhook(payload, signature(payload));
+        expect(result).not.toMatchObject({ status: 'VERIFIED' });
+      }
+    });
+
+    it('rejects missing, invalid, and unconfigured webhook signatures', async () => {
+      const payload = { userId: 'user-1', status: 'verified' };
+      await expect(service.handleKycWebhook(payload)).rejects.toMatchObject({ status: 401 });
+      await expect(service.handleKycWebhook(payload, 'invalid')).rejects.toMatchObject({ status: 401 });
+      configService.get.mockReturnValue(undefined);
+      await expect(service.handleKycWebhook(payload)).rejects.toMatchObject({ response: { code: 'KYC_WEBHOOK_NOT_CONFIGURED' } });
+      expect(userRepository.update).not.toHaveBeenCalled();
+    });
+
+    it.each([undefined, 'another-session'])('does not apply a signed event from an unbound session (%s)', async (metamapSessionId) => {
+      const payload = { verificationId: 'verification-1', status: 'verified', metadata: { userId: 'user-1', metamapSessionId } };
+      await expect(service.handleKycWebhook(payload, signature(payload))).resolves.toMatchObject({ updated: false });
+      expect(kycProfileRepository.save).not.toHaveBeenCalled();
+    });
   });
 
   it('keeps USD wallet responses isolated from NGN account data', async () => {
@@ -335,7 +510,7 @@ describe('VidalpayService', () => {
     );
   });
 
-  it('starts MetaMap using the existing user record when KYC profile storage is absent', async () => {
+  it('does not bypass Fincra checks when KYC profile storage is absent', async () => {
     userRepository.findOne.mockResolvedValue({
       id: 'legacy-user',
       kycStatus: 'NOT_STARTED',
@@ -354,24 +529,12 @@ describe('VidalpayService', () => {
         })[key],
     );
 
-    await expect(service.startKyc('legacy-user')).resolves.toEqual(
-      expect.objectContaining({
-        clientId: 'metamap-client',
-        workflowId: 'metamap-workflow',
-        metadata: expect.objectContaining({
-          userId: 'legacy-user',
-          profileId: null,
-          region: 'NG',
-        }),
-      }),
-    );
-    expect(userRepository.update).toHaveBeenCalledWith('legacy-user', {
-      kycStatus: 'IN_PROGRESS',
-    });
+    await expect(service.startKyc('legacy-user')).rejects.toMatchObject({ response: { code: 'FINCRA_KYC_CHECK_REQUIRED' } });
+    expect(userRepository.update).not.toHaveBeenCalled();
     expect(kycProfileRepository.save).not.toHaveBeenCalled();
   });
 
-  it('starts Fincra KYC as primary when Fincra KYC is configured and keeps MetaMap as fallback', async () => {
+  it('starts Fincra KYC first and requires MetaMap as the next provider', async () => {
     userRepository.findOne.mockResolvedValue({
       id: 'user-1',
       kycStatus: 'NOT_STARTED',
@@ -397,7 +560,7 @@ describe('VidalpayService', () => {
       expect.objectContaining({
         provider: 'FINCRA',
         mode: 'BACKEND_VERIFICATION',
-        fallbackProvider: 'METAMAP',
+        nextProvider: 'METAMAP',
         requirements: expect.arrayContaining(['bvn', 'government_id']),
         metadata: expect.objectContaining({ provider: 'FINCRA' }),
       }),
@@ -407,6 +570,7 @@ describe('VidalpayService', () => {
   it('submits BVN verification through Fincra without storing the raw BVN in provider operations', async () => {
     userRepository.findOne.mockResolvedValue({
       id: 'user-1',
+      firstName: 'Jane', lastName: 'Doe', dateOfBirth: '1990-01-02',
       countryCode: 'NG',
       kycStatus: 'IN_PROGRESS',
     });
@@ -439,7 +603,8 @@ describe('VidalpayService', () => {
     transactionRepository.create.mockImplementation((payload: any) => payload);
     transactionRepository.save.mockImplementation(async (payload: any) => payload);
     sandboxProviderService.verifyFincraBvn.mockResolvedValue({
-      data: { id: 'verify-1', status: 'verified' },
+      success: true,
+      data: { id: 'verify-1', verificationStatus: 'verified', response: { firstName: 'JANE', lastName: 'DOE', dateOfBirth: '02-Jan-1990' } },
     });
     configService.get.mockImplementation(
       (key: string) =>
@@ -514,7 +679,19 @@ describe('VidalpayService', () => {
     );
   });
 
-  it('starts MetaMap when KYC profile storage has missing legacy columns', async () => {
+  it('parses the documented Fincra price field and exposes the source environment', async () => {
+    userRepository.findOne.mockResolvedValue({ id: 'user-1' });
+    configService.get.mockImplementation((key) => key === 'FINCRA_API_KEY' ? 'test-key' : undefined);
+    sandboxProviderService.getFincraRates.mockResolvedValue({ success: true, data: { rates: [
+      { baseCurrency: 'USD', quoteCurrency: 'NGN', side: 'sell', price: 1500 },
+      { baseCurrency: 'CAD', quoteCurrency: 'NGN', price: 0 },
+    ] } });
+    await expect(service.getFxRates('user-1')).resolves.toMatchObject({ status: 'AVAILABLE', environment: 'sandbox', rates: [{ fromCurrency: 'USD', toCurrency: 'NGN', rate: 1500, side: 'sell' }] });
+    sandboxProviderService.getFincraRates.mockResolvedValue({ data: { rates: [] } });
+    await expect(service.getFxRates('user-1')).resolves.toMatchObject({ status: 'UNAVAILABLE', rates: [] });
+  });
+
+  it('does not bypass Fincra checks when KYC profile columns are missing', async () => {
     userRepository.findOne.mockResolvedValue({
       id: 'legacy-user',
       kycStatus: 'NOT_STARTED',
@@ -533,22 +710,11 @@ describe('VidalpayService', () => {
         })[key],
     );
 
-    await expect(service.startKyc('legacy-user')).resolves.toEqual(
-      expect.objectContaining({
-        clientId: 'metamap-client',
-        workflowId: 'metamap-workflow',
-        metadata: expect.objectContaining({
-          userId: 'legacy-user',
-          profileId: null,
-          region: 'NG',
-          storageAvailable: false,
-        }),
-      }),
-    );
+    await expect(service.startKyc('legacy-user')).rejects.toMatchObject({ response: { code: 'FINCRA_KYC_CHECK_REQUIRED' } });
     expect(kycProfileRepository.save).not.toHaveBeenCalled();
   });
 
-  it('starts MetaMap even when saving an existing KYC profile hits a legacy schema gap', async () => {
+  it('refuses to start verification when saving the KYC profile hits a schema gap', async () => {
     userRepository.findOne.mockResolvedValue({
       id: 'legacy-user',
       kycStatus: 'NOT_STARTED',
@@ -569,27 +735,16 @@ describe('VidalpayService', () => {
     configService.get.mockImplementation(
       (key: string) =>
         ({
+          FINCRA_KYC_ENABLED: 'true', FINCRA_API_KEY: 'key', FINCRA_BUSINESS_ID: 'business',
           METAMAP_CLIENT_ID: 'metamap-client',
           METAMAP_WORKFLOW_ID: 'metamap-workflow',
         })[key],
     );
 
-    await expect(service.startKyc('legacy-user')).resolves.toEqual(
-      expect.objectContaining({
-        metadata: expect.objectContaining({
-          userId: 'legacy-user',
-          profileId: null,
-          region: 'NG',
-          storageAvailable: false,
-        }),
-      }),
-    );
-    expect(userRepository.update).toHaveBeenCalledWith('legacy-user', {
-      kycStatus: 'IN_PROGRESS',
-    });
+    await expect(service.startKyc('legacy-user')).rejects.toMatchObject({ response: { code: 'KYC_STORAGE_UNAVAILABLE' } });
   });
 
-  it('starts MetaMap when Postgres reports a schema-qualified missing KYC table', async () => {
+  it('does not bypass Fincra checks when Postgres reports a missing KYC table', async () => {
     userRepository.findOne.mockResolvedValue({
       id: 'legacy-user',
       kycStatus: 'NOT_STARTED',
@@ -608,15 +763,7 @@ describe('VidalpayService', () => {
         })[key],
     );
 
-    await expect(service.startKyc('legacy-user')).resolves.toEqual(
-      expect.objectContaining({
-        metadata: expect.objectContaining({
-          userId: 'legacy-user',
-          profileId: null,
-          region: 'NG',
-        }),
-      }),
-    );
+    await expect(service.startKyc('legacy-user')).rejects.toMatchObject({ response: { code: 'FINCRA_KYC_CHECK_REQUIRED' } });
     expect(kycProfileRepository.save).not.toHaveBeenCalled();
   });
 
@@ -670,6 +817,7 @@ describe('VidalpayService', () => {
   });
 
   it('reports internal transfer storage unavailable when operation storage is absent', async () => {
+    userRepository.findOne.mockResolvedValue({ id: 'user-1', kycStatus: 'VERIFIED' });
     providerOperationRepository.findOne.mockRejectedValue(
       Object.assign(
         new Error('relation "public.provider_operation" does not exist'),
@@ -831,6 +979,7 @@ describe('VidalpayService', () => {
   });
 
   it('persists blocked provider operations and returns structured unavailable errors', async () => {
+    userRepository.findOne.mockResolvedValue({ id: 'user-1', kycStatus: 'VERIFIED' });
     providerOperationRepository.findOne.mockResolvedValue(null);
 
     await expect(
@@ -1901,12 +2050,15 @@ describe('VidalpayService', () => {
   );
 
   it('maps a MetaMap webhook to KYC state and deduplicates the event', async () => {
+    configService.get.mockImplementation((key: string) => key === 'METAMAP_WEBHOOK_SECRET' ? 'test-webhook-secret' : undefined);
     userRepository.findOne.mockResolvedValue({ id: 'user-1' });
     kycProfileRepository.findOne.mockResolvedValue({
       id: 'kyc-1',
       userId: 'user-1',
       status: 'IN_PROGRESS',
       region: 'US',
+      provider: 'METAMAP',
+      identity: { metamapSessionId: 'session-1' },
       capabilities: {},
       limits: {},
     });
@@ -1922,25 +2074,27 @@ describe('VidalpayService', () => {
     const payload = {
       eventId: 'metamap-event-1',
       userId: 'user-1',
+      metadata: { metamapSessionId: 'session-1' },
       status: 'APPROVED',
       verificationId: 'verification-1',
     };
 
-    await expect(service.handleKycWebhook(payload)).resolves.toEqual(
+    const signature = createHmac('sha256', 'test-webhook-secret').update(JSON.stringify(payload)).digest('hex');
+    await expect(service.handleKycWebhook(payload, signature)).resolves.toEqual(
       expect.objectContaining({
         received: true,
         updated: true,
-        status: 'VERIFIED',
+        status: 'MANUAL_REVIEW',
       }),
     );
     expect(userRepository.update).toHaveBeenCalledWith('user-1', {
-      kycStatus: 'VERIFIED',
+      kycStatus: 'MANUAL_REVIEW',
     });
     expect(kycProfileRepository.save).toHaveBeenCalledWith(
       expect.objectContaining({
-        status: 'VERIFIED',
-        capabilities: expect.objectContaining({ canTransfer: true }),
-        limits: expect.objectContaining({ accountProgressLevel: 4 }),
+        status: 'MANUAL_REVIEW',
+        capabilities: expect.objectContaining({ canTransfer: false }),
+        limits: expect.objectContaining({ accountProgressLevel: 3 }),
       }),
     );
     expect(providerOperationRepository.save).toHaveBeenCalledWith(
@@ -1953,31 +2107,37 @@ describe('VidalpayService', () => {
 
     providerOperationRepository.findOne.mockResolvedValue({
       status: 'APPLIED',
-      metadata: { status: 'VERIFIED' },
+      metadata: { status: 'MANUAL_REVIEW', providerStatus: 'VERIFIED' },
     });
-    await expect(service.handleKycWebhook(payload)).resolves.toEqual(
+    await expect(service.handleKycWebhook(payload, signature)).resolves.toEqual(
       expect.objectContaining({
         received: true,
         updated: false,
         duplicate: true,
-        status: 'VERIFIED',
+        status: 'MANUAL_REVIEW',
       }),
     );
   });
 
   it('updates the returned KYC user and writes an admin review audit record', async () => {
-    const targetUser = { id: 'user-1', kycStatus: 'IN_PROGRESS' };
+    const targetUser = { id: 'user-1', kycStatus: 'IN_PROGRESS', firstName: 'Jane', lastName: 'Doe', dateOfBirth: '1990-01-02' };
     userRepository.findOne
-      .mockResolvedValueOnce({ id: 'admin-1' })
+      .mockResolvedValueOnce({ id: 'admin-1', role: UserRole.SUPER_ADMIN })
       .mockResolvedValue(targetUser);
     kycProfileRepository.findOne.mockResolvedValue({
       id: 'kyc-1',
       userId: 'user-1',
-      status: 'IN_PROGRESS',
-      region: 'US',
+      status: 'MANUAL_REVIEW',
+      region: 'NG',
+      providerReference: 'verification-1',
+      updatedAt: new Date('2026-10-15T00:00:00Z'),
       capabilities: {},
       limits: {},
     });
+    providerOperationRepository.findOne
+      .mockResolvedValueOnce({ status: 'APPLIED', providerReference: 'verification-1', metadata: { providerStatus: 'VERIFIED' } })
+      .mockResolvedValueOnce({ status: 'VERIFIED', metadata: { identityMatched: true, identityFingerprint: fincraIdentityFingerprint(targetUser), environment: 'sandbox' } });
+    kycProfileRepository.update.mockResolvedValue({ affected: 1 });
     notificationPreferenceRepository.findOne.mockResolvedValue({
       userId: 'user-1',
       preferences: { push: false },
@@ -2005,7 +2165,7 @@ describe('VidalpayService', () => {
   it('lets admins request more KYC information and exposes action-required status to mobile', async () => {
     const targetUser = { id: 'user-1', kycStatus: 'UNDER_REVIEW' };
     userRepository.findOne
-      .mockResolvedValueOnce({ id: 'admin-1' })
+      .mockResolvedValueOnce({ id: 'admin-1', role: UserRole.ADMIN })
       .mockResolvedValue(targetUser);
     kycProfileRepository.findOne.mockResolvedValue({
       id: 'kyc-1',
@@ -2076,6 +2236,7 @@ describe('VidalpayService', () => {
     userRepository.findOne.mockResolvedValue({
       id: 'user-1',
       country: 'Nigeria',
+      kycStatus: 'VERIFIED',
       pin,
     });
     providerStatusService.isCapabilityEnabled.mockReturnValue(true);
@@ -2140,6 +2301,7 @@ describe('VidalpayService', () => {
     userRepository.findOne.mockResolvedValue({
       id: 'user-1',
       country: 'Nigeria',
+      kycStatus: 'VERIFIED',
       pin,
     });
     providerOperationRepository.findOne.mockResolvedValue(null);
@@ -2333,6 +2495,7 @@ describe('VidalpayService', () => {
     userRepository.findOne.mockResolvedValue({
       id: 'user-1',
       country: 'Nigeria',
+      kycStatus: 'VERIFIED',
       pin,
     });
     providerOperationRepository.findOne.mockResolvedValue({

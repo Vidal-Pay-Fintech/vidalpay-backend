@@ -1,16 +1,59 @@
 # Fincra KYC, FX, wallet, card, and VTU readiness
 
+## Environment safety and verification
+
+- `FINCRA_ENV=sandbox` is the default, with `https://sandboxapi.fincra.com`.
+- `FINCRA_ENV=live` explicitly selects `https://api.fincra.com`. No deployment settings were changed by this patch.
+- `FINCRA_BASE_URL` is optional. If supplied, it must exactly match the selected official HTTPS origin, without userinfo, path, query, or fragment. Invalid/mismatched settings fail at startup instead of silently falling back.
+- Authenticated requests cannot override the origin or follow redirects. The sandbox probe refuses live configuration. A timeout, 4xx/5xx, or business rejection is not successful authentication.
+- Use separate deployments/databases for sandbox and live, with separate API keys, business IDs, webhook secrets, queues and provider identifiers. Never point live keys at a database containing sandbox accounts. The code cannot determine a credential's environment from its value.
+- `npm run verify:core` runs local backend tests/build, schema-repair tests, mobile type checking and mobile policy tests. It reports real-provider/device/deployment checks as unverified; it does not deploy or transact.
+- The Render login failure is still confirmed by the supplied 2026-10-15 log: PostgreSQL `42703`, `column user.region does not exist`. The local repair has not been applied to the deployed database; see the procedure below. The general `db:migrate` command remains a no-op; do not substitute the MySQL-oriented historical migration on PostgreSQL.
+
+Official references: https://docs.fincra.com/reference/rates and https://docs.fincra.com/di/docs/bvn-resolution-1.
+
+## Render login schema repair
+
+The login query selects `user.region` before checking the password, so this database/schema mismatch causes HTTP 500 independently of the supplied credentials. Browser animation/font deprecation warnings are not the cause.
+
+1. Ensure the reviewed backend revision containing `scripts/repair-kyc-region.js` and its package command is deployed. A script present only in the local checkout is not available in Render's shell.
+2. In the affected backend service's Render shell, confirm the intended database target and a usable backup. Keep database URLs and credentials private. The script reads the service's existing `DATABASE_URL` and `DB_SSL`; it does not load a local `.env` file.
+3. Run the read-only check:
+
+   ```sh
+   npm run db:repair-kyc-region -- --check
+   ```
+
+   Exit code 2 means required columns are missing. Other failures need investigation before applying anything.
+
+4. After reviewing the target and missing-column output, run the additive repair and then check again:
+
+   ```sh
+   npm run db:repair-kyc-region -- --apply
+   npm run db:repair-kyc-region -- --check
+   ```
+
+   The repair adds only missing nullable `countryCode`, `residency`, and `region` columns in a transaction with bounded lock/statement timeouts. It does not delete accounts, reset passwords, infer residence, approve KYC, or activate wallets. A lock timeout is a failed/rolled-back attempt, not success.
+
+5. Confirm `missing: []`, retry login with the user's own credentials, and inspect the new server logs. This resolves the demonstrated missing-column failure only; any subsequent error needs separate diagnosis. Do not enable TypeORM synchronization to work around it.
+
 ## Fincra KYC
 
-Fincra is now preferred for Nigeria KYC only when these backend variables are configured:
+The implemented first step is Fincra's Nigerian BVN check, requiring:
 
 - `FINCRA_KYC_ENABLED=true`
 - `FINCRA_API_KEY`
 - `FINCRA_BUSINESS_ID`
 
-When enabled, `POST /kyc/start` returns a backend-verification contract for Fincra and keeps MetaMap as fallback if MetaMap credentials are present. The implemented Fincra identity check is BVN verification through the backend. Raw BVN values are not stored in provider operations; only a fingerprint and sanitized provider response are kept.
+`POST /kyc/start` first returns Fincra backend verification. The BVN response must explicitly succeed and its first name, last name and date of birth must match the stored customer identity. Unknown or mismatched results cannot advance. Update missing personal information before submitting. Raw BVN and provider face images are not stored in provider operations.
 
-MetaMap remains the fallback hosted verification provider.
+After that server-side check, the next start request launches MetaMap. The mobile identity form returns to that launch step instead of the unimplemented document-upload path. MetaMap is a required second step, not a fallback around a failed Fincra check.
+
+Signed MetaMap approval places the account in `MANUAL_REVIEW`, not `VERIFIED`. Final approval requires a super-admin, matching persisted provider evidence, and the same customer identity/environment. The final write requires the same verification reference and manual-review state, so it cannot overwrite a concurrent rejection. Client-submitted provider/reviewer flags are not trusted. Storage failures block verification writes while legacy session reads remain supported.
+
+Foreign-country Fincra customer-check contracts and per-currency final-review workflows are NOT implemented by this change. They must not be simulated with the Nigerian BVN endpoint or by treating MetaMap alone as approval. Existing legacy `VERIFIED` accounts have not been bulk-revoked or backfilled; their approval evidence still needs review.
+
+New MetaMap launches carry a server-generated session identifier which must return in the signed webhook metadata. In-flight legacy sessions without this binding must be reviewed and restarted; they cannot approve or reject a different customer's profile through client-supplied metadata.
 
 ## FX rates and quotes
 
@@ -28,6 +71,8 @@ Supported display currencies are:
 - CAD
 
 Rates are read-only through Fincra treasury rates when `FINCRA_API_KEY` is configured. Quotes are `QUOTE_ONLY` and `executable=false`.
+
+The backend parses the documented `price` field and follows bounded pagination. Mobile Home reads `/fx/rates`, not an amount-less `/fx/quotes` request. Sandbox rates are labelled Sandbox; public fallback/display estimates are Reference rates, not executable quotes or measured price movements.
 
 `POST /fx/convert` remains blocked until ledger holds, settlement, reconciliation, and reversal behavior are implemented.
 
@@ -54,7 +99,11 @@ VTU.ng v2 adapter support is now prepared for:
 - requery support
 - webhook receipt
 
-Purchases write idempotent provider operations and do not debit/finalize wallet balances until requery/webhook settlement and ledger finalization are implemented.
+Purchases currently create ledger holds and provider operations; webhook settlement/reversal logic exists. Automatic requery, timeout reconciliation, immediate terminal-response handling and multi-instance token coordination still need validation/fixes. Do not treat this adapter as production-ready or as a free sandbox.
+
+## Remaining provider migration work
+
+The requested target is Fincra wallets and VTU bills, with no new PayVessel routing. Legacy PayVessel/Unit wallet readiness labels, fallback paths and other provider references still exist outside this patch. Migrate those separately while preserving historical records. Do not infer merchant entitlements, financial limits, foreign KYC availability, card issuing or loan readiness from credentials or passing local tests.
 
 ## Crypto and stablecoins
 

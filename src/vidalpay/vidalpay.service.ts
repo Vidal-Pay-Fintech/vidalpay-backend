@@ -1,5 +1,6 @@
 import {
   BadRequestException,
+  ForbiddenException,
   Injectable,
   NotFoundException,
   PreconditionFailedException,
@@ -32,6 +33,7 @@ import { Wallet } from 'src/database/entities/wallet.entity';
 import { TokenType } from 'src/common/enum/token-type.enum';
 import { MailService } from 'src/mail/mail.service';
 import { Currency } from 'src/utils/enums/wallet.enum';
+import { UserRole } from 'src/utils/enums/user.enum';
 import { TagIdGenerator } from 'src/utils/tagIdGenerator';
 import {
   BlockedResponse,
@@ -40,6 +42,7 @@ import {
 } from './contracts';
 import { ProviderStatusService } from './provider-status.service';
 import { FincraSandboxService } from './fincra-sandbox.service';
+import { fincraIdentityFingerprint, matchesFincraIdentity } from './fincra-identity';
 import {
   FincraVirtualAccountRequestPayload,
   FincraWalletService,
@@ -178,7 +181,7 @@ export class VidalpayService {
     const accountLevel = this.buildAccountLevel(user, kyc);
     return {
       accountLevel,
-      limits: kyc.limits ?? this.defaultLimits(kyc.status),
+      limits: this.defaultLimits(kyc.status),
       providerLimits: {
         unit: null,
         payvessel: null,
@@ -750,6 +753,7 @@ export class VidalpayService {
   }
 
   async externalTransfer(userId: string, payload: AnyRecord) {
+    await this.assertKycApproved(userId);
     const currency = this.normalizeCurrency(payload.currency);
     await this.recordBlockedOperation(userId, 'external_transfer', payload, {
       provider:
@@ -768,6 +772,7 @@ export class VidalpayService {
   }
 
   async createCardTopUpIntent(userId: string, payload: AnyRecord) {
+    await this.assertKycApproved(userId);
     await this.recordBlockedOperation(userId, 'card_topup', payload, {
       provider: 'Card top-up provider',
       capability: 'card_topup',
@@ -964,6 +969,7 @@ export class VidalpayService {
     type: VtuServiceKind,
     payload: AnyRecord,
   ) {
+    await this.assertKycApproved(userId);
     const capabilityByKind: Record<VtuServiceKind, ProviderCapability> = {
       airtime: 'airtime_purchase',
       data: 'data_purchase',
@@ -1137,19 +1143,21 @@ export class VidalpayService {
         rates: [],
         missingRequirements: ['FINCRA_API_KEY'],
         message:
-          'Live exchange rates require the backend Fincra sandbox API key.',
+          'Exchange rates require a configured backend Fincra connection.',
       };
     }
 
     try {
       const raw = await this.sandboxProviderService.getFincraRates();
+      const rates = this.normalizeFincraRates(raw, pairs);
       return {
         provider: 'Fincra',
-        status: 'AVAILABLE',
+        status: rates.length ? 'AVAILABLE' : 'UNAVAILABLE',
         readinessStatus: 'CONFIGURED_NOT_LIVE_TESTED',
         baseCurrencies: [...fxCurrencies],
         quoteCurrencies: [...fxCurrencies],
-        rates: this.normalizeFincraRates(raw, pairs),
+        rates,
+        environment: this.configService.get<string>('FINCRA_ENV')?.trim().toLowerCase() || 'sandbox',
         fetchedAt: new Date().toISOString(),
         source: 'FINCRA_TREASURY_RATES',
       };
@@ -1212,6 +1220,7 @@ export class VidalpayService {
   }
 
   async convertFx(userId: string, payload: AnyRecord) {
+    await this.assertKycApproved(userId);
     await this.recordBlockedOperation(userId, 'fx_convert', payload, {
       provider: 'Fincra',
       capability: 'fx_convert',
@@ -1221,6 +1230,7 @@ export class VidalpayService {
   }
 
   async internalTransfer(userId: string, payload: AnyRecord) {
+    await this.assertKycApproved(userId);
     const currency = this.normalizeCurrency(payload.currency);
     const amount = this.normalizeAmount(payload.amount);
     const recipientTag =
@@ -1978,9 +1988,46 @@ export class VidalpayService {
       actionRequired?: boolean;
     } = {},
   ) {
-    await this.findUser(adminUserId);
+    const admin = await this.findUser(adminUserId);
+    if (![UserRole.ADMIN, UserRole.SUPER_ADMIN].includes(admin.role)) {
+      throw new ForbiddenException('Only KYC administrators can review verification.');
+    }
+    if (decision === 'VERIFIED' && admin.role !== UserRole.SUPER_ADMIN) {
+      throw new ForbiddenException('Final KYC approval requires a super administrator.');
+    }
+    if (adminUserId === userId) {
+      throw new ForbiddenException('You cannot review your own KYC.');
+    }
     const user = await this.findUser(userId);
     const profile = await this.getKycProfileForSession(user);
+    if (!profile.id) {
+      throw new ServiceUnavailableException({ code: 'KYC_STORAGE_UNAVAILABLE', message: 'KYC review requires persistent verification storage.' });
+    }
+    if (decision === 'VERIFIED') {
+      if (profile.status !== 'MANUAL_REVIEW') {
+        throw new PreconditionFailedException({ code: 'KYC_REVIEW_NOT_READY', message: 'Verification must complete provider checks before final review.' });
+      }
+      const evidence = await this.providerOperationRepository.findOne({
+        where: { userId, type: 'kyc_webhook', provider: 'MetaMap' },
+        order: { createdAt: 'DESC' },
+      });
+      if (evidence?.status !== 'APPLIED' || evidence.metadata?.providerStatus !== 'VERIFIED' ||
+          !profile.providerReference || evidence.providerReference !== profile.providerReference) {
+        throw new PreconditionFailedException({ code: 'KYC_PROVIDER_CHECK_REQUIRED', message: 'A matching, persisted MetaMap approval is required before final review.' });
+      }
+      const fincra = await this.providerOperationRepository.findOne({
+        where: { userId, type: 'kyc_fincra_bvn', provider: 'Fincra' },
+        order: { createdAt: 'DESC' },
+      });
+      // A BVN lookup is not proof of customer identity. Require the matching
+      // result from the server-side check, never fields supplied by the app.
+      const environment = this.configService.get<string>('FINCRA_ENV')?.trim().toLowerCase() || 'sandbox';
+      if (profile.region !== 'NG' || fincra?.status !== 'VERIFIED' ||
+          fincra.metadata?.identityMatched !== true || fincra.metadata?.environment !== environment ||
+          fincra.metadata?.identityFingerprint !== fincraIdentityFingerprint(user)) {
+        throw new PreconditionFailedException({ code: 'FINCRA_KYC_CHECK_REQUIRED', message: 'A completed Fincra identity check for this customer and environment is required before approval.' });
+      }
+    }
     const normalizedReason = this.asString(reason);
     const statusMessage =
       this.asString(options.message) ??
@@ -2014,7 +2061,14 @@ export class VidalpayService {
       missingRequirements,
       decision,
     );
-    if (profile.id) {
+    if (decision === 'VERIFIED') {
+      const saved = await this.kycProfileRepository.update(
+        { id: profile.id, status: 'MANUAL_REVIEW', providerReference: profile.providerReference! },
+        { status: profile.status, statusMessage: profile.statusMessage, rejectionReason: profile.rejectionReason,
+          identity: profile.identity, sections: profile.sections, capabilities: profile.capabilities, limits: profile.limits } as QueryDeepPartialEntity<KycProfile>,
+      );
+      if (saved.affected !== 1) throw new PreconditionFailedException('Verification changed during review. Reload it before approving.');
+    } else {
       await this.kycProfileRepository.save(profile);
     }
     user.kycStatus = decision;
@@ -2128,6 +2182,10 @@ export class VidalpayService {
     const profile = await this.getKycProfileForSession(user);
     const region = profile.region ?? this.inferRegion(user);
 
+    if (['VERIFIED', 'SUBMITTED', 'UNDER_REVIEW', 'MANUAL_REVIEW'].includes(profile.status)) {
+      return { mode: 'STATUS_ONLY', status: profile.status, provider: profile.provider };
+    }
+
     if (!region) {
       throw new BadRequestException(
         createBlockedResponse({
@@ -2155,15 +2213,28 @@ export class VidalpayService {
       );
     }
 
-    if (this.fincraKycEnabled(region)) {
+    const fincraCheck = await this.providerOperationRepository.findOne({
+      where: { userId, type: 'kyc_fincra_bvn', provider: 'Fincra' },
+      order: { createdAt: 'DESC' },
+    });
+    const fincraPassed = region === 'NG' && fincraCheck?.status === 'VERIFIED' &&
+      fincraCheck.metadata?.identityMatched === true &&
+      fincraCheck.metadata?.identityFingerprint === fincraIdentityFingerprint(user) &&
+      fincraCheck.metadata?.environment === (this.configService.get<string>('FINCRA_ENV')?.trim().toLowerCase() || 'sandbox');
+
+    if (!fincraPassed && this.fincraKycEnabled(region)) {
       profile.region = region;
       profile.provider = 'FINCRA';
-      profile.status =
-        profile.status === 'NOT_STARTED' ? 'IN_PROGRESS' : profile.status;
+      profile.status = 'IN_PROGRESS';
+      profile.capabilities = this.capabilitiesForKycStatus(profile.status);
+      profile.limits = this.defaultLimits(profile.status);
       const kycStorageAvailable = await this.persistKycStartState(
         userId,
         profile,
       );
+      if (!kycStorageAvailable) {
+        throw new ServiceUnavailableException({ code: 'KYC_STORAGE_UNAVAILABLE', message: 'Verification cannot start until secure KYC storage is available.' });
+      }
       return {
         provider: 'FINCRA',
         mode: 'BACKEND_VERIFICATION',
@@ -2174,7 +2245,7 @@ export class VidalpayService {
           address: '/api/v1/user/kyc/address',
           liveness: '/api/v1/user/kyc/liveness',
         },
-        fallbackProvider: this.metamapConfigured() ? 'METAMAP' : null,
+        nextProvider: 'METAMAP',
         metadata: {
           userId,
           profileId: kycStorageAvailable ? (profile.id ?? null) : null,
@@ -2183,6 +2254,15 @@ export class VidalpayService {
           storageAvailable: kycStorageAvailable,
         },
       };
+    }
+
+    if (!fincraPassed) {
+      throw new ServiceUnavailableException({
+        code: 'FINCRA_KYC_CHECK_REQUIRED',
+        message: region === 'NG'
+          ? 'Identity checks are temporarily unavailable. Please try again later or contact support.'
+          : 'Verification for this country is not available yet. Please contact support.',
+      });
     }
 
     const clientId =
@@ -2198,7 +2278,7 @@ export class VidalpayService {
         feature: 'KYC',
         capability: 'kyc_start',
         provider: 'Fincra/MetaMap',
-        reason: 'Neither Fincra KYC nor MetaMap KYC is configured.',
+        reason: 'The required MetaMap verification step is not configured.',
         missingRequirements: [
           'FINCRA_KYC_ENABLED',
           'FINCRA_API_KEY',
@@ -2211,12 +2291,19 @@ export class VidalpayService {
 
     profile.region = region;
     profile.provider = 'METAMAP';
-    profile.status =
-      profile.status === 'NOT_STARTED' ? 'IN_PROGRESS' : profile.status;
+    profile.providerReference = null;
+    const metamapSessionId = randomUUID();
+    profile.identity = { ...profile.identity, metamapSessionId };
+    profile.status = 'IN_PROGRESS';
+    profile.capabilities = this.capabilitiesForKycStatus(profile.status);
+    profile.limits = this.defaultLimits(profile.status);
     const kycStorageAvailable = await this.persistKycStartState(
       userId,
       profile,
     );
+    if (!kycStorageAvailable) {
+      throw new ServiceUnavailableException({ code: 'KYC_STORAGE_UNAVAILABLE', message: 'Verification cannot start until secure KYC storage is available.' });
+    }
 
     return {
       provider: 'METAMAP',
@@ -2227,6 +2314,7 @@ export class VidalpayService {
         profileId: kycStorageAvailable ? (profile.id ?? null) : null,
         region,
         provider: 'METAMAP',
+        metamapSessionId,
         storageAvailable: kycStorageAvailable,
       },
     };
@@ -2255,26 +2343,36 @@ export class VidalpayService {
   ) {
     const user = await this.findUser(userId);
     const profile = await this.getOrCreateKycProfile(user);
+    if (profile.status === 'VERIFIED') return this.normalizeKycProfile(profile);
     profile.identity = {
       ...(profile.identity ?? {}),
-      ...this.redactPayload(payload),
+      ...this.customerKycIdentity(payload),
     };
     if (
       section === 'GOVERNMENT_ID' &&
       profile.provider === 'FINCRA' &&
       this.fincraKycEnabled(profile.region ?? this.inferRegion(user))
     ) {
-      profile.identity = {
-        ...profile.identity,
-        fincra: await this.verifyFincraIdentity(userId, user, payload),
-      };
+      if (!/^\d{11}$/.test(this.asString(payload.bvn) ?? '')) {
+        throw new BadRequestException('Enter a valid 11-digit BVN.');
+      }
+      const verification = await this.verifyFincraIdentity(userId, user, payload);
+      if (verification.status !== 'VERIFIED') {
+        throw new ServiceUnavailableException({
+          code: 'KYC_IDENTITY_CHECK_FAILED',
+          message: 'Identity verification could not be completed. Please try again or contact support.',
+        });
+      }
+      profile.identity = { ...profile.identity, fincra: verification };
     }
     profile.sections = this.updateKycSection(
       profile.sections,
       section,
       'SUBMITTED',
     );
-    profile.status = this.computeKycStatus(profile.sections);
+    profile.status = profile.provider === 'FINCRA' ? 'IN_PROGRESS' : this.computeKycStatus(profile.sections);
+    profile.capabilities = this.capabilitiesForKycStatus(profile.status);
+    profile.limits = this.defaultLimits(profile.status);
     await this.kycProfileRepository.save(profile);
     await this.userRepository.update(userId, { kycStatus: profile.status });
 
@@ -2284,14 +2382,17 @@ export class VidalpayService {
   async submitKycProfile(userId: string, payload: AnyRecord) {
     const user = await this.findUser(userId);
     const profile = await this.getOrCreateKycProfile(user);
+    if (profile.status === 'VERIFIED') return this.normalizeKycProfile(profile);
     profile.identity = {
       ...(profile.identity ?? {}),
-      ...(this.asRecord(payload.identity) ?? {}),
+      ...this.customerKycIdentity(this.asRecord(payload.identity) ?? {}),
     };
     profile.uploads = Array.isArray(payload.documents)
       ? (payload.documents as AnyRecord[])
       : profile.uploads;
     profile.status = 'UNDER_REVIEW';
+    profile.capabilities = this.capabilitiesForKycStatus(profile.status);
+    profile.limits = this.defaultLimits(profile.status);
     await this.kycProfileRepository.save(profile);
     await this.userRepository.update(userId, { kycStatus: profile.status });
     return this.normalizeKycProfile(profile);
@@ -2302,10 +2403,7 @@ export class VidalpayService {
 
     const eventId =
       this.asString(payload.eventId) ??
-      this.asString(payload.event_id) ??
-      this.asString(payload.verificationId) ??
-      this.asString(payload.reference) ??
-      this.asString(payload.id);
+      this.asString(payload.event_id);
     const idempotencyKey =
       eventId ??
       `payload:${createHash('sha256')
@@ -2332,11 +2430,16 @@ export class VidalpayService {
     const metadata = this.asRecord(payload.metadata) ?? {};
     const userId =
       this.asString(metadata.userId) ?? this.asString(payload.userId);
-    const status = this.mapProviderKycStatus(
-      this.asString(payload.status) ??
+    const providerStatus = this.mapProviderKycStatus(
+      this.asString(payload.identityStatus) ??
+        this.asString(payload.status) ??
         this.asString(payload.verificationStatus) ??
         this.asString(payload.eventName),
     );
+
+    if (!providerStatus || payload.eventName === 'step_completed') {
+      return { received: true, updated: false, reason: 'No overall verification decision in this event' };
+    }
 
     if (!userId) {
       return {
@@ -2348,15 +2451,31 @@ export class VidalpayService {
 
     const user = await this.findUser(userId);
     const profile = await this.getKycProfileForSession(user);
+    if (!profile.id) {
+      throw new ServiceUnavailableException({ code: 'KYC_STORAGE_UNAVAILABLE', message: 'KYC webhook processing requires persistent verification storage.' });
+    }
+    const verificationId = this.asString(payload.verificationId) ?? this.asString(payload.id);
+    if (profile.provider !== 'METAMAP' || !profile.identity?.metamapSessionId ||
+        metadata.metamapSessionId !== profile.identity.metamapSessionId) {
+      return { received: true, updated: false, reason: 'This event belongs to a different verification session' };
+    }
+    if (!verificationId || (profile.providerReference && profile.providerReference !== verificationId)) {
+      return { received: true, updated: false, reason: 'Verification reference is missing or does not match the active verification' };
+    }
+    const status = providerStatus === 'VERIFIED'
+      ? profile.status === 'VERIFIED' ? 'VERIFIED' : 'MANUAL_REVIEW'
+      : providerStatus;
+    if (['VERIFIED', 'MANUAL_REVIEW', 'REJECTED', 'FAILED', 'EXPIRED', 'RETRY_REQUIRED'].includes(profile.status) &&
+        ['IN_PROGRESS', 'UNDER_REVIEW', 'SUBMITTED'].includes(status)) {
+      return { received: true, updated: false, status: profile.status };
+    }
     profile.status = status;
     profile.statusMessage = this.asString(payload.message) ?? null;
     profile.rejectionReason = this.asString(payload.rejectionReason) ?? null;
     profile.capabilities = this.capabilitiesForKycStatus(status);
     profile.limits = this.defaultLimits(status);
-    profile.providerReference =
-      this.asString(payload.verificationId) ??
-      this.asString(payload.id) ??
-      null;
+    profile.providerReference = verificationId;
+    profile.sections = this.markMissingKycSections(profile.sections, profile.region, [], status);
     if (profile.id) {
       await this.kycProfileRepository.save(profile);
     }
@@ -2379,7 +2498,7 @@ export class VidalpayService {
           providerReference: profile.providerReference,
           requestPayload: this.redactPayload(payload),
           responsePayload: { status, userId },
-          metadata: { status, eventId: eventId ?? null },
+          metadata: { status, providerStatus, eventId: eventId ?? null },
         }),
       );
     } catch (error) {
@@ -2441,6 +2560,7 @@ export class VidalpayService {
     type: 'virtual' | 'physical',
     payload: AnyRecord,
   ) {
+    await this.assertKycApproved(userId);
     const currency = this.normalizeCurrency(payload.currency ?? Currency.USD);
     const capability: ProviderCapability =
       currency === Currency.USD
@@ -2580,6 +2700,9 @@ export class VidalpayService {
     operation: string,
     payload: AnyRecord = {},
   ) {
+    if (!['freeze', 'terminate'].includes(operation)) {
+      await this.assertKycApproved(userId);
+    }
     await this.getCard(userId, cardId);
     const capabilityByOperation: Record<string, ProviderCapability> = {
       freeze: 'card_freeze',
@@ -3125,6 +3248,7 @@ export class VidalpayService {
     payload: AnyRecord,
     type: string,
   ) {
+    await this.assertKycApproved(userId);
     await this.assertProductAccess(userId, 'investments');
     await this.recordBlockedOperation(userId, type, payload, {
       provider: 'Investment provider',
@@ -3165,6 +3289,7 @@ export class VidalpayService {
   }
 
   async blockTaxOperation(userId: string, payload: AnyRecord, type: string) {
+    await this.assertKycApproved(userId);
     await this.assertProductAccess(userId, 'foreign_tax');
     await this.recordBlockedOperation(userId, type, payload, {
       provider: 'Tax provider',
@@ -3174,6 +3299,7 @@ export class VidalpayService {
   }
 
   async blockLoanOperation(userId: string, payload: AnyRecord, type: string) {
+    await this.assertKycApproved(userId);
     await this.assertProductAccess(userId, 'lending');
     await this.recordBlockedOperation(userId, type, payload, {
       provider: 'Unit.co',
@@ -3370,6 +3496,7 @@ export class VidalpayService {
     capability: ProviderCapability,
     payload: AnyRecord = {},
   ) {
+    await this.assertKycApproved(userId);
     await this.assertCapabilityProductAccess(userId, capability);
     await this.recordBlockedOperation(userId, type, payload, {
       provider: this.providerStatusService.getStatus(capability).provider,
@@ -4536,10 +4663,9 @@ export class VidalpayService {
         source: 'ACCOUNT_REGION',
       },
       provider: kyc.provider,
-      capabilities:
-        kyc.capabilities ?? this.capabilitiesForKycStatus(kyc.status),
+      capabilities: this.capabilitiesForKycStatus(kyc.status),
       productAvailability: this.buildProductAvailability(region),
-      limits: kyc.limits ?? this.defaultLimits(kyc.status),
+      limits: this.defaultLimits(kyc.status),
       security: this.buildSecurityOverview(user),
       accountRails: this.buildAccountRails(orderedWallets, defaultCurrency),
       fundingMethods: this.buildFundingMethods(),
@@ -4916,9 +5042,8 @@ export class VidalpayService {
         profile.sections ??
         this.defaultKycSections(profile.region, profile.status),
       uploads: profile.uploads ?? [],
-      capabilities:
-        profile.capabilities ?? this.capabilitiesForKycStatus(profile.status),
-      limits: profile.limits ?? this.defaultLimits(profile.status),
+      capabilities: this.capabilitiesForKycStatus(profile.status),
+      limits: this.defaultLimits(profile.status),
       identity,
       providerReference: profile.providerReference,
       createdAt: profile.createdAt,
@@ -4995,7 +5120,7 @@ export class VidalpayService {
       missingRequirements: normalizedMissingRequirements,
       actionRequired: kycStatus === 'RETRY_REQUIRED',
       capabilities: this.capabilitiesForKycStatus(kycStatus),
-      limits: kyc.limits ?? this.defaultLimits(kycStatus),
+      limits: this.defaultLimits(kycStatus),
       message: verified
         ? 'KYC is verified. Provider-specific limits still depend on live provider provisioning.'
         : kycStatus === 'RETRY_REQUIRED'
@@ -5744,6 +5869,20 @@ export class VidalpayService {
     return { user, eligibility };
   }
 
+  private async assertKycApproved(userId: string) {
+    const user = await this.findUser(userId);
+    const profile = await this.getKycProfileSnapshot(user);
+    if (profile.status !== 'VERIFIED') {
+      throw new ForbiddenException({
+        code: 'KYC_REQUIRED',
+        message: 'Complete identity verification and wait for approval before spending.',
+        kycStatus: profile.status,
+        actionRequired: true,
+        missingRequirements: ['APPROVED_IDENTITY_VERIFICATION'],
+      });
+    }
+  }
+
   private productForCapability(
     capability: ProviderCapability,
   ): ProductCode | null {
@@ -5835,15 +5974,6 @@ export class VidalpayService {
     );
   }
 
-  private metamapConfigured() {
-    return Boolean(
-      (this.configService.get<string>('METAMAP_CLIENT_ID') ??
-        this.configService.get<string>('METAMAP_MERCHANT_TOKEN')) &&
-      (this.configService.get<string>('METAMAP_WORKFLOW_ID') ??
-        this.configService.get<string>('METAMAP_FLOW_ID')),
-    );
-  }
-
   private fincraKycRequirements(region?: string | null) {
     if (region !== 'NG') {
       return [
@@ -5886,14 +6016,16 @@ export class VidalpayService {
         missingRequirements: ['FINCRA_BUSINESS_ID'],
       };
     }
+    const environment = this.configService.get<string>('FINCRA_ENV')?.trim().toLowerCase() || 'sandbox';
+    const identityFingerprint = fincraIdentityFingerprint(user);
     const reference = `fincra_kyc_${userId}_${createHash('sha256')
-      .update(bvn)
+      .update(`${environment}:${identityFingerprint}:${bvn}`)
       .digest('hex')
       .slice(0, 16)}`;
     const existing = await this.providerOperationRepository.findOne({
       where: { userId, type: 'kyc_fincra_bvn', idempotencyKey: reference },
     });
-    if (existing) {
+    if (existing && ['PENDING', 'VERIFIED', 'REJECTED'].includes(existing.status)) {
       return {
         provider: 'FINCRA',
         status: existing.status,
@@ -5903,6 +6035,7 @@ export class VidalpayService {
     }
     const operation = await this.providerOperationRepository.save(
       this.providerOperationRepository.create({
+        ...(existing ?? {}),
         userId,
         type: 'kyc_fincra_bvn',
         idempotencyKey: reference,
@@ -5918,7 +6051,7 @@ export class VidalpayService {
           },
         },
         responsePayload: null,
-        metadata: { source: 'FINCRA_BVN_VERIFICATION' },
+        metadata: { source: 'FINCRA_BVN_VERIFICATION', environment, identityFingerprint },
       }),
     );
     try {
@@ -5926,7 +6059,13 @@ export class VidalpayService {
         bvn,
         businessId,
       });
-      operation.status = 'SUBMITTED';
+      const data = this.asRecord(response.data);
+      const resolvedIdentity = this.asRecord(data?.response);
+      const providerVerified = response.success === true &&
+        this.asString(data?.verificationStatus)?.toUpperCase() === 'VERIFIED';
+      const identityMatched = Boolean(resolvedIdentity && matchesFincraIdentity(user, resolvedIdentity));
+      operation.status = providerVerified && identityMatched ? 'VERIFIED' : 'REJECTED';
+      operation.metadata = { ...operation.metadata, identityMatched, providerVerified };
       operation.providerReference =
         this.asString(response.reference) ??
         this.asString(response.id) ??
@@ -5936,7 +6075,7 @@ export class VidalpayService {
       await this.providerOperationRepository.save(operation);
       return {
         provider: 'FINCRA',
-        status: 'SUBMITTED',
+        status: operation.status,
         providerReference: operation.providerReference,
         response: operation.responsePayload,
       };
@@ -5949,7 +6088,7 @@ export class VidalpayService {
         provider: 'FINCRA',
         status: 'FAILED',
         reason: operation.failureReason,
-        fallbackProvider: this.metamapConfigured() ? 'METAMAP' : null,
+        retryable: true,
       };
     }
   }
@@ -6021,7 +6160,7 @@ export class VidalpayService {
         const record = this.asRecord(match);
         const rate = record
           ? Number(
-              record.rate ?? record.buyRate ?? record.sellRate ?? record.value,
+              record.price ?? record.rate ?? record.buyRate ?? record.sellRate ?? record.value,
             )
           : NaN;
         if (!Number.isFinite(rate) || rate <= 0) return null;
@@ -6155,6 +6294,20 @@ export class VidalpayService {
           .filter(Boolean),
       ),
     ];
+  }
+
+  private customerKycIdentity(payload: AnyRecord): AnyRecord {
+    const allowed = [
+      'nin', 'bvn', 'ssn', 'idType', 'idNumber', 'documentNumber', 'legalName',
+      'fullName', 'dateOfBirth', 'address', 'residentialAddress', 'city', 'state',
+      'country', 'postalCode', 'occupation', 'employmentStatus', 'employer',
+      'sourceOfIncome', 'incomeBand', 'maritalStatus',
+      'addressLine1', 'addressLine2', 'isAtAddress', 'governmentIdDocumentId',
+      'proofOfAddressDocumentId', 'livenessDocumentId',
+    ];
+    return this.redactPayload(Object.fromEntries(
+      Object.entries(payload).filter(([key]) => allowed.includes(key)),
+    ));
   }
 
   private mergeKycIdentityAction(
@@ -6412,7 +6565,7 @@ export class VidalpayService {
   private mapProviderKycStatus(status?: string | null) {
     const normalized = status?.toUpperCase().replace(/[\s-]+/g, '_');
     if (!normalized) {
-      return 'UNDER_REVIEW';
+      return null;
     }
     if (['APPROVED', 'VERIFIED'].includes(normalized)) {
       return 'VERIFIED';
@@ -6423,26 +6576,24 @@ export class VidalpayService {
     if (['FAILED', 'EXPIRED'].includes(normalized)) {
       return normalized;
     }
-    return 'UNDER_REVIEW';
+    if (['REVIEWNEEDED', 'REVIEW_NEEDED', 'MANUAL_REVIEW'].includes(normalized)) return 'MANUAL_REVIEW';
+    if (['VERIFICATION_STARTED', 'IN_PROGRESS'].includes(normalized)) return 'IN_PROGRESS';
+    if (normalized === 'VERIFICATION_EXPIRED') return 'EXPIRED';
+    if (['VERIFICATION_INPUTS_COMPLETED', 'SUBMITTED', 'UNDER_REVIEW', 'PENDING'].includes(normalized)) return 'UNDER_REVIEW';
+    return null;
   }
 
   private assertKycWebhookSignature(payload: AnyRecord, signature?: string) {
     const secret = this.configService.get<string>('METAMAP_WEBHOOK_SECRET');
-    const environment =
-      this.configService.get<string>('NODE_ENV') ?? 'development';
-
     if (!secret) {
-      if (environment === 'production') {
-        this.throwProviderUnavailable({
-          code: 'KYC_WEBHOOK_NOT_CONFIGURED',
-          feature: 'kyc_webhook',
-          capability: 'kyc_start',
-          provider: 'MetaMap',
-          reason: 'The MetaMap webhook secret is not configured.',
-          missingRequirements: ['METAMAP_WEBHOOK_SECRET'],
-        });
-      }
-      return;
+      this.throwProviderUnavailable({
+        code: 'KYC_WEBHOOK_NOT_CONFIGURED',
+        feature: 'kyc_webhook',
+        capability: 'kyc_start',
+        provider: 'MetaMap',
+        reason: 'The MetaMap webhook secret is not configured.',
+        missingRequirements: ['METAMAP_WEBHOOK_SECRET'],
+      });
     }
 
     if (!signature) {
@@ -6642,12 +6793,14 @@ export class VidalpayService {
     return {
       canReceive: true,
       canTransfer: verified,
-      canTagTransfer: true,
+      canTagTransfer: verified,
       canBankTransfer: verified,
       blockedReason: verified
         ? null
-        : 'Complete KYC to unlock bank transfers and higher limits.',
-      tagTransferBlockedReason: null,
+        : 'Complete identity verification and wait for approval before spending.',
+      tagTransferBlockedReason: verified
+        ? null
+        : 'Complete identity verification and wait for approval before spending.',
       bankTransferBlockedReason: verified
         ? null
         : 'Complete KYC to unlock bank transfers and higher limits.',
@@ -6686,7 +6839,7 @@ export class VidalpayService {
       },
       outbound: {
         tagTransfer: {
-          enabled: true,
+          enabled: verified,
           perTransaction: null,
           daily: null,
           monthly: null,

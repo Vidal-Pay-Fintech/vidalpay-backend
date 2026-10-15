@@ -1,5 +1,6 @@
 import { Injectable } from '@nestjs/common';
 import { ConfigService } from '@nestjs/config';
+import { FincraConfigurationError, resolveFincraConfiguration } from './fincra-configuration';
 import {
   ProviderCapability,
   ProviderStatusItem,
@@ -49,8 +50,8 @@ export class ProviderStatusService {
     wallet_activation: {
       provider: 'Fincra',
       providerType: 'BANKING',
-      service: 'Fincra sandbox virtual account activation requests',
-      envVars: ['FINCRA_API_KEY', 'FINCRA_BASE_URL'],
+      service: 'Fincra virtual account activation requests',
+      envVars: ['FINCRA_API_KEY'],
     },
     usd_virtual_card: {
       provider: 'Unit.co',
@@ -177,16 +178,10 @@ export class ProviderStatusService {
       ],
     },
     fx_quote: {
-      provider: 'Fincra/FX provider',
+      provider: 'Fincra',
       providerType: 'FX',
       service: 'Backend FX quote provider',
-      envVars: [],
-      envVarGroups: [
-        ['FINCRA_API_KEY', 'FINCRA_BASE_URL'],
-        ['FX_PROVIDER_BASE_URL', 'FX_PROVIDER_API_KEY'],
-        ['VERTO_BASE_URL', 'VERTO_API_KEY'],
-        ['CURRENCYCLOUD_LOGIN_ID', 'CURRENCYCLOUD_API_KEY'],
-      ],
+      envVars: ['FINCRA_API_KEY'],
     },
     fx_convert: {
       provider: 'FX provider',
@@ -444,6 +439,16 @@ export class ProviderStatusService {
 
   getStatus(capability: ProviderCapability): ProviderStatusItem {
     const config = this.capabilityConfig[capability];
+    let mode = this.configService.get<string>('NODE_ENV') ?? 'development';
+    let configurationError: string | null = null;
+    if (config.provider === 'Fincra') {
+      try {
+        mode = resolveFincraConfiguration((key) => this.configService.get<string>(key)).environment;
+      } catch (error) {
+        if (!(error instanceof FincraConfigurationError)) throw error;
+        configurationError = error.message;
+      }
+    }
     const missingEnvVars = config.envVarGroups
       ? config.envVarGroups.some((group) =>
           group.every((envVar) => this.hasUsableConfiguration(envVar)),
@@ -451,10 +456,10 @@ export class ProviderStatusService {
         ? []
         : config.envVarGroups.map((group) => group.join(' + '))
       : config.envVars.filter((envVar) => !this.hasUsableConfiguration(envVar));
-    const envConfigured = missingEnvVars.length === 0;
+    const envConfigured = missingEnvVars.length === 0 && !configurationError;
     const internalProvider = config.provider === 'VidalPay';
     const enabled = !config.unsupported && (envConfigured || internalProvider);
-    const readinessStatus = config.unsupported
+    const readinessStatus = configurationError ? 'INVALID_CONFIGURATION' : config.unsupported
       ? 'UNSUPPORTED'
       : enabled
         ? internalProvider
@@ -467,7 +472,7 @@ export class ProviderStatusService {
         ? 'AVAILABLE'
         : 'UNAVAILABLE';
     const failureReason =
-      config.failureReason ??
+      configurationError ?? config.failureReason ??
       (missingEnvVars.length
         ? `Missing backend environment variables: ${missingEnvVars.join(', ')}`
         : null);
@@ -485,7 +490,7 @@ export class ProviderStatusService {
       failureReason,
       service: config.service,
       capabilities: [capability],
-      mode: this.configService.get<string>('NODE_ENV') ?? 'development',
+      mode,
     };
   }
 

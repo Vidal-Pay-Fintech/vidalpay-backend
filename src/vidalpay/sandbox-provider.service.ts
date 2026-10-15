@@ -41,13 +41,28 @@ export class SandboxProviderService {
   }
 
   async getFincraRates(query: FincraFxRateQuery = {}): Promise<JsonRecord> {
-    const params: JsonRecord = {};
+    const params: JsonRecord = { page: 1, perPage: 100 };
     if (query.baseCurrency) params.baseCurrency = query.baseCurrency;
     if (query.quoteCurrency) params.quoteCurrency = query.quoteCurrency;
-    const { data } = await this.http
-      .fincraClient()
-      .get('/quotes/treasury-orders/rates', { params });
-    return data as JsonRecord;
+    const client = this.http.fincraClient();
+    const rates: unknown[] = [];
+    for (let page = 1; page <= 20; page += 1) {
+      const { data } = await client.get('/quotes/treasury-orders/rates', { params: { ...params, page } });
+      if (data?.success === false) throw new Error('Fincra could not provide exchange rates.');
+      const pageRates = data?.data?.rates;
+      // Older deployments return an unpaginated data array.
+      if (!Array.isArray(pageRates)) {
+        if (page === 1) return data as JsonRecord;
+        throw new Error('Fincra returned an invalid rates page.');
+      }
+      rates.push(...pageRates);
+      const totalPages = Number(data.data.pagination?.totalPages ?? 1);
+      if (!Number.isInteger(totalPages) || totalPages < 1 || totalPages > 20) {
+        throw new Error('Fincra returned invalid rates pagination.');
+      }
+      if (page >= totalPages) return { ...data, data: { ...data.data, rates } };
+    }
+    throw new Error('Fincra rates pagination exceeded the safety limit.');
   }
 
   async getVtuNgBalance(): Promise<JsonRecord> {

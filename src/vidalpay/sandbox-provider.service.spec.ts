@@ -80,8 +80,25 @@ describe('SandboxProviderService', () => {
     );
     await expect(service.getFincraRates()).resolves.toEqual({ data: [] });
     expect(get).toHaveBeenCalledWith('/quotes/treasury-orders/rates', {
-      params: {},
+      params: { page: 1, perPage: 100 },
     });
+  });
+
+  it('collects treasury rates across pages without mutating provider resources', async () => {
+    const first = { baseCurrency: 'EUR', quoteCurrency: 'USD', price: 1.1 };
+    const second = { baseCurrency: 'USD', quoteCurrency: 'NGN', price: 1500 };
+    get.mockResolvedValueOnce({ data: { success: true, data: { rates: [first], pagination: { totalPages: 2 } } } })
+      .mockResolvedValueOnce({ data: { success: true, data: { rates: [second], pagination: { totalPages: 2 } } } });
+    const service = new SandboxProviderService(config as unknown as ConfigService, http as any);
+    await expect(service.getFincraRates()).resolves.toEqual(expect.objectContaining({ data: expect.objectContaining({ rates: [first, second] }) }));
+    expect(get).toHaveBeenNthCalledWith(2, '/quotes/treasury-orders/rates', { params: { page: 2, perPage: 100 } });
+    expect(post).not.toHaveBeenCalled();
+  });
+
+  it('fails closed on provider business errors', async () => {
+    get.mockResolvedValueOnce({ data: { success: false, data: { rates: [] } } });
+    const service = new SandboxProviderService(config as unknown as ConfigService, http as any);
+    await expect(service.getFincraRates()).rejects.toThrow('could not provide');
   });
 
   it('uses VTU.ng v2 JWT auth for purchase submissions', async () => {

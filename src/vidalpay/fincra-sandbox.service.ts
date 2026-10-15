@@ -2,6 +2,7 @@ import { Injectable } from '@nestjs/common';
 import { AxiosError, AxiosInstance } from 'axios';
 import { ConfigService } from '@nestjs/config';
 import { ProviderHttpService } from './provider-http.service';
+import { FincraConfigurationError, resolveFincraConfiguration } from './fincra-configuration';
 
 export type FincraProbeEndpoint = {
   name: string;
@@ -73,8 +74,8 @@ export class FincraSandboxService {
         configuration: configured,
         authentication: {
           attempted: false,
-          status: 'MISSING_CONFIGURATION',
-          message:
+          status: configured.error ? 'INVALID_CONFIGURATION' : 'MISSING_CONFIGURATION',
+          message: configured.error ??
             'FINCRA_API_KEY and FINCRA_BUSINESS_ID are required before authenticated sandbox probing can run.',
         },
         endpoints: [],
@@ -82,10 +83,10 @@ export class FincraSandboxService {
       };
     }
 
-    const client = this.providerHttpService.fincraClient();
+    const client = this.providerHttpService.fincraSandboxClient();
     const endpoints = await this.probeEndpoints(client, this.readOnlyEndpoints());
     const authenticated = endpoints.some(
-      (endpoint) => endpoint.status !== 401 && endpoint.status !== 403,
+      (endpoint) => endpoint.ok,
     );
 
     return {
@@ -97,8 +98,8 @@ export class FincraSandboxService {
         attempted: true,
         status: authenticated ? 'AUTHENTICATED_OR_PARTIALLY_AUTHENTICATED' : 'FAILED',
         message: authenticated
-          ? 'At least one Fincra read-only endpoint returned a non-authentication response.'
-          : 'Fincra rejected all read-only probes with authentication/authorization responses.',
+          ? 'At least one authenticated Fincra read-only endpoint succeeded. This does not prove product activation or money movement.'
+          : 'No authenticated Fincra read-only endpoint succeeded. Check the individual results.',
       },
       endpoints,
       currencyMatrix: this.updateMatrixFromProbe(matrix, endpoints),
@@ -107,13 +108,22 @@ export class FincraSandboxService {
 
   private configurationStatus() {
     const required = ['FINCRA_API_KEY', 'FINCRA_BUSINESS_ID'];
-    const optional = ['FINCRA_BASE_URL', 'FINCRA_PUBLIC_KEY', 'FINCRA_WEBHOOK_SECRET'];
-    const missingRequired = required.filter((key) => !this.configService.get<string>(key));
+    const optional = ['FINCRA_ENV', 'FINCRA_BASE_URL', 'FINCRA_PUBLIC_KEY', 'FINCRA_WEBHOOK_SECRET'];
+    const missingRequired = required.filter((key) => !this.configService.get<string>(key)?.trim());
+    let baseUrl: string | null = null;
+    let error: string | null = null;
+    try {
+      const resolved = resolveFincraConfiguration((key) => this.configService.get<string>(key));
+      baseUrl = resolved.baseUrl;
+      if (resolved.environment !== 'sandbox') error = 'Sandbox probes are disabled when FINCRA_ENV=live.';
+    } catch (failure) {
+      if (!(failure instanceof FincraConfigurationError)) throw failure;
+      error = failure.message;
+    }
     return {
-      ready: missingRequired.length === 0,
-      baseUrl:
-        this.configService.get<string>('FINCRA_BASE_URL') ??
-        'https://sandboxapi.fincra.com',
+      ready: missingRequired.length === 0 && !error,
+      baseUrl,
+      error,
       required: required.map((key) => ({ key, configured: !missingRequired.includes(key) })),
       optional: optional.map((key) => ({ key, configured: Boolean(this.configService.get<string>(key)) })),
       missingRequired,
@@ -157,7 +167,7 @@ export class FincraSandboxService {
         method: endpoint.method,
         path: endpoint.path,
         status: response.status,
-        ok: response.status >= 200 && response.status < 300,
+        ok: response.status >= 200 && response.status < 300 && response.data?.success !== false,
         errorCode: null,
         message: null,
         data: this.summarizeResponse(response.data),

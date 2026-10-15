@@ -149,6 +149,7 @@ export class AdminKycController {
   }
 
   @Post(':userId/approve')
+  @Roles(Role.SUPER_ADMIN)
   approve(
     @ActiveUser() admin: ActiveUserData,
     @Param('userId') userId: string,

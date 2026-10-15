@@ -1,11 +1,21 @@
-import { Injectable } from '@nestjs/common';
+import { Injectable, OnModuleInit } from '@nestjs/common';
 import { ConfigService } from '@nestjs/config';
 import axios, { AxiosInstance } from 'axios';
 import { createHmac } from 'crypto';
+import { FincraConfigurationError, resolveFincraConfiguration } from './fincra-configuration';
 
 @Injectable()
-export class ProviderHttpService {
+export class ProviderHttpService implements OnModuleInit {
   constructor(private readonly configService: ConfigService) {}
+
+  onModuleInit() {
+    // Catch a mistyped environment before serving financial requests.
+    this.fincraConfiguration();
+  }
+
+  private fincraConfiguration() {
+    return resolveFincraConfiguration((key) => this.configService.get<string>(key));
+  }
 
   private timeout(): number {
     return Number(
@@ -107,15 +117,41 @@ export class ProviderHttpService {
   }
 
   fincraClient(): AxiosInstance {
-    return axios.create({
-      baseURL: this.fincraSandboxBaseUrl(),
+    const { baseUrl } = this.fincraConfiguration();
+    const apiKey = this.configService.get<string>('FINCRA_API_KEY')?.trim();
+    if (!apiKey) {
+      throw new FincraConfigurationError('FINCRA_API_KEY is required for Fincra requests.');
+    }
+    const client = axios.create({
+      baseURL: baseUrl,
       headers: {
-        'api-key': this.configService.get<string>('FINCRA_API_KEY') ?? '',
+        'api-key': apiKey,
         Accept: 'application/json',
         'Content-Type': 'application/json',
       },
       timeout: this.timeout(),
+      maxRedirects: 0,
     });
+    client.interceptors.request.use((config) => {
+      const target = new URL(config.url ?? '/', `${config.baseURL ?? baseUrl}/`);
+      if (target.origin !== baseUrl || target.username || target.password || target.hash) {
+        throw new FincraConfigurationError('Fincra requests must use the configured official origin.');
+      }
+      // Do not forward provider credentials to a redirect or per-request proxy.
+      config.baseURL = baseUrl;
+      config.url = `${target.pathname}${target.search}`;
+      config.maxRedirects = 0;
+      config.proxy = false;
+      return config;
+    });
+    return client;
+  }
+
+  fincraSandboxClient(): AxiosInstance {
+    if (this.fincraConfiguration().environment !== 'sandbox') {
+      throw new FincraConfigurationError('Sandbox probes are disabled when FINCRA_ENV=live.');
+    }
+    return this.fincraClient();
   }
 
   vtuNgClient(accessToken?: string): AxiosInstance {
@@ -178,25 +214,4 @@ export class ProviderHttpService {
     }
   }
 
-  private fincraSandboxBaseUrl(): string {
-    const fallback = 'https://sandboxapi.fincra.com';
-    const configured = this.configService
-      .get<string>('FINCRA_BASE_URL')
-      ?.trim();
-    if (!configured) return fallback;
-    try {
-      const url = new URL(configured);
-      if (
-        url.protocol !== 'https:' ||
-        url.username ||
-        url.password ||
-        url.hostname !== 'sandboxapi.fincra.com'
-      ) {
-        return fallback;
-      }
-      return url.origin;
-    } catch {
-      return fallback;
-    }
-  }
 }

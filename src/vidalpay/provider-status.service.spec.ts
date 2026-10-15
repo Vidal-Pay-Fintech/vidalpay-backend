@@ -38,11 +38,20 @@ describe('ProviderStatusService', () => {
     expect(service.getStatus('fx_quote')).toEqual(
       expect.objectContaining({
         enabled: false,
-        missingEnvVars: expect.arrayContaining([
-          'FX_PROVIDER_BASE_URL + FX_PROVIDER_API_KEY',
-          'VERTO_BASE_URL + VERTO_API_KEY',
-        ]),
+        missingEnvVars: ['FINCRA_API_KEY'],
       }),
+    );
+  });
+
+  it('uses the same Fincra environment validation as the HTTP client', () => {
+    expect(buildService({ FINCRA_API_KEY: 'key' }).getStatus('fx_quote')).toEqual(
+      expect.objectContaining({ enabled: true, mode: 'sandbox', liveTested: false }),
+    );
+    expect(buildService({ FINCRA_API_KEY: 'key', FINCRA_ENV: 'live' }).getStatus('wallet_activation')).toEqual(
+      expect.objectContaining({ enabled: true, mode: 'live', liveTested: false }),
+    );
+    expect(buildService({ FINCRA_API_KEY: 'key', FINCRA_BASE_URL: 'https://api.fincra.com' }).getStatus('wallet_activation')).toEqual(
+      expect.objectContaining({ enabled: false, envConfigured: false, readinessStatus: 'INVALID_CONFIGURATION' }),
     );
   });
 

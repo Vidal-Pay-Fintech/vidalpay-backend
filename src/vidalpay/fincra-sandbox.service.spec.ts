@@ -10,8 +10,38 @@ const configured = {
 };
 
 describe('FincraSandboxService', () => {
+  it.each([
+    { FINCRA_ENV: 'live' },
+    { FINCRA_BASE_URL: 'https://api.fincra.com' },
+    { FINCRA_BASE_URL: 'https://secret@evil.example' },
+  ])('does not send sandbox probes with invalid or live configuration', async (env) => {
+    const http = { fincraSandboxClient: jest.fn() };
+    const result = await new FincraSandboxService(config({ ...configured, ...env }), http as any).probeReadOnly();
+    expect(result.ready).toBe(false);
+    expect(result.authentication).toEqual(expect.objectContaining({ attempted: false, status: 'INVALID_CONFIGURATION' }));
+    expect(http.fincraSandboxClient).not.toHaveBeenCalled();
+    expect(JSON.stringify(result)).not.toContain('secret@');
+  });
+
+  it.each([undefined, 404, 500, 401, 403])('never reports failed HTTP requests (%s) as authenticated', async (status) => {
+    const client = { request: jest.fn().mockRejectedValue({ response: status ? { status } : undefined }) };
+    const result = await new FincraSandboxService(config(configured), {
+      fincraSandboxClient: () => client,
+    } as any).probeReadOnly();
+    expect(result.ready).toBe(false);
+    expect(result.authentication.status).toBe('FAILED');
+  });
+
+  it('does not treat an HTTP 200 business rejection as authentication proof', async () => {
+    const client = { request: jest.fn().mockResolvedValue({ status: 200, data: { success: false } }) };
+    const result = await new FincraSandboxService(config(configured), {
+      fincraSandboxClient: () => client,
+    } as any).probeReadOnly();
+    expect(result.ready).toBe(false);
+  });
+
   it('does not attempt authenticated probes when required sandbox config is missing', async () => {
-    const http = { fincraClient: jest.fn() };
+    const http = { fincraSandboxClient: jest.fn() };
     const service = new FincraSandboxService(config(), http as any);
 
     const result = await service.probeReadOnly();
@@ -22,11 +52,11 @@ describe('FincraSandboxService', () => {
       'FINCRA_API_KEY',
       'FINCRA_BUSINESS_ID',
     ]);
-    expect(http.fincraClient).not.toHaveBeenCalled();
+    expect(http.fincraSandboxClient).not.toHaveBeenCalled();
   });
 
   it('handles missing FINCRA_API_KEY safely', async () => {
-    const http = { fincraClient: jest.fn() };
+    const http = { fincraSandboxClient: jest.fn() };
     const service = new FincraSandboxService(
       config({ FINCRA_BUSINESS_ID: 'business-1' }),
       http as any,
@@ -36,11 +66,11 @@ describe('FincraSandboxService', () => {
 
     expect(result.authentication.status).toBe('MISSING_CONFIGURATION');
     expect(result.configuration.missingRequired).toEqual(['FINCRA_API_KEY']);
-    expect(http.fincraClient).not.toHaveBeenCalled();
+    expect(http.fincraSandboxClient).not.toHaveBeenCalled();
   });
 
   it('handles missing FINCRA_BUSINESS_ID safely', async () => {
-    const http = { fincraClient: jest.fn() };
+    const http = { fincraSandboxClient: jest.fn() };
     const service = new FincraSandboxService(
       config({ FINCRA_API_KEY: 'secret' }),
       http as any,
@@ -50,7 +80,7 @@ describe('FincraSandboxService', () => {
 
     expect(result.authentication.status).toBe('MISSING_CONFIGURATION');
     expect(result.configuration.missingRequired).toEqual(['FINCRA_BUSINESS_ID']);
-    expect(http.fincraClient).not.toHaveBeenCalled();
+    expect(http.fincraSandboxClient).not.toHaveBeenCalled();
   });
 
   it('returns only allow-listed summaries from provider responses', async () => {
@@ -68,7 +98,7 @@ describe('FincraSandboxService', () => {
     };
     const service = new FincraSandboxService(
       config(configured),
-      { fincraClient: jest.fn(() => client) } as any,
+      { fincraSandboxClient: jest.fn(() => client) } as any,
     );
 
     const result = await service.probeReadOnly();
@@ -92,7 +122,7 @@ describe('FincraSandboxService', () => {
     };
     const service = new FincraSandboxService(
       config(configured),
-      { fincraClient: jest.fn(() => client) } as any,
+      { fincraSandboxClient: jest.fn(() => client) } as any,
     );
 
     await service.probeReadOnly();
@@ -137,7 +167,7 @@ describe('FincraSandboxService', () => {
     };
     const service = new FincraSandboxService(
       config(configured),
-      { fincraClient: jest.fn(() => client) } as any,
+      { fincraSandboxClient: jest.fn(() => client) } as any,
     );
 
     const result = await service.probeReadOnly();

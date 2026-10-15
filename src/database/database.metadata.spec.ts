@@ -51,15 +51,12 @@ describe('PostgreSQL entity metadata', () => {
     await expect((dataSource as any).buildMetadatas()).resolves.toBeUndefined();
   });
 
-  it('keeps migration-era fields out of default reads and writes for the existing production schema', async () => {
+  it('preserves legacy compatibility while allowing region and Fincra persistence', async () => {
     const dataSource = buildMetadataDataSource();
 
     await (dataSource as any).buildMetadatas();
 
     const optionalUserColumns = [
-      'countryCode',
-      'residency',
-      'region',
       'pendingEmail',
       'pendingPhoneNumber',
       'kycStatus',
@@ -70,6 +67,8 @@ describe('PostgreSQL entity metadata', () => {
     const optionalWalletColumns = [
       'availableBalance',
       'ledgerBalance',
+    ];
+    const providerWalletColumns = [
       'address',
       'provider',
       'providerCustomerId',
@@ -83,26 +82,28 @@ describe('PostgreSQL entity metadata', () => {
     const userMetadata = dataSource.getMetadata(User);
     const walletMetadata = dataSource.getMetadata(Wallet);
 
+    for (const propertyName of ['countryCode', 'residency', 'region']) {
+      expect(userMetadata.findColumnWithPropertyName(propertyName)).toEqual(
+        expect.objectContaining({ isSelect: true, isInsert: true, isUpdate: true }),
+      );
+    }
+
     for (const propertyName of optionalUserColumns) {
       const column = userMetadata.findColumnWithPropertyName(propertyName);
-      expect(column).toEqual(
-        expect.objectContaining({
-          isSelect: false,
-          isInsert: false,
-          isUpdate: false,
-        }),
-      );
+      expect({ name: propertyName, select: column?.isSelect, insert: column?.isInsert, update: column?.isUpdate })
+        .toEqual({ name: propertyName, select: false, insert: false, update: false });
     }
 
     for (const propertyName of optionalWalletColumns) {
       const column = walletMetadata.findColumnWithPropertyName(propertyName);
-      expect(column).toEqual(
-        expect.objectContaining({
-          isSelect: false,
-          isInsert: false,
-          isUpdate: false,
-        }),
-      );
+      expect({ name: propertyName, select: column?.isSelect, insert: column?.isInsert, update: column?.isUpdate })
+        .toEqual({ name: propertyName, select: false, insert: false, update: false });
+    }
+
+    for (const propertyName of providerWalletColumns) {
+      const column = walletMetadata.findColumnWithPropertyName(propertyName);
+      expect({ name: propertyName, select: column?.isSelect, insert: column?.isInsert, update: column?.isUpdate })
+        .toEqual({ name: propertyName, select: false, insert: true, update: true });
     }
   });
 });
