@@ -39,6 +39,33 @@ The login query selects `user.region` before checking the password, so this data
 
 ## Fincra KYC
 
+### Profile confirmation and wallet schema
+
+The later 2026-10-15 Render exception is a separate schema failure: `column "address" of relation "wallet" does not exist` during `ensureCustomerWallets`. `PATCH /user/profile` updated residence and then called `getCurrentUser`, which tried to insert the missing GBP/CAD local wallet records. This made the KYC country-confirmation screen report HTTP 500 even though the failure was wallet persistence, not a Fincra or MetaMap response.
+
+Profile/session reads now return existing wallet records without creating optional wallets. Wallet APIs still perform their own creation/checks; this does not hide wallet-storage errors or treat missing account details as activation. New local wallet records use `FINCRA` and `NOT_PROVISIONED`, never a guessed PayVessel/Unit assignment or credential-based active status. Existing provider records and balances are not migrated. An unknown provider remains null in normalized responses.
+
+The supplied audit confirms missing `wallet.address`, `wallet.provider`, `wallet.providerStatus`, and `wallet.metadata`. It also lacks the legacy `ledgerBalance` alias. Read-only balance aliases no longer have ORM defaults, which prevents TypeORM from unnecessarily including them in `INSERT ... RETURNING`. This is a code change only; existing database balance/default definitions are untouched.
+
+After deploying the reviewed backend revision containing the new repair script, use the affected Render backend shell and confirm the database target and backup:
+
+```sh
+npm run db:repair-wallet-schema -- --check
+```
+
+The check inspects columns, required unmapped fields/defaults and currency enum support without reading customer records or writing data. If it reports incompatible types, required unmapped fields, or unsupported currencies, stop for a reviewed migration. It does not automatically change financial columns, enum types, constraints or defaults.
+
+If it reports only the expected missing nullable account/provider columns, apply and recheck:
+
+```sh
+npm run db:repair-wallet-schema -- --apply
+npm run db:repair-wallet-schema -- --check
+```
+
+This adds only the missing allowlisted nullable fields, in a transaction with lock/statement timeouts. It does not create tables, replace `routingProvider`/`providerMetadata`, infer historical provider mappings, activate wallets, or update balances. Retry profile loading, KYC country confirmation and wallet account-detail requests after `missing: []`. The local patch has not been applied to Render by this task.
+
+The browser log separately reports transaction HTTP 503 and beneficiary HTTP 500 errors, plus web notification/deprecation warnings. The shared audit excerpt includes historical `transaction` and `user_kyc` tables, while the current entities use `financial_transaction` and `kyc_profile`; the excerpt does not establish whether those latter tables also exist. A complete schema comparison and an explicit historical-data mapping are still required. Do not rename tables or create empty replacements to conceal existing financial history. The wallet repair is not a claim that all those errors or live KYC are resolved.
+
 The implemented first step is Fincra's Nigerian BVN check, requiring:
 
 - `FINCRA_KYC_ENABLED=true`

@@ -9,7 +9,7 @@ const mobile = path.resolve(process.env.VIDALPAY_MOBILE_PATH || path.join(backen
 const mobileTests = path.join(mobile, 'tests');
 const steps = [
   ['Backend regression tests (mocked providers)', backend, ['node_modules/jest/bin/jest.js', '--runInBand']],
-  ['Database repair regression tests (no database access)', backend, ['--test', 'scripts/repair-kyc-region.test.js']],
+  ['Database repair regression tests (no database access)', backend, ['--test', 'scripts/repair-kyc-region.test.js', 'scripts/repair-wallet-schema.test.js']],
   ['Backend compilation', backend, ['node_modules/@nestjs/cli/bin/nest.js', 'build']],
   ['Mobile type check', mobile, ['node_modules/typescript/bin/tsc', '--noEmit']],
   ['Mobile policy tests (mocked API)', mobile, ['--test', ...(existsSync(mobileTests)

@@ -98,12 +98,30 @@ describe('PostgreSQL entity metadata', () => {
       const column = walletMetadata.findColumnWithPropertyName(propertyName);
       expect({ name: propertyName, select: column?.isSelect, insert: column?.isInsert, update: column?.isUpdate })
         .toEqual({ name: propertyName, select: false, insert: false, update: false });
+      // A default also puts read-only legacy fields in INSERT ... RETURNING.
+      expect(column?.default).toBeUndefined();
+      expect(walletMetadata.getInsertionReturningColumns()).not.toContain(column);
     }
 
     for (const propertyName of providerWalletColumns) {
       const column = walletMetadata.findColumnWithPropertyName(propertyName);
       expect({ name: propertyName, select: column?.isSelect, insert: column?.isInsert, update: column?.isUpdate })
         .toEqual({ name: propertyName, select: false, insert: true, update: true });
+    }
+  });
+
+  it('keeps the additive wallet repair aligned with writable nullable entity fields', async () => {
+    const { walletColumns, coreColumns } = require('../../scripts/repair-wallet-schema');
+    const dataSource = buildMetadataDataSource();
+    await (dataSource as any).buildMetadatas();
+    const walletMetadata = dataSource.getMetadata(Wallet);
+    const nullableFields = walletMetadata.columns
+      .filter((column) => column.isNullable && column.isInsert && !coreColumns.includes(column.databaseName))
+      .map((column) => column.databaseName).sort();
+    expect(Object.keys(walletColumns).sort()).toEqual(nullableFields);
+    for (const [name, sqlType] of Object.entries(walletColumns)) {
+      const column = walletMetadata.findColumnWithPropertyName(name)!;
+      expect(dataSource.driver.normalizeType(column)).toBe(sqlType === 'varchar' ? 'character varying' : sqlType);
     }
   });
 });

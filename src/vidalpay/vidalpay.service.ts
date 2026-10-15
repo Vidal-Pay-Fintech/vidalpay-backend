@@ -142,7 +142,7 @@ export class VidalpayService {
   async getCurrentUser(userId: string) {
     const user = await this.findUser(userId);
     await this.ensureLegacyUserTag(user);
-    await this.ensureCustomerWallets(user.id);
+    // Profile/KYC updates must not depend on creating optional currency wallets.
     const [wallets, kyc] = await Promise.all([
       this.walletRepository.find({
         where: { userId: user.id },
@@ -676,12 +676,7 @@ export class VidalpayService {
             normalized.providerStatus ??
             this.providerReadinessForCurrency(normalizedCurrency),
           isProvisioned: false,
-          message:
-            normalizedCurrency === Currency.NGN
-              ? 'NGN account details require PayVessel virtual-account provisioning.'
-              : normalizedCurrency === Currency.USD
-                ? 'USD account details require Unit deposit-account provisioning.'
-                : `${normalizedCurrency} account details require Fincra wallet activation or provider provisioning.`,
+          message: `Complete wallet activation to receive ${normalizedCurrency} account details.`,
         },
         wallet: normalized,
       };
@@ -3815,10 +3810,8 @@ export class VidalpayService {
             userId,
             currency,
             balance: 0,
-            availableBalance: 0,
-            ledgerBalance: 0,
-            provider: currency === Currency.USD ? 'Unit.co' : 'PayVessel',
-            providerStatus: this.providerReadinessForCurrency(currency),
+            provider: 'FINCRA',
+            providerStatus: 'NOT_PROVISIONED',
           }),
         );
       }
@@ -4968,15 +4961,13 @@ export class VidalpayService {
       bankName: wallet.bankName ?? null,
       routingNumber: wallet.routingNumber ?? null,
       address: wallet.address ?? null,
-      provider:
-        wallet.provider ??
-        (wallet.currency === Currency.USD ? 'Unit.co' : 'PayVessel'),
+      provider: wallet.provider ?? null,
       providerCustomerId: wallet.providerCustomerId ?? null,
       providerAccountId: wallet.providerAccountId ?? null,
       providerVirtualAccountId: wallet.providerVirtualAccountId ?? null,
       providerStatus:
         wallet.providerStatus ??
-        this.providerReadinessForCurrency(wallet.currency),
+        (wallet.accountNumber ? 'UNKNOWN' : 'NOT_PROVISIONED'),
       providerReference: wallet.providerReference ?? null,
       metadata: wallet.metadata ?? null,
       withdrawalSuspended: wallet.withdrawalSuspended,

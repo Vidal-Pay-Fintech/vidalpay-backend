@@ -441,12 +441,14 @@ describe('VidalpayService', () => {
       expect.arrayContaining([
         expect.objectContaining({
           currency: Currency.NGN,
-          provider: 'PayVessel',
+          provider: 'FINCRA',
+          providerStatus: 'NOT_PROVISIONED',
           balance: 0,
         }),
         expect.objectContaining({
           currency: Currency.USD,
-          provider: 'Unit.co',
+          provider: 'FINCRA',
+          providerStatus: 'NOT_PROVISIONED',
           balance: 0,
         }),
       ]),
@@ -455,6 +457,68 @@ describe('VidalpayService', () => {
       Currency.NGN,
       Currency.USD,
     ]);
+  });
+
+  it.each([['Nigeria', 'NG'], ['United States', 'US']])(
+    'saves KYC residence for %s without attempting unrelated wallet creation',
+    async (country, countryCode) => {
+      const user = { id: 'user-1', tagId: '$EXISTING', country: null, countryCode: null, region: null };
+      const kyc = { id: 'kyc-1', userId: user.id, status: 'NOT_STARTED', region: null, identity: {}, sections: [], limits: {} };
+      userRepository.findOne.mockResolvedValue(user);
+      userRepository.update.mockImplementation(async (_id, patch) => Object.assign(user, patch));
+      kycProfileRepository.findOne.mockResolvedValue(kyc);
+      walletRepository.find.mockResolvedValue([]);
+      walletRepository.save.mockRejectedValue(Object.assign(
+        new Error('column "address" of relation "wallet" does not exist'), { code: '42703' },
+      ));
+
+      await expect(service.updateProfile(user.id, { country, countryCode })).resolves.toMatchObject({
+        region: countryCode,
+        kycStatus: 'NOT_STARTED',
+        wallet: [],
+        capabilities: { canTagTransfer: false, canBankTransfer: false },
+      });
+      expect(userRepository.update).toHaveBeenCalledWith(user.id, { country, countryCode, region: countryCode });
+      expect(kycProfileRepository.save).toHaveBeenCalledWith(expect.objectContaining({ region: countryCode }));
+      expect(walletRepository.create).not.toHaveBeenCalled();
+      expect(walletRepository.save).not.toHaveBeenCalled();
+      expect(fincraWalletService.requestPermanentVirtualAccount).not.toHaveBeenCalled();
+    },
+  );
+
+  it('preserves existing balances and provider records when adding unprovisioned Fincra wallet records', async () => {
+    const wallets = [
+      { id: 'ngn-1', currency: Currency.NGN, balance: 1234, provider: 'PayVessel', accountNumber: 'legacy-ngn' },
+      { id: 'usd-1', currency: Currency.USD, balance: 567, provider: 'Unit.co', accountNumber: 'legacy-usd' },
+    ];
+    const before = JSON.stringify(wallets);
+    walletRepository.find.mockResolvedValue(wallets);
+    await service.ensureCustomerWallets('user-1');
+    expect(walletRepository.save).toHaveBeenCalledWith([
+      { userId: 'user-1', currency: Currency.GBP, balance: 0, provider: 'FINCRA', providerStatus: 'NOT_PROVISIONED' },
+      { userId: 'user-1', currency: Currency.CAD, balance: 0, provider: 'FINCRA', providerStatus: 'NOT_PROVISIONED' },
+    ]);
+    expect(JSON.stringify(wallets)).toBe(before);
+    expect(walletRepository.update).not.toHaveBeenCalled();
+    expect(fincraWalletService.requestPermanentVirtualAccount).not.toHaveBeenCalled();
+  });
+
+  it('does not invent a provider based only on wallet currency', async () => {
+    userRepository.findOne.mockResolvedValue({ id: 'user-1', tagId: '$EXISTING', countryCode: 'NG' });
+    walletRepository.find.mockResolvedValue([{ id: 'ngn-1', currency: Currency.NGN, balance: 50 }]);
+    kycProfileRepository.findOne.mockResolvedValue({ id: 'kyc-1', status: 'NOT_STARTED', region: 'NG' });
+    await expect(service.getCurrentUser('user-1')).resolves.toMatchObject({
+      wallet: [expect.objectContaining({ balance: 50, provider: null, providerStatus: 'NOT_PROVISIONED' })],
+    });
+    expect(walletRepository.save).not.toHaveBeenCalled();
+  });
+
+  it('does not disguise a failed wallet read as an empty account', async () => {
+    userRepository.findOne.mockResolvedValue({ id: 'user-1', tagId: '$EXISTING' });
+    kycProfileRepository.findOne.mockResolvedValue({ id: 'kyc-1', status: 'NOT_STARTED' });
+    const error = Object.assign(new Error('database connection lost'), { code: '08006' });
+    walletRepository.find.mockRejectedValue(error);
+    await expect(service.getCurrentUser('user-1')).rejects.toBe(error);
   });
 
   it('restores an existing user session when the optional KYC table is absent', async () => {
@@ -975,7 +1039,8 @@ describe('VidalpayService', () => {
 
     expect(response.accountDetails.isProvisioned).toBe(false);
     expect(response.accountDetails.accountNumber).toBeNull();
-    expect(response.accountDetails.message).toContain('Unit');
+    expect(response.accountDetails.message).toContain('USD');
+    expect(response.accountDetails.message).not.toMatch(/Unit|PayVessel/);
   });
 
   it('persists blocked provider operations and returns structured unavailable errors', async () => {
