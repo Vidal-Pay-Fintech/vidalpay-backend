@@ -57,7 +57,7 @@ async function inspectWalletColumns(client) {
       (currency) => !result.rows.some((row) => row.enumlabel === currency),
     );
     if (missingCurrencies.length) {
-      throw new Error(`Wallet currency type does not support ${missingCurrencies.join(', ')}; a reviewed currency migration is required.`);
+      throw new Error(`Wallet currency type does not support ${missingCurrencies.join(', ')}; run npm run db:repair-wallet-currencies -- --check and review the separate currency migration first.`);
     }
   }
   for (const name of Object.keys(walletColumns)) {

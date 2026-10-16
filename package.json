@@ -17,6 +17,7 @@
     "db:audit-legacy": "node scripts/audit-legacy-data.js",
     "db:repair-kyc-region": "node scripts/repair-kyc-region.js",
     "db:repair-wallet-schema": "node scripts/repair-wallet-schema.js",
+    "db:repair-wallet-currencies": "node scripts/repair-wallet-currencies.js",
     "db:plan-legacy-restore": "node scripts/plan-legacy-restore.js",
     "db:restore-legacy": "node scripts/restore-legacy-data.js",
     "lint": "eslint \"{src,apps,libs,test}/**/*.ts\" --fix",
