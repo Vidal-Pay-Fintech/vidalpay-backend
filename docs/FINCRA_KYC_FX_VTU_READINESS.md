@@ -116,13 +116,28 @@ npm run db:repair-kyc-storage -- --check
 
 The transaction adds `type`, `providerReference`, and `errorCode` where missing; copies `operationType` verbatim into an absent `type`; converts provider/status/currency and `user.kycStatus` enum columns to varchar preserving existing values/defaults; and makes the legacy `operationType` column nullable without a default so current KYC inserts can omit it. Existing external/internal references are retained without guessing their relationship to `providerReference`. Unique reference and user/type/idempotency indexes are required; duplicates cause a refusal, never deletion or deduplication. Enum types themselves and the original legacy columns are retained. The new and old operation formats are not interchangeable for an older backend deployment, so use a coordinated deployment rather than rolling back only application code.
 
-`kyc_profile` is created with a unique user link and profiles are seeded only when each affected user's legacy KYC state is absent or exactly `NOT_STARTED`, with no submitted evidence. The legacy `user_kyc` table remains intact, and seeded profiles retain the legacy source ID. Any existing approval, rejection, in-progress state, or submitted identity/review evidence stops the migration for explicit mapping. No approval is manufactured or revoked. Existing current profiles are preserved. The command does not create `financial_transaction`, change wallet balances, issue accounts, or contact providers.
+`kyc_profile` is created with a unique user link. Without explicit mapping, profiles are seeded only when the legacy state is absent or `NOT_STARTED` and no submitted evidence exists. For existing history, first deploy the revision supporting `--map-legacy-kyc`. Review `proposedLegacyMappings`, confirm the original approvals are intended to remain effective, and run this read-only check:
+
+```sh
+npm run db:repair-kyc-storage -- --check --map-legacy-kyc
+```
+
+The reviewed mapping is `NOT_STARTED -> NOT_STARTED`, `VERIFIED -> VERIFIED`, `PENDING_REVIEW -> MANUAL_REVIEW`, and `REJECTED -> REJECTED`. Decisions are checked per user, not merely by aggregate counts. A non-initial decision requires both active sources (`user.kycStatus` and `user_kyc.status`) to agree. Missing decision sources, disagreements, unknown statuses and multiple active legacy records block application even with the flag. Null/absent statuses are treated only as `NOT_STARTED`, never as approval.
+
+If the mapped check has no blockers and matches the reviewed history, apply during a maintenance window after confirming the target and backup:
+
+```sh
+npm run db:repair-kyc-storage -- --apply --map-legacy-kyc
+npm run db:repair-kyc-storage -- --check
+```
+
+The original `user_kyc` rows, evidence and user statuses remain unchanged. New profiles contain a versioned legacy source pointer, not raw identity/provider evidence (profile identity is returned to mobile). Provider identity, references, section completion, capabilities and limits are not fabricated. Existing current profiles, including soft-deleted profiles, are never overwritten or resurrected. Preserving `VERIFIED` retains the old approval and its access semantics; it does not prove a new Fincra/MetaMap check. Pending/rejected users remain unapproved. Legacy manual-review cases without current signed provider evidence cannot pass the current final-approval checks; review the old evidence and request `RETRY_REQUIRED` through the existing review flow when new verification is necessary. The command does not create `financial_transaction`, change wallet balances, issue accounts, or contact providers.
 
 Apply takes bounded locks and verifies the resulting schema and provider-operation row count before commit. Failures roll back; after an uncertain connection failure, reconnect and run `--check`. Committed changes require a reviewed rollback plan, not dropping tables or enum types. Successful storage repair permits further KYC testing but does not prove Fincra credentials, MetaMap webhooks, final review, or account activation.
 
-The optional integration test (`node --test scripts/repair-kyc-storage.integration.test.js`) requires `VIDALPAY_KYC_TEST_URL` pointing to an empty dedicated `vidalpay_repair_test_*` database on loopback. It owns and resets that disposable database's public schema. It never reads the deployment's `DATABASE_URL`. Tests cover preservation of 20 fixture rows and original column values, new KYC writes, idempotency uniqueness, repeated application, rollback, and rejection of ambiguous legacy KYC/evidence and unsupported required/default fields.
+The optional integration test (`node --test scripts/repair-kyc-storage.integration.test.js`) requires `VIDALPAY_KYC_TEST_URL` pointing to an empty dedicated `vidalpay_repair_test_*` database on loopback. It owns and resets that disposable database's public schema. It never reads the deployment's `DATABASE_URL`. Tests cover preservation of 20 fixture rows and original column values, new KYC writes, idempotency uniqueness, repeated application, rollback, explicit mapping of the supplied 11-user distribution, private evidence retention, mismatched per-user decisions despite identical totals, missing decision sources, unknown statuses, and unsupported required/default fields.
 
-Local validation on 2026-10-16: 102 service/metadata tests, eight PostgreSQL integration scenarios, and TypeScript checking passed. The temporary PostgreSQL server was stopped. The Render migrations and live verification journey have not been executed by this task.
+Local validation on 2026-10-16: the earlier 102 service/metadata tests and TypeScript check passed. After the legacy-mapping extension, all 12 PostgreSQL integration scenarios passed (13 test-runner passes including the parent test). The temporary PostgreSQL server was stopped. The Render KYC repair and live verification journey have not been executed by this task.
 
 The implemented first step is Fincra's Nigerian BVN check, requiring:
 
@@ -136,7 +151,7 @@ After that server-side check, the next start request launches MetaMap. The mobil
 
 Signed MetaMap approval places the account in `MANUAL_REVIEW`, not `VERIFIED`. Final approval requires a super-admin, matching persisted provider evidence, and the same customer identity/environment. The final write requires the same verification reference and manual-review state, so it cannot overwrite a concurrent rejection. Client-submitted provider/reviewer flags are not trusted. Storage failures block verification writes while legacy session reads remain supported.
 
-Foreign-country Fincra customer-check contracts and per-currency final-review workflows are NOT implemented by this change. They must not be simulated with the Nigerian BVN endpoint or by treating MetaMap alone as approval. Existing legacy `VERIFIED` accounts have not been bulk-revoked or backfilled; their approval evidence still needs review.
+Foreign-country Fincra customer-check contracts and per-currency final-review workflows are NOT implemented by this change. They must not be simulated with the Nigerian BVN endpoint or by treating MetaMap alone as approval. The opt-in storage mapping preserves matching legacy `VERIFIED` decisions without manufacturing new provider evidence; the original approval evidence still needs review before choosing that mapping.
 
 New MetaMap launches carry a server-generated session identifier which must return in the signed webhook metadata. In-flight legacy sessions without this binding must be reviewed and restarted; they cannot approve or reject a different customer's profile through client-supplied metadata.
 

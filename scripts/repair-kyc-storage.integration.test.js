@@ -24,7 +24,7 @@ test('KYC compatibility repair on disposable PostgreSQL', { skip: !connectionStr
         CREATE TYPE operation_enum AS ENUM ('VIRTUAL_ACCOUNT', 'PAYOUT');
         CREATE TYPE status_enum AS ENUM ('PENDING', 'SUCCESS');
         CREATE TYPE currency_enum AS ENUM ('NGN', 'USD');
-        CREATE TYPE kyc_enum AS ENUM ('NOT_STARTED', 'VERIFIED');
+        CREATE TYPE kyc_enum AS ENUM ('NOT_STARTED', 'VERIFIED', 'PENDING_REVIEW', 'REJECTED', 'UNKNOWN');
         CREATE TABLE public."user" (id uuid PRIMARY KEY, "deletedAt" timestamp NULL,
           region varchar, "kycStatus" kyc_enum NOT NULL DEFAULT 'NOT_STARTED');
         CREATE TABLE public.user_kyc (id uuid PRIMARY KEY, "userId" uuid UNIQUE,
@@ -108,18 +108,105 @@ test('KYC compatibility repair on disposable PostgreSQL', { skip: !connectionStr
       assert.equal((await inspectKycStorage(client)).operationRows, 20);
     });
 
-    await t.test('legacy approval is preserved and requires explicit mapping', async () => {
+    await t.test('conflicting approval is blocked even with explicit mapping', async () => {
       await fixture();
       await client.query("UPDATE public.user_kyc SET status = 'VERIFIED'");
-      await assert.rejects(repairKycStorage(client, true), /Legacy KYC decisions/);
+      await assert.rejects(repairKycStorage(client, true, { mapLegacyKyc: true }), /conflicting/);
       assert.equal((await client.query('SELECT status FROM public.user_kyc')).rows[0].status, 'VERIFIED');
       assert.equal((await client.query("SELECT to_regclass('public.kyc_profile') AS table")).rows[0].table, null);
     });
 
-    await t.test('legacy evidence blocks empty-profile migration even with NOT_STARTED status', async () => {
+    await t.test('legacy evidence requires opt-in and remains private in its original table', async () => {
       await fixture();
       await client.query('UPDATE public.user_kyc SET "identityData" = $1', ['{"identity":"test-only"}']);
-      await assert.rejects(repairKycStorage(client, true), /Legacy KYC evidence exists/);
+      await assert.rejects(repairKycStorage(client, true), /explicit --map-legacy-kyc/);
+      const before = (await client.query('SELECT to_jsonb(k) AS row FROM public.user_kyc k')).rows;
+      const plan = await inspectKycStorage(client, { mapLegacyKyc: true });
+      assert.deepEqual(plan.blockers, []);
+      assert.equal(plan.legacyEvidenceRows, 1);
+      assert.equal(JSON.stringify(plan).includes('test-only'), false);
+      await repairKycStorage(client, true, { mapLegacyKyc: true });
+      assert.deepEqual((await client.query('SELECT to_jsonb(k) AS row FROM public.user_kyc k')).rows, before);
+      const profile = (await client.query('SELECT * FROM public.kyc_profile')).rows[0];
+      assert.equal(profile.status, 'NOT_STARTED');
+      assert.equal(JSON.stringify(profile).includes('test-only'), false);
+      assert.equal(JSON.parse(profile.identity).legacySource.id, before[0].row.id);
+    });
+
+    await t.test('maps the supplied 11-user distribution without new provider approvals or overwriting profiles', async () => {
+      await fixture();
+      const states = ['NOT_STARTED', 'NOT_STARTED', 'NOT_STARTED', 'NOT_STARTED', 'NOT_STARTED',
+        'VERIFIED', 'PENDING_REVIEW', 'PENDING_REVIEW', 'PENDING_REVIEW', 'PENDING_REVIEW', 'REJECTED'];
+      for (let i = 1; i < states.length; i++) {
+        const id = `00000000-0000-4000-8000-${String(i + 1).padStart(12, '0')}`;
+        await client.query('INSERT INTO public."user" (id, region, "kycStatus") VALUES ($1, $2, $3)', [id, 'NG', states[i]]);
+        await client.query(`INSERT INTO public.user_kyc (id, "userId", status, "identityData")
+          VALUES (gen_random_uuid(), $1, $2, $3)`, [id, states[i], '{"sensitive":"retained-test-evidence"}']);
+      }
+      const usersBefore = (await client.query('SELECT to_jsonb(u) AS row FROM public."user" u ORDER BY id')).rows;
+      const legacyBefore = (await client.query('SELECT to_jsonb(k) AS row FROM public.user_kyc k ORDER BY id')).rows;
+      const plan = await inspectKycStorage(client, { mapLegacyKyc: true });
+      assert.equal(plan.profilesToSeed, 11);
+      assert.deepEqual(plan.blockers, []);
+      assert.deepEqual(plan.proposedLegacyMappings, [
+        { source: 'NOT_STARTED', target: 'NOT_STARTED', count: 5 },
+        { source: 'PENDING_REVIEW', target: 'MANUAL_REVIEW', count: 4 },
+        { source: 'REJECTED', target: 'REJECTED', count: 1 },
+        { source: 'VERIFIED', target: 'VERIFIED', count: 1 },
+      ]);
+      await assert.rejects(repairKycStorage(client, true), /explicit --map-legacy-kyc/);
+      const result = await repairKycStorage(client, true, { mapLegacyKyc: true });
+      assert.deepEqual(result.appliedLegacyMappings, plan.proposedLegacyMappings);
+      assert.deepEqual((await client.query('SELECT to_jsonb(u) AS row FROM public."user" u ORDER BY id')).rows, usersBefore);
+      assert.deepEqual((await client.query('SELECT to_jsonb(k) AS row FROM public.user_kyc k ORDER BY id')).rows, legacyBefore);
+      const profiles = (await client.query('SELECT * FROM public.kyc_profile ORDER BY "userId"')).rows;
+      assert.deepEqual(profiles.map((p) => p.status), states.map((s) => s === 'PENDING_REVIEW' ? 'MANUAL_REVIEW' : s));
+      assert.ok(profiles.every((p) => p.provider === null && p.providerReference === null && p.sections === null));
+      assert.equal(JSON.stringify(profiles).includes('retained-test-evidence'), false);
+      assert.equal((await client.query('SELECT count(*)::int AS count FROM public.provider_operation')).rows[0].count, 20);
+      await client.query(`UPDATE public.kyc_profile SET status = 'RETRY_REQUIRED' WHERE "userId" = $1`, [userId]);
+      const updatedProfiles = (await client.query('SELECT * FROM public.kyc_profile ORDER BY "userId"')).rows;
+      assert.equal((await repairKycStorage(client, true, { mapLegacyKyc: true })).applied, false);
+      assert.deepEqual((await client.query('SELECT * FROM public.kyc_profile ORDER BY "userId"')).rows, updatedProfiles);
+    });
+
+    await t.test('matching aggregate totals cannot hide per-user conflicting decisions', async () => {
+      await fixture();
+      const other = '00000000-0000-4000-8000-000000000002';
+      await client.query(`INSERT INTO public."user" (id, "kycStatus") VALUES ($1, 'VERIFIED')`, [other]);
+      await client.query(`INSERT INTO public.user_kyc (id, "userId") VALUES (gen_random_uuid(), $1)`, [other]);
+      await client.query(`UPDATE public.user_kyc SET status = 'VERIFIED' WHERE "userId" = $1`, [userId]);
+      const plan = await inspectKycStorage(client, { mapLegacyKyc: true });
+      const sorted = (rows) => [...rows].sort((a, b) => a.status.localeCompare(b.status));
+      assert.deepEqual(sorted(plan.legacyUserStatuses), sorted(plan.legacyKycStatuses));
+      assert.equal(plan.unmappedLegacyRows, 2);
+      await assert.rejects(repairKycStorage(client, true, { mapLegacyKyc: true }), /conflicting/);
+    });
+
+    await t.test('missing approval source and unknown matched statuses both block mapping', async () => {
+      await fixture();
+      await client.query(`UPDATE public."user" SET "kycStatus" = 'VERIFIED'`);
+      await client.query('DELETE FROM public.user_kyc');
+      await assert.rejects(repairKycStorage(client, true, { mapLegacyKyc: true }), /missing decision sources/);
+      await fixture();
+      await client.query(`UPDATE public."user" SET "kycStatus" = 'UNKNOWN'`);
+      await client.query(`UPDATE public.user_kyc SET status = 'UNKNOWN'`);
+      await assert.rejects(repairKycStorage(client, true, { mapLegacyKyc: true }), /unsupported statuses/);
+    });
+
+    await t.test('failure during mapped profile insertion rolls back all preceding changes', async () => {
+      await fixture();
+      await client.query(`UPDATE public."user" SET "kycStatus" = 'VERIFIED'`);
+      await client.query(`UPDATE public.user_kyc SET status = 'VERIFIED'`);
+      const failingClient = { query: async (sql, args) => {
+        const result = await client.query(sql, args);
+        if (sql.startsWith('INSERT INTO public.kyc_profile')) throw new Error('injected mapping failure');
+        return result;
+      } };
+      await assert.rejects(repairKycStorage(failingClient, true, { mapLegacyKyc: true }), /injected mapping failure/);
+      assert.equal((await client.query("SELECT to_regclass('public.kyc_profile') AS table")).rows[0].table, null);
+      assert.equal((await client.query('SELECT "kycStatus" FROM public."user"')).rows[0].kycStatus, 'VERIFIED');
+      assert.deepEqual((await inspectKycStorage(client)).missingFields, ['type', 'providerReference', 'errorCode']);
     });
 
     await t.test('unexpected required legacy columns block writes', async () => {

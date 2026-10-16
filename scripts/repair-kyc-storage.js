@@ -12,6 +12,27 @@ const profileFields = {
   rejectionReason: 'character varying', providerReference: 'character varying', sections: 'text',
   uploads: 'text', identity: 'text', capabilities: 'text', limits: 'text',
 };
+const legacyStatusMapping = Object.freeze({
+  NOT_STARTED: 'NOT_STARTED', VERIFIED: 'VERIFIED',
+  PENDING_REVIEW: 'MANUAL_REVIEW', REJECTED: 'REJECTED',
+});
+
+function legacyCandidates(hasLegacy, hasProfiles) {
+  return `SELECT u.id, u."kycStatus"::text AS "userStatus",
+    ${hasLegacy ? 'k.id' : 'NULL::uuid'} AS "legacyId",
+    ${hasLegacy ? 'k.status::text' : 'NULL::text'} AS "legacyStatus"
+    FROM public."user" u
+    ${hasLegacy ? 'LEFT JOIN public.user_kyc k ON k."userId" = u.id AND k."deletedAt" IS NULL' : ''}
+    WHERE u."deletedAt" IS NULL
+    ${hasProfiles ? 'AND NOT EXISTS (SELECT 1 FROM public.kyc_profile p WHERE p."userId" = u.id)' : ''}`;
+}
+
+function mappedLegacyStatus(row) {
+  const userStatus = row.userStatus ?? 'NOT_STARTED';
+  const legacyStatus = row.legacyStatus ?? 'NOT_STARTED';
+  if (userStatus !== legacyStatus || !Object.hasOwn(legacyStatusMapping, userStatus)) return null;
+  return legacyStatusMapping[userStatus];
+}
 
 async function columns(client, table) {
   const result = await client.query(`SELECT column_name, data_type, is_nullable, column_default,
@@ -42,7 +63,7 @@ async function uniqueIndexExists(client, table, names) {
   return result.rows.some((row) => JSON.stringify(row.columns) === JSON.stringify(names));
 }
 
-async function inspectKycStorage(client) {
+async function inspectKycStorage(client, { mapLegacyKyc = false } = {}) {
   const operations = await columns(client, 'provider_operation');
   const users = await columns(client, 'user');
   const legacy = await columns(client, 'user_kyc');
@@ -102,16 +123,25 @@ async function inspectKycStorage(client) {
       HAVING count(*) > 1) d) AS idempotency`);
   if (duplicates.rows[0].references || duplicates.rows[0].idempotency) blockers.push('Duplicate operation references/idempotency keys require review; records will not be deleted');
 
-  // Only untouched legacy KYC can be seeded automatically. Decisions/evidence need an explicit mapping.
+  // Compare each user's two sources; matching aggregate counts can hide conflicting decisions.
   const unprofiled = profiles.size ? 'AND NOT EXISTS (SELECT 1 FROM public.kyc_profile p WHERE p."userId" = u.id)' : '';
   const userStates = await client.query(`SELECT u."kycStatus"::text AS status, count(*)::int AS count
     FROM public."user" u WHERE u."deletedAt" IS NULL ${unprofiled} GROUP BY u."kycStatus"::text`);
   const legacyStates = legacy.size ? await client.query(`SELECT k.status::text AS status, count(*)::int AS count
     FROM public.user_kyc k JOIN public."user" u ON u.id = k."userId"
     WHERE u."deletedAt" IS NULL AND k."deletedAt" IS NULL ${unprofiled} GROUP BY k.status::text`) : { rows: [] };
-  if ([...userStates.rows, ...legacyStates.rows].some((row) => row.status != null && row.status !== 'NOT_STARTED')) {
-    blockers.push('Legacy KYC decisions or in-progress checks require explicit mapping before profile creation');
+  const candidates = (await client.query(legacyCandidates(legacy.size, profiles.size))).rows;
+  const mappingCounts = new Map();
+  let unmapped = 0;
+  for (const row of candidates) {
+    const target = mappedLegacyStatus(row);
+    if (!target) { unmapped++; continue; }
+    const source = row.userStatus ?? 'NOT_STARTED';
+    const key = JSON.stringify([source, target]);
+    mappingCounts.set(key, (mappingCounts.get(key) || 0) + 1);
   }
+  if (unmapped) blockers.push(`${unmapped} legacy KYC records have conflicting, missing decision sources, or unsupported statuses; review per user`);
+  let evidenceRows = 0;
   if (legacy.size) {
     const duplicateKyc = await client.query(`SELECT count(*)::int AS count FROM
       (SELECT "userId" FROM public.user_kyc WHERE "deletedAt" IS NULL GROUP BY "userId" HAVING count(*) > 1) d`);
@@ -121,7 +151,13 @@ async function inspectKycStorage(client) {
       AND EXISTS (SELECT 1 FROM jsonb_each(to_jsonb(k)) e WHERE e.key IN
         ('identityData', 'addressData', 'livenessData', 'submissionReference', 'providerResponse', 'submittedAt', 'reviewedAt')
         AND e.value NOT IN ('null'::jsonb, '""'::jsonb, '"{}"'::jsonb, '"[]"'::jsonb, '{}'::jsonb, '[]'::jsonb))`);
-    if (evidence.rows[0].count) blockers.push('Legacy KYC evidence exists; review and map it instead of starting an empty profile');
+    evidenceRows = evidence.rows[0].count;
+  }
+  const requiresLegacyMapping = evidenceRows > 0 || candidates.some((row) =>
+    (row.userStatus != null && row.userStatus !== 'NOT_STARTED') ||
+    (row.legacyStatus != null && row.legacyStatus !== 'NOT_STARTED'));
+  if (requiresLegacyMapping && !mapLegacyKyc) {
+    blockers.push('Legacy KYC history requires review of proposedLegacyMappings and explicit --map-legacy-kyc');
   }
   const missingFields = Object.keys(operationFields).filter((key) => !operations.has(key));
   const enumConversions = ['provider', 'status', 'currency'].filter((key) => operations.get(key).data_type === 'USER-DEFINED');
@@ -139,6 +175,11 @@ async function inspectKycStorage(client) {
     relaxLegacyOperationType: Boolean(legacyRequired), missingIndexes, typeRowsToBackfill: needsBackfill,
     createKycProfile: !profiles.size, profilesToSeed: userStates.rows.reduce((sum, row) => sum + row.count, 0),
     legacyUserStatuses: userStates.rows, legacyKycStatuses: legacyStates.rows,
+    proposedLegacyMappings: [...mappingCounts].map(([key, count]) => {
+      const [source, target] = JSON.parse(key);
+      return { source, target, count };
+    }).sort((a, b) => a.source.localeCompare(b.source)),
+    legacyEvidenceRows: evidenceRows, unmappedLegacyRows: unmapped,
     transactionHistory: (await columns(client, 'financial_transaction')).size ? 'PRESENT_NOT_AUDITED' : 'MISSING_REQUIRES_SEPARATE_LEGACY_MAPPING',
   };
 }
@@ -160,8 +201,8 @@ async function convertEnumColumn(client, table, field) {
   }
 }
 
-async function repairKycStorage(client, apply = false) {
-  let plan = await inspectKycStorage(client);
+async function repairKycStorage(client, apply = false, options = {}) {
+  let plan = await inspectKycStorage(client, options);
   if (!apply || !hasChanges(plan)) return plan;
   if (plan.blockers.length) throw new Error(`No repair applied: ${plan.blockers.join('; ')}`);
   await client.query('BEGIN');
@@ -172,7 +213,7 @@ async function repairKycStorage(client, apply = false) {
     await client.query('LOCK TABLE public."user", public.provider_operation IN ACCESS EXCLUSIVE MODE');
     if ((await columns(client, 'user_kyc')).size) await client.query('LOCK TABLE public.user_kyc IN SHARE MODE');
     if ((await columns(client, 'kyc_profile')).size) await client.query('LOCK TABLE public.kyc_profile IN ACCESS EXCLUSIVE MODE');
-    plan = await inspectKycStorage(client);
+    plan = await inspectKycStorage(client, options);
     if (plan.blockers.length) throw new Error(`No repair applied: ${plan.blockers.join('; ')}`);
     for (const field of plan.missingFields) {
       await client.query(`ALTER TABLE public.provider_operation ADD COLUMN ${quote(field)} ${operationFields[field]} NULL`);
@@ -203,19 +244,33 @@ async function repairKycStorage(client, apply = false) {
       const legacy = await columns(client, 'user_kyc');
       const users = await columns(client, 'user');
       const regionField = users.has('region') ? 'u.region' : users.has('countryCode') ? 'u."countryCode"' : 'NULL::text';
-      await client.query(`INSERT INTO public.kyc_profile ("userId", region, status, identity)
-        SELECT u.id, CASE WHEN ${regionField} IN ('NG', 'US') THEN ${regionField} ELSE NULL END,
-          'NOT_STARTED', ${legacy.size ? `CASE WHEN k.id IS NULL THEN NULL ELSE
-            jsonb_build_object('legacySource', jsonb_build_object('table', 'user_kyc', 'id', k.id, 'status', k.status::text))::text END` : 'NULL'}
-        FROM public."user" u ${legacy.size ? 'LEFT JOIN public.user_kyc k ON k."userId" = u.id AND k."deletedAt" IS NULL' : ''}
-        WHERE u."deletedAt" IS NULL AND NOT EXISTS (SELECT 1 FROM public.kyc_profile p WHERE p."userId" = u.id)`);
+      const candidates = (await client.query(legacyCandidates(legacy.size, true))).rows;
+      let seeded = 0;
+      for (const row of candidates) {
+        const status = mappedLegacyStatus(row);
+        if (!status) throw new Error('Legacy KYC mapping changed; repair rolled back.');
+        // identity is returned to mobile. Keep only provenance here, never raw legacy evidence.
+        const identity = JSON.stringify({ legacySource: {
+          mappingVersion: 1, table: row.legacyId ? 'user_kyc' : 'user',
+          id: row.legacyId ?? row.id, status: row.legacyStatus,
+          userStatus: row.userStatus, mappedStatus: status,
+        } });
+        const inserted = await client.query(`INSERT INTO public.kyc_profile ("userId", region, status, identity)
+          SELECT u.id, CASE WHEN ${regionField} IN ('NG', 'US') THEN ${regionField} ELSE NULL END, $2, $3
+          FROM public."user" u WHERE u.id = $1 RETURNING status`, [row.id, status, identity]);
+        if (inserted.rowCount !== 1 || inserted.rows[0].status !== status) {
+          throw new Error('Legacy KYC profile verification failed; repair rolled back.');
+        }
+        seeded++;
+      }
+      if (seeded !== plan.profilesToSeed) throw new Error('Legacy KYC profile count changed; repair rolled back.');
     }
-    const verified = await inspectKycStorage(client);
+    const verified = await inspectKycStorage(client, options);
     if (hasChanges(verified) || verified.blockers.length || verified.operationRows !== plan.operationRows) {
       throw new Error('KYC storage verification failed; repair rolled back.');
     }
     await client.query('COMMIT');
-    return { ...verified, applied: true };
+    return { ...verified, applied: true, appliedLegacyMappings: plan.proposedLegacyMappings };
   } catch (error) {
     try { await client.query('ROLLBACK'); } catch { /* Recheck after a connection failure. */ }
     throw error;
@@ -224,13 +279,16 @@ async function repairKycStorage(client, apply = false) {
 
 async function main() {
   const args = process.argv.slice(2);
-  if (args.length > 1 || args.some((arg) => !['--check', '--apply'].includes(arg))) throw new Error('Use --check (default) or --apply.');
+  if (new Set(args).size !== args.length || args.some((arg) => !['--check', '--apply', '--map-legacy-kyc'].includes(arg)) ||
+      (args.includes('--check') && args.includes('--apply'))) {
+    throw new Error('Use --check (default) or --apply, optionally with --map-legacy-kyc after reviewing the proposed mapping.');
+  }
   if (!/^postgres(?:ql)?:\/\//i.test(process.env.DATABASE_URL || '')) throw new Error('A PostgreSQL DATABASE_URL is required.');
   const { Client } = require('pg');
   const client = new Client({ connectionString: process.env.DATABASE_URL, ssl: sslConfiguration(process.env.DB_SSL), connectionTimeoutMillis: 10000 });
   await client.connect();
   try {
-    const result = await repairKycStorage(client, args.includes('--apply'));
+    const result = await repairKycStorage(client, args.includes('--apply'), { mapLegacyKyc: args.includes('--map-legacy-kyc') });
     process.stdout.write(`${JSON.stringify(result, null, 2)}\n`);
     if (result.blockers.length || hasChanges(result)) process.exitCode = 2;
   } finally { await client.end(); }
