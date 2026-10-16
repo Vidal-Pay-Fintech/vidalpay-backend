@@ -59,7 +59,6 @@ describe('PostgreSQL entity metadata', () => {
     const optionalUserColumns = [
       'pendingEmail',
       'pendingPhoneNumber',
-      'kycStatus',
       'capabilities',
       'productAvailability',
       'limits',
@@ -81,6 +80,14 @@ describe('PostgreSQL entity metadata', () => {
 
     const userMetadata = dataSource.getMetadata(User);
     const walletMetadata = dataSource.getMetadata(Wallet);
+
+    expect(userMetadata.findColumnWithPropertyName('kycStatus')).toEqual(
+      expect.objectContaining({ isSelect: false, isInsert: false, isUpdate: true }),
+    );
+    const statusUpdate = dataSource.createQueryBuilder().update(User)
+      .set({ kycStatus: 'IN_PROGRESS' }).where('id = :id', { id: 'test-user' });
+    expect(statusUpdate.getQuery()).toContain('"kycStatus" =');
+    expect(statusUpdate.getParameters()).toEqual(expect.objectContaining({ id: 'test-user' }));
 
     for (const propertyName of ['countryCode', 'residency', 'region']) {
       expect(userMetadata.findColumnWithPropertyName(propertyName)).toEqual(

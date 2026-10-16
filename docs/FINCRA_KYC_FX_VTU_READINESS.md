@@ -8,7 +8,7 @@
 - Authenticated requests cannot override the origin or follow redirects. The sandbox probe refuses live configuration. A timeout, 4xx/5xx, or business rejection is not successful authentication.
 - Use separate deployments/databases for sandbox and live, with separate API keys, business IDs, webhook secrets, queues and provider identifiers. Never point live keys at a database containing sandbox accounts. The code cannot determine a credential's environment from its value.
 - `npm run verify:core` runs local backend tests/build, schema-repair tests, mobile type checking and mobile policy tests. It reports real-provider/device/deployment checks as unverified; it does not deploy or transact.
-- The Render login failure is still confirmed by the supplied 2026-10-15 log: PostgreSQL `42703`, `column user.region does not exist`. The local repair has not been applied to the deployed database; see the procedure below. The general `db:migrate` command remains a no-op; do not substitute the MySQL-oriented historical migration on PostgreSQL.
+- The supplied 2026-10-15 Render log identified PostgreSQL `42703`, `column user.region does not exist`. The user subsequently supplied successful repair output adding `region`, followed by `missing: []`. This confirms that repair in the reported target, not independent live login or KYC verification. The procedure below remains a runbook for other affected targets, not an instruction to repeat an already-completed repair. The general `db:migrate` command remains a no-op; do not substitute the MySQL-oriented historical migration on PostgreSQL.
 
 Official references: https://docs.fincra.com/reference/rates and https://docs.fincra.com/di/docs/bvn-resolution-1.
 
@@ -53,7 +53,32 @@ After deploying the reviewed backend revision containing the new repair script, 
 npm run db:repair-wallet-schema -- --check
 ```
 
-The check inspects columns, required unmapped fields/defaults and currency enum support without reading customer records or writing data. If it reports incompatible types, required unmapped fields, or unsupported currencies, stop for a reviewed migration. It does not automatically change financial columns, enum types, constraints or defaults.
+The check inspects columns, required unmapped fields/defaults and currency enum support without reading customer records or writing data. It does not automatically change financial columns, enum types, constraints or defaults. The user's subsequent Render output confirms that this check and `--apply` both refused because the wallet currency enum lacks GBP/CAD; neither command applied the column repair. Use the separate currency procedure below first. Incompatible types or required unmapped fields still require separate review, not a bypass of these guards.
+
+### Missing GBP/CAD wallet enum values
+
+Deploy the reviewed backend revision containing `scripts/repair-wallet-currencies.js` and its package command before using it in Render. In the affected backend service shell, confirm the intended database and a usable backup, then inspect without changing data:
+
+```sh
+npm run db:repair-wallet-currencies -- --check
+```
+
+Review `enumType`, `values`, and `missing`. The script discovers the enum actually attached to `public.wallet.currency`; it does not guess its name. Exit code 2 means GBP and/or CAD is missing. It refuses missing/non-enum columns, an enum without NGN/USD, or one shared with other table columns. Stop for review on those errors. Do not paste connection strings or credentials into logs or chat.
+
+Only after reviewing the target and expected missing values, apply and recheck:
+
+```sh
+npm run db:repair-wallet-currencies -- --apply
+npm run db:repair-wallet-currencies -- --check
+```
+
+This separately committed repair adds only missing GBP/CAD labels, preserves existing labels and records, and requires PostgreSQL 12+ and permission to alter the enum. It uses bounded lock/statement timeouts and rolls back if the operation fails before commit. A connection failure during commit can leave the outcome uncertain: reconnect and run `--check` before retrying. Once committed, labels are not automatically removed as a rollback; do not drop/recreate the type or rewrite financial tables to remove them. PostgreSQL requires new enum values to be committed before application queries use them: https://www.postgresql.org/docs/current/sql-altertype.html.
+
+After the currency check reports `missing: []`, run the column check again:
+
+```sh
+npm run db:repair-wallet-schema -- --check
+```
 
 If it reports only the expected missing nullable account/provider columns, apply and recheck:
 
@@ -64,7 +89,40 @@ npm run db:repair-wallet-schema -- --check
 
 This adds only the missing allowlisted nullable fields, in a transaction with lock/statement timeouts. It does not create tables, replace `routingProvider`/`providerMetadata`, infer historical provider mappings, activate wallets, or update balances. Retry profile loading, KYC country confirmation and wallet account-detail requests after `missing: []`. The local patch has not been applied to Render by this task.
 
-The browser log separately reports transaction HTTP 503 and beneficiary HTTP 500 errors, plus web notification/deprecation warnings. The shared audit excerpt includes historical `transaction` and `user_kyc` tables, while the current entities use `financial_transaction` and `kyc_profile`; the excerpt does not establish whether those latter tables also exist. A complete schema comparison and an explicit historical-data mapping are still required. Do not rename tables or create empty replacements to conceal existing financial history. The wallet repair is not a claim that all those errors or live KYC are resolved.
+The currency repair only makes those codes storable. It does not create customer wallets or provider accounts, grant merchant currency entitlements, approve KYC, or activate spending. Live Fincra, MetaMap, and final-review behavior must still be verified separately.
+
+Local verification: the 31 region/wallet-column/currency unit tests pass. A separate disposable loopback PostgreSQL integration test also passes: it reproduces the pre-repair refusal, verifies a real mid-repair rollback, applies both repairs in order, verifies repeat runs are no-ops, preserves the original test rows/balances, and accepts GBP/CAD only after the currency commit. These are local database results, not verification of Render or a complete provider journey. The optional integration test uses only `VIDALPAY_CURRENCY_TEST_URL`, requires an empty dedicated `vidalpay_repair_test_*` database on loopback, and never uses the service's `DATABASE_URL`.
+
+The subsequent focused audit confirms that `financial_transaction` and `kyc_profile` are missing. It also reports 20 existing `provider_operation` rows in a different schema: `operationType` is an enum, `type`, `providerReference`, and `errorCode` are absent, and provider/status/currency are enums. The 2026-10-16 Render log confirms `ProviderOperation.type` fails in `startKyc`. This is independent of the wallet error. Transaction HTTP 503 remains unresolved until a verified mapping of the existing historical `transaction` rows is implemented. Do not rename tables or create an empty transaction table to conceal history. Beneficiary HTTP 500 and browser warnings remain separate diagnoses.
+
+### Provider-operation and KYC storage repair
+
+The reviewed `scripts/repair-kyc-storage.js` command prepares PostgreSQL storage for the current KYC implementation. Deploy this command together with the entity change allowing explicit `user.kycStatus` updates; leaving that field non-writable causes TypeORM status updates to fail even after schema repair. General reads/inserts still omit this compatibility field.
+
+Run the following in the affected Render service shell after confirming the database target and backup:
+
+```sh
+npm run db:repair-kyc-storage -- --check
+```
+
+This is read-only and reports schema changes, row counts, aggregate legacy status counts, and blockers without customer identity values. Missing columns alone are insufficient to decide on a repair: old enum values, required columns, unique references, and KYC history must also be compatible.
+
+If `blockers` is empty and the reported changes match this deployment, apply and recheck:
+
+```sh
+npm run db:repair-kyc-storage -- --apply
+npm run db:repair-kyc-storage -- --check
+```
+
+The transaction adds `type`, `providerReference`, and `errorCode` where missing; copies `operationType` verbatim into an absent `type`; converts provider/status/currency and `user.kycStatus` enum columns to varchar preserving existing values/defaults; and makes the legacy `operationType` column nullable without a default so current KYC inserts can omit it. Existing external/internal references are retained without guessing their relationship to `providerReference`. Unique reference and user/type/idempotency indexes are required; duplicates cause a refusal, never deletion or deduplication. Enum types themselves and the original legacy columns are retained. The new and old operation formats are not interchangeable for an older backend deployment, so use a coordinated deployment rather than rolling back only application code.
+
+`kyc_profile` is created with a unique user link and profiles are seeded only when each affected user's legacy KYC state is absent or exactly `NOT_STARTED`, with no submitted evidence. The legacy `user_kyc` table remains intact, and seeded profiles retain the legacy source ID. Any existing approval, rejection, in-progress state, or submitted identity/review evidence stops the migration for explicit mapping. No approval is manufactured or revoked. Existing current profiles are preserved. The command does not create `financial_transaction`, change wallet balances, issue accounts, or contact providers.
+
+Apply takes bounded locks and verifies the resulting schema and provider-operation row count before commit. Failures roll back; after an uncertain connection failure, reconnect and run `--check`. Committed changes require a reviewed rollback plan, not dropping tables or enum types. Successful storage repair permits further KYC testing but does not prove Fincra credentials, MetaMap webhooks, final review, or account activation.
+
+The optional integration test (`node --test scripts/repair-kyc-storage.integration.test.js`) requires `VIDALPAY_KYC_TEST_URL` pointing to an empty dedicated `vidalpay_repair_test_*` database on loopback. It owns and resets that disposable database's public schema. It never reads the deployment's `DATABASE_URL`. Tests cover preservation of 20 fixture rows and original column values, new KYC writes, idempotency uniqueness, repeated application, rollback, and rejection of ambiguous legacy KYC/evidence and unsupported required/default fields.
+
+Local validation on 2026-10-16: 102 service/metadata tests, eight PostgreSQL integration scenarios, and TypeScript checking passed. The temporary PostgreSQL server was stopped. The Render migrations and live verification journey have not been executed by this task.
 
 The implemented first step is Fincra's Nigerian BVN check, requiring:
 

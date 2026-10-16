@@ -198,7 +198,7 @@ export class User extends AbstractEntity {
     nullable: true,
     select: false,
     insert: false,
-    update: false,
+    update: true,
   })
   kycStatus: string;
 
