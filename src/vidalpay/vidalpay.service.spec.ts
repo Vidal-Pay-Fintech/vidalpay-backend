@@ -1235,6 +1235,9 @@ describe('VidalpayService', () => {
         userId: 'user-1',
         currency: Currency.NGN,
         balance: 0,
+        provider: 'FINCRA',
+        providerStatus: 'ACTIVE',
+        accountNumber: '1234567890',
       },
     ]);
     providerOperationRepository.findOne.mockResolvedValue(null);
@@ -1479,13 +1482,69 @@ describe('VidalpayService', () => {
     expect(providerOperationRepository.save).not.toHaveBeenCalled();
   });
 
+  it('does not treat an unprovisioned currency placeholder as an active wallet', async () => {
+    userRepository.findOne.mockResolvedValue({ id: 'user-1', region: 'NG' });
+    walletRepository.find.mockResolvedValue([
+      {
+        id: 'gbp-placeholder',
+        userId: 'user-1',
+        currency: 'GBP',
+        balance: 0,
+        provider: 'FINCRA',
+        providerStatus: 'NOT_PROVISIONED',
+        accountNumber: null,
+      },
+    ]);
+    providerOperationRepository.findOne.mockResolvedValue(null);
+    kycProfileRepository.findOne.mockResolvedValue({ status: 'VERIFIED' });
+
+    const result = await service.getWalletEligibility('user-1', 'GBP');
+
+    expect(result.status).not.toBe('ACTIVE');
+    expect(result.activeWallet).toBeNull();
+  });
+
+  it('requires final KYC approval before requesting a Fincra wallet', async () => {
+    userRepository.findOne.mockResolvedValue({
+      id: 'user-1',
+      region: 'NG',
+      kycStatus: 'MANUAL_REVIEW',
+    });
+    walletRepository.find.mockResolvedValue([]);
+    kycProfileRepository.findOne.mockResolvedValue({ status: 'MANUAL_REVIEW' });
+
+    const eligibility = await service.getWalletEligibility('user-1', 'GBP');
+    expect(eligibility.status).toBe('KYC_REQUIRED');
+    expect(eligibility.canRequest).toBe(false);
+    expect(eligibility.missingRequirements).toEqual(
+      expect.arrayContaining([
+        expect.objectContaining({ key: 'VIDALPAY_FINAL_KYC_APPROVAL' }),
+      ]),
+    );
+
+    await expect(
+      service.activateWalletProduct('user-1', 'GBP', {}),
+    ).rejects.toMatchObject({
+      response: expect.objectContaining({ code: 'KYC_REQUIRED' }),
+    });
+    expect(fincraWalletService.requestPermanentVirtualAccount).not.toHaveBeenCalled();
+  });
+
   it('does not recreate an already-active wallet', async () => {
     userRepository.findOne.mockResolvedValue({ id: 'user-1', region: 'NG' });
     walletRepository.find.mockResolvedValue([
-      { id: 'gbp-wallet', userId: 'user-1', currency: 'GBP', balance: 0 },
+      {
+        id: 'gbp-wallet',
+        userId: 'user-1',
+        currency: 'GBP',
+        balance: 0,
+        provider: 'FINCRA',
+        providerStatus: 'ACTIVE',
+        accountNumber: '1234567890',
+      },
     ]);
     providerOperationRepository.findOne.mockResolvedValue(null);
-    kycProfileRepository.findOne.mockResolvedValue(null);
+    kycProfileRepository.findOne.mockResolvedValue({ status: 'VERIFIED' });
 
     const result = await service.activateWalletProduct('user-1', 'GBP', {});
 
@@ -1503,7 +1562,7 @@ describe('VidalpayService', () => {
       currency: 'GBP',
       provider: 'FINCRA',
     });
-    kycProfileRepository.findOne.mockResolvedValue(null);
+    kycProfileRepository.findOne.mockResolvedValue({ status: 'VERIFIED' });
 
     const result = await service.activateWalletProduct('user-1', 'GBP', {});
 
@@ -1515,7 +1574,7 @@ describe('VidalpayService', () => {
     userRepository.findOne.mockResolvedValue({ id: 'user-1', region: 'NG' });
     walletRepository.find.mockResolvedValue([]);
     providerOperationRepository.findOne.mockResolvedValue(null);
-    kycProfileRepository.findOne.mockResolvedValue(null);
+    kycProfileRepository.findOne.mockResolvedValue({ status: 'VERIFIED' });
 
     const result = await service.activateWalletProduct('user-1', 'GBP', {});
 
@@ -1568,12 +1627,19 @@ describe('VidalpayService', () => {
         metadata: payload.metadata ? { ...payload.metadata } : payload.metadata,
       }),
     );
-    kycProfileRepository.findOne.mockResolvedValue(null);
+    kycProfileRepository.findOne.mockResolvedValue({ status: 'VERIFIED' });
     fincraWalletService.requestPermanentVirtualAccount.mockResolvedValue({
       status: 200,
       data: {
         success: true,
-        data: { id: 'fincra-request-1', status: 'pending' },
+        data: {
+          id: 'fincra-request-1',
+          status: 'active',
+          accountInformation: {
+            accountNumber: '9876543210',
+            accountName: 'Ada Lovelace',
+          },
+        },
       },
       providerReference: 'fincra-request-1',
       requestStatus: 'PENDING',
@@ -1627,6 +1693,203 @@ describe('VidalpayService', () => {
     expect(walletRepository.save).not.toHaveBeenCalled();
     expect(result.status).toBe('PENDING');
     expect(result.activation.providerReference).toBe('fincra-request-1');
+    expect(result.activation.message).toContain('webhook');
+  });
+
+  it('sends NGN BVN to Fincra without persisting the raw value in provider operation storage', async () => {
+    (configService.get as jest.Mock).mockImplementation((key: string) => {
+      if (key === 'FINCRA_WALLET_PRODUCTS_JSON') {
+        return JSON.stringify([
+          {
+            currency: 'NGN',
+            enabled: true,
+            tier: 'PRIMARY',
+            supportedJurisdictions: ['NG'],
+            canProvision: true,
+            requirementsConfigured: true,
+            requirements: [],
+          },
+        ]);
+      }
+      if (key === 'FINCRA_API_KEY') return 'configured';
+      if (key === 'FINCRA_BASE_URL') return 'https://sandboxapi.fincra.com';
+      return undefined;
+    });
+    userRepository.findOne.mockResolvedValue({
+      id: 'user-1',
+      region: 'NG',
+      firstName: 'Ada',
+      lastName: 'Lovelace',
+      email: 'ada@example.com',
+      phoneNumber: '+2348012345678',
+      country: 'Nigeria',
+    });
+    walletRepository.find.mockResolvedValue([]);
+    providerOperationRepository.findOne.mockResolvedValue(null);
+    providerOperationRepository.create.mockImplementation((value: any) => value);
+    providerOperationRepository.save.mockImplementation(async (value: any) => value);
+    kycProfileRepository.findOne.mockResolvedValue({ status: 'VERIFIED' });
+    fincraWalletService.requestPermanentVirtualAccount.mockResolvedValue({
+      status: 200,
+      data: { success: true, data: { status: 'approved', accountNumber: null } },
+      providerReference: 'fincra-ngn-request',
+      requestStatus: 'APPROVED',
+    });
+
+    const result = await service.activateWalletProduct('user-1', 'NGN', {
+      KYCInformation: { bvn: '12345678901' },
+    });
+
+    expect(fincraWalletService.requestPermanentVirtualAccount).toHaveBeenCalledWith(
+      expect.objectContaining({
+        currency: 'NGN',
+        KYCInformation: expect.objectContaining({ bvn: '12345678901' }),
+      }),
+    );
+    expect(providerOperationRepository.save).toHaveBeenCalledWith(
+      expect.objectContaining({
+        status: 'PENDING',
+        requestPayload: expect.not.objectContaining({
+          KYCInformation: expect.objectContaining({ bvn: '12345678901' }),
+        }),
+      }),
+    );
+    expect(walletRepository.save).not.toHaveBeenCalled();
+    expect(result.status).toBe('PENDING');
+  });
+
+  it('rejects NGN activation before provider submission when BVN is missing', async () => {
+    userRepository.findOne.mockResolvedValue({
+      id: 'user-1', region: 'NG', firstName: 'Ada', lastName: 'Lovelace',
+    });
+    walletRepository.find.mockResolvedValue([]);
+    providerOperationRepository.findOne.mockResolvedValue(null);
+    kycProfileRepository.findOne.mockResolvedValue({ status: 'VERIFIED' });
+
+    const result = await service.activateWalletProduct('user-1', 'NGN', {});
+
+    expect(result.status).toBe('REQUIRES_INFORMATION');
+    expect(result.missingRequirements).toEqual(
+      expect.arrayContaining([expect.objectContaining({ key: 'bvn' })]),
+    );
+    expect(fincraWalletService.requestPermanentVirtualAccount).not.toHaveBeenCalled();
+    expect(providerOperationRepository.save).not.toHaveBeenCalled();
+  });
+
+  it('does not expose legacy account details unless the wallet is Fincra-issued and active', async () => {
+    walletRepository.find.mockResolvedValue([]);
+    walletRepository.findOne.mockResolvedValue({
+      id: 'old-wallet',
+      userId: 'user-1',
+      currency: Currency.NGN,
+      balance: 0,
+      provider: 'LEGACY',
+      providerStatus: 'ACTIVE',
+      accountNumber: '0112233445',
+      accountName: 'Legacy Name',
+      bankName: 'Legacy Bank',
+    });
+
+    const response = await service.getWalletAccountDetails('user-1', Currency.NGN);
+
+    expect(response.accountDetails).toEqual(
+      expect.objectContaining({
+        accountNumber: null,
+        accountName: null,
+        bankName: null,
+        isProvisioned: false,
+      }),
+    );
+    expect(response.wallet.accountNumber).toBeNull();
+  });
+
+  it('does not persist an approved webhook before Fincra issues the account', async () => {
+    const payload = {
+      id: 'event-approved',
+      event: 'virtualaccount.approved',
+      data: {
+        id: 'fincra-request-1',
+        status: 'approved',
+        accountInformation: { accountNumber: '1234567890' },
+      },
+    };
+    configService.get.mockImplementation((key: string) =>
+      key === 'FINCRA_WEBHOOK_SECRET' ? 'secret' : undefined,
+    );
+    const signature = require('crypto')
+      .createHmac('sha512', 'secret')
+      .update(JSON.stringify(payload))
+      .digest('hex');
+    providerOperationRepository.findOne.mockResolvedValue({
+      id: 'op-1',
+      userId: 'user-1',
+      type: 'wallet_activation',
+      reference: 'wallet_activation:user-1:CAD',
+      providerReference: 'fincra-request-1',
+      status: 'PENDING',
+      currency: 'CAD',
+      metadata: {},
+    });
+    providerOperationRepository.save.mockImplementation(
+      async (payload: any) => payload,
+    );
+
+    const result = await service.handleFincraWebhook(payload, signature);
+
+    expect(result.walletUpdated).toBe(false);
+    expect(walletRepository.save).not.toHaveBeenCalled();
+    expect(providerOperationRepository.save).toHaveBeenCalledWith(
+      expect.objectContaining({ status: 'APPROVED' }),
+    );
+  });
+
+  it('accepts the NGN virtualaccount.approved webhook as Fincra issuance confirmation', async () => {
+    const payload = {
+      id: 'event-ngn-approved',
+      event: 'virtualaccount.approved',
+      data: {
+        id: 'fincra-ngn-request',
+        currency: 'NGN',
+        status: 'approved',
+        accountInformation: {
+          accountNumber: '0123456789',
+          accountName: 'Ada Lovelace',
+          bankName: 'Wema Bank',
+        },
+      },
+    };
+    configService.get.mockImplementation((key: string) =>
+      key === 'FINCRA_WEBHOOK_SECRET' ? 'secret' : undefined,
+    );
+    const signature = require('crypto')
+      .createHmac('sha512', 'secret')
+      .update(JSON.stringify(payload))
+      .digest('hex');
+    providerOperationRepository.findOne.mockResolvedValue({
+      id: 'op-ngn',
+      userId: 'user-1',
+      type: 'wallet_activation',
+      reference: 'wallet_activation:user-1:NGN',
+      providerReference: 'fincra-ngn-request',
+      status: 'PENDING',
+      currency: 'NGN',
+      metadata: {},
+    });
+    providerOperationRepository.save.mockImplementation(
+      async (operation: any) => operation,
+    );
+
+    const result = await service.handleFincraWebhook(payload, signature);
+
+    expect(result.walletUpdated).toBe(true);
+    expect(walletRepository.save).toHaveBeenCalledWith(
+      expect.objectContaining({
+        currency: Currency.NGN,
+        accountNumber: '0123456789',
+        provider: 'FINCRA',
+        providerStatus: 'ACTIVE',
+      }),
+    );
   });
 
   it('marks retryable Fincra timeouts as ambiguous for later reconciliation', async () => {
@@ -1666,7 +1929,7 @@ describe('VidalpayService', () => {
     walletRepository.save.mockImplementation(async (payload: any) => payload);
     transactionRepository.create.mockImplementation((payload: any) => payload);
     transactionRepository.save.mockImplementation(async (payload: any) => payload);
-    kycProfileRepository.findOne.mockResolvedValue(null);
+    kycProfileRepository.findOne.mockResolvedValue({ status: 'VERIFIED' });
     fincraWalletService.requestPermanentVirtualAccount.mockRejectedValue({
       response: {
         message: {
@@ -1731,7 +1994,7 @@ describe('VidalpayService', () => {
     walletRepository.save.mockImplementation(async (payload: any) => payload);
     transactionRepository.create.mockImplementation((payload: any) => payload);
     transactionRepository.save.mockImplementation(async (payload: any) => payload);
-    kycProfileRepository.findOne.mockResolvedValue(null);
+    kycProfileRepository.findOne.mockResolvedValue({ status: 'VERIFIED' });
     fincraWalletService.requestPermanentVirtualAccount.mockRejectedValue({
       response: {
         message: {
@@ -1757,11 +2020,11 @@ describe('VidalpayService', () => {
   it('persists real Fincra wallet account details from an authenticated approved webhook', async () => {
     const payload = {
       id: 'event-1',
-      event: 'virtual_account.approved',
+      event: 'virtualaccount.issued',
       data: {
         id: 'fincra-request-1',
-        status: 'approved',
-        account: {
+        status: 'pending',
+        accountInformation: {
           accountNumber: '1234567890',
           accountName: 'Ada Lovelace',
           bankName: 'Fincra Bank',

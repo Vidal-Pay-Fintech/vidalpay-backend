@@ -12,6 +12,18 @@
 
 Official references: https://docs.fincra.com/reference/rates and https://docs.fincra.com/di/docs/bvn-resolution-1.
 
+## NGN permanent wallet activation
+
+- Final VidalPay KYC approval is required before the mobile app may request provisioning. NGN requests also require a fresh 11-digit BVN entry; the app sends it to Fincra over the provider request, but the activation operation stores only redacted request metadata.
+- An HTTP success from `POST /profile/virtual-accounts/requests` is only an accepted request. The backend does not persist or expose account data from that response.
+- For NGN, a signed `virtualaccount.approved` webhook with an account number is Fincra's documented confirmation. Foreign currencies require the signed `virtualaccount.issued` event; `virtualaccount.approved` alone is still pending for those currencies.
+- The public callback route is `POST /webhooks/fincra`; Render must point to the deployed backend's exact public URL plus this path. The callback accepts Fincra's `signature`, `x-fincra-signature`, or `x-signature` header and validates the body with `FINCRA_WEBHOOK_SECRET`.
+- Fincra documents that NGN virtual-account funds settle to the merchant balance, not automatically into VidalPay's per-user ledger. Reconciliation/crediting must therefore be implemented and tested separately before presenting incoming transfers as ledger-settled.
+
+## Deployed Fincra verification checklist
+
+Repository code cannot inspect Render's actual secret values or the merchant dashboard. In Render, confirm `FINCRA_ENV` and `FINCRA_BASE_URL` select the same environment; the API key, business ID, and webhook encryption secret all belong to that same sandbox/live merchant environment. Confirm the merchant is enabled for NGN permanent individual virtual accounts and that the webhook is configured for virtual-account events, including `virtualaccount.approved` (and `virtualaccount.issued` for FCY). Use the admin-only `/providers/fincra/sandbox-probe` only when the selected configuration is sandbox; it does not prove product entitlement or webhook delivery. Test with a dedicated test customer and verify that the account-details endpoint remains unprovisioned until the signed issuance event is received.
+
 ## Render login schema repair
 
 The login query selects `user.region` before checking the password, so this database/schema mismatch causes HTTP 500 independently of the supplied credentials. Browser animation/font deprecation warnings are not the cause.

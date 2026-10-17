@@ -417,7 +417,7 @@ export class VidalpayService {
           product.currency,
           wallets,
         );
-        return eligibility.available && eligibility.canRequest
+        return eligibility.available && eligibility.status !== 'PENDING'
           ? eligibility.product
           : null;
       }),
@@ -441,6 +441,7 @@ export class VidalpayService {
     currency: string,
     payload: AnyRecord = {},
   ) {
+    await this.assertKycApproved(userId);
     const user = await this.findUser(userId);
     const eligibility = await this.evaluateWalletEligibility(user, currency);
     const activationKey = this.walletActivationIdempotencyKey(
@@ -471,17 +472,6 @@ export class VidalpayService {
       };
     }
 
-    if (!eligibility.eligible) {
-      return {
-        ...eligibility,
-        activation: {
-          status: eligibility.status,
-          reference: null,
-          message: eligibility.reason,
-        },
-      };
-    }
-
     const rawProduct = this.walletProductCatalogService.find(
       eligibility.currency,
     );
@@ -498,6 +488,46 @@ export class VidalpayService {
 
     const provider =
       this.walletProductCatalogService.providerConfigured(rawProduct);
+    const fincraRequest = this.buildFincraVirtualAccountRequest(
+      user,
+      rawProduct,
+      payload,
+      activationKey,
+    );
+    const fincraKycInformation = this.asRecord(
+      fincraRequest.KYCInformation,
+    ) ?? {};
+    if (
+      eligibility.currency === 'NGN' &&
+      !/^\d{11}$/.test(this.asString(fincraKycInformation.bvn) ?? '')
+    ) {
+      return {
+        ...eligibility,
+        eligible: false,
+        canRequest: true,
+        status: 'REQUIRES_INFORMATION',
+        reason: 'Fincra requires a valid 11-digit BVN to request a permanent NGN account.',
+        missingRequirements: [
+          ...eligibility.missingRequirements,
+          { key: 'bvn', label: '11-digit BVN', source: 'FINCRA' },
+        ],
+        activation: {
+          status: 'REQUIRES_INFORMATION',
+          reference: null,
+          message: 'Enter a valid 11-digit BVN to continue.',
+        },
+      };
+    }
+    if (!eligibility.eligible) {
+      return {
+        ...eligibility,
+        activation: {
+          status: eligibility.status,
+          reference: null,
+          message: eligibility.reason,
+        },
+      };
+    }
     const existing = await this.providerOperationRepository.findOne({
       where: {
         userId,
@@ -508,12 +538,14 @@ export class VidalpayService {
     if (existing) {
       return {
         ...eligibility,
-        status: existing.status === 'PENDING' ? 'PENDING' : eligibility.status,
+        status: this.isWalletActivationInProgress(existing.status)
+          ? 'PENDING'
+          : eligibility.status,
         activation: {
           status: existing.status,
           reference: existing.reference,
           message:
-            existing.status === 'PENDING'
+            this.isWalletActivationInProgress(existing.status)
               ? 'A wallet activation request is already pending for this currency.'
               : existing.failureReason,
         },
@@ -557,12 +589,6 @@ export class VidalpayService {
       };
     }
 
-    const fincraRequest = this.buildFincraVirtualAccountRequest(
-      user,
-      rawProduct,
-      payload,
-      activationKey,
-    );
     const operation = await this.providerOperationRepository.save(
       this.providerOperationRepository.create({
         userId,
@@ -589,14 +615,20 @@ export class VidalpayService {
         await this.fincraWalletService.requestPermanentVirtualAccount(
           fincraRequest,
         );
-      operation.status = 'PENDING';
       operation.providerReference = result.providerReference;
+      const providerPayload = this.asRecord(result.data) ?? {};
+      // Only a signed Fincra issuance webhook can prove the account exists.
+      operation.status = 'PENDING';
       operation.responsePayload =
         this.safeFincraActivationResponsePayload(result);
       operation.metadata = {
         ...(operation.metadata ?? {}),
         providerRequestStatus: result.requestStatus,
         providerHttpStatus: result.status,
+        providerAccountDetailsAvailable: this.fincraWebhookHasAccountDetails(
+          providerPayload,
+        ),
+        walletPersistenceStatus: 'AWAITING_SIGNED_ISSUANCE_WEBHOOK',
       };
       const saved = await this.providerOperationRepository.save(operation);
       return {
@@ -604,16 +636,14 @@ export class VidalpayService {
         available: false,
         eligible: false,
         status: 'PENDING',
-        reason:
-          'A Fincra sandbox virtual account request has been submitted and is pending provider completion.',
+        reason: 'A Fincra virtual account request has been submitted. Account details will appear only after Fincra confirms issuance by webhook.',
         pendingActivation: this.normalizeProviderOperation(saved),
         activation: {
           status: saved.status,
           reference: saved.reference,
           providerReference: saved.providerReference,
           providerStatus: result.requestStatus,
-          message:
-            'Fincra sandbox wallet activation request submitted. No account number will be shown until Fincra returns real account details.',
+          message: 'Request submitted. Account details will appear after Fincra confirms issuance by webhook.',
         },
       };
     } catch (error) {
@@ -663,22 +693,35 @@ export class VidalpayService {
     const normalizedCurrency = this.normalizeCurrency(currency);
     const wallet = await this.ensureWallet(userId, normalizedCurrency);
     const normalized = this.normalizeWallet(wallet);
+    const isProvisioned =
+      wallet.provider === 'FINCRA' &&
+      wallet.providerStatus === 'ACTIVE' &&
+      Boolean(this.asString(wallet.accountNumber));
 
-    if (!wallet.accountNumber) {
+    if (!isProvisioned) {
+      const safeWallet = {
+        ...normalized,
+        accountNumber: null,
+        accountName: null,
+        bankName: null,
+        routingNumber: null,
+        address: null,
+        sortCode: null,
+      };
       return {
         accountDetails: {
-          accountName: normalized.accountName,
-          accountNumber: normalized.accountNumber,
-          bankName: normalized.bankName,
+          accountName: null,
+          accountNumber: null,
+          bankName: null,
           currency: normalizedCurrency,
-          provider: normalized.provider,
+          provider: 'FINCRA',
           providerStatus:
             normalized.providerStatus ??
             this.providerReadinessForCurrency(normalizedCurrency),
           isProvisioned: false,
-          message: `Complete wallet activation to receive ${normalizedCurrency} account details.`,
+          message: `Your ${normalizedCurrency} account details will appear after Fincra confirms account issuance.`,
         },
-        wallet: normalized,
+        wallet: safeWallet,
       };
     }
 
@@ -3852,7 +3895,13 @@ export class VidalpayService {
       knownWallets ??
       (await this.walletRepository.find({ where: { userId: user.id } }));
     const activeWallet =
-      wallets.find((wallet) => wallet.currency === normalizedCurrency) ?? null;
+      wallets.find(
+        (wallet) =>
+          wallet.currency === normalizedCurrency &&
+          wallet.provider === 'FINCRA' &&
+          wallet.providerStatus === 'ACTIVE' &&
+          Boolean(this.asString(wallet.accountNumber)),
+      ) ?? null;
     const pendingActivation = await this.findWalletActivationOperation(
       user.id,
       normalizedCurrency,
@@ -3931,7 +3980,10 @@ export class VidalpayService {
       };
     }
 
-    if (pendingActivation?.status === 'PENDING') {
+    if (
+      pendingActivation &&
+      this.isWalletActivationInProgress(pendingActivation.status)
+    ) {
       return {
         currency: normalizedCurrency,
         available: false,
@@ -3944,6 +3996,32 @@ export class VidalpayService {
         activeWallet: null,
         pendingActivation: this.normalizeProviderOperation(pendingActivation),
         ...requirementEvaluation,
+      };
+    }
+
+    if (requirementEvaluation.kycStatus !== 'VERIFIED') {
+      return {
+        currency: normalizedCurrency,
+        available: true,
+        eligible: false,
+        canRequest: false,
+        status: 'KYC_REQUIRED',
+        reason: 'Final VidalPay KYC approval is required before requesting this Fincra account.',
+        jurisdiction,
+        product: this.normalizeWalletProduct(product),
+        activeWallet: null,
+        pendingActivation: pendingActivation
+          ? this.normalizeProviderOperation(pendingActivation)
+          : null,
+        ...requirementEvaluation,
+        missingRequirements: [
+          ...requirementEvaluation.missingRequirements,
+          {
+            key: 'VIDALPAY_FINAL_KYC_APPROVAL',
+            label: 'Final VidalPay KYC approval',
+            source: 'VIDALPAY_REVIEW',
+          },
+        ],
       };
     }
 
@@ -4024,6 +4102,7 @@ export class VidalpayService {
     }
 
     return {
+      kycStatus: kyc.status ?? 'NOT_STARTED',
       requirementsConfigured: product.requirementsConfigured,
       satisfiedRequirements,
       missingRequirements,
@@ -4098,14 +4177,20 @@ export class VidalpayService {
   private fincraWebhookReference(payload: AnyRecord) {
     const data = this.asRecord(payload.data) ?? {};
     const account =
-      this.asRecord(data.account) ?? this.asRecord(payload.account) ?? {};
+      this.asRecord(data.accountInformation) ??
+      this.asRecord(data.account) ??
+      this.asRecord(payload.accountInformation) ??
+      this.asRecord(payload.account) ??
+      {};
     return (
       this.asString(payload.reference) ??
       this.asString(payload.providerReference) ??
+      this.asString(payload.merchantReference) ??
       this.asString(payload.requestId) ??
       this.asString(payload.requestID) ??
       this.asString(payload.virtualAccountRequestId) ??
       this.asString(data.reference) ??
+      this.asString(data.merchantReference) ??
       this.asString(data.id) ??
       this.asString(data._id) ??
       this.asString(data.requestId) ??
@@ -4117,13 +4202,16 @@ export class VidalpayService {
 
   private fincraWebhookStatus(payload: AnyRecord) {
     const data = this.asRecord(payload.data) ?? {};
+    const event =
+      this.asString(payload.event) ?? this.asString(payload.type) ?? '';
+    if (/virtual[._-]?account[._-]issued/i.test(event)) {
+      return event.toUpperCase();
+    }
     const raw =
       this.asString(payload.status) ??
-      this.asString(payload.event) ??
-      this.asString(payload.type) ??
       this.asString(data.status) ??
       this.asString(data.state) ??
-      'RECEIVED';
+      (event || 'RECEIVED');
     return raw.toUpperCase();
   }
 
@@ -4162,7 +4250,11 @@ export class VidalpayService {
   private fincraWebhookHasAccountDetails(payload: AnyRecord) {
     const data = this.asRecord(payload.data) ?? {};
     const account =
-      this.asRecord(data.account) ?? this.asRecord(payload.account) ?? {};
+      this.asRecord(data.accountInformation) ??
+      this.asRecord(data.account) ??
+      this.asRecord(payload.accountInformation) ??
+      this.asRecord(payload.account) ??
+      {};
     return Boolean(
       this.asString(account.accountNumber) ??
       this.asString(account.account_number) ??
@@ -4206,7 +4298,17 @@ export class VidalpayService {
     status: string,
   ) {
     const details = this.fincraWebhookAccountDetails(payload);
-    if (!this.isFincraWalletActiveStatus(status) || !details.accountNumber) {
+    const event = (
+      this.asString(payload.event) ?? this.asString(payload.type) ?? ''
+    ).toLowerCase();
+    const ngnAccountApproved =
+      this.normalizeCurrency(operation.currency ?? '') === 'NGN' &&
+      status === 'APPROVED' &&
+      /virtual[._-]?account[._-]approved/.test(event);
+    if (
+      (!this.isFincraWalletActiveStatus(status) && !ngnAccountApproved) ||
+      !details.accountNumber
+    ) {
       return {
         persisted: false,
         status: 'NO_APPROVED_ACCOUNT_DETAILS',
@@ -4280,7 +4382,11 @@ export class VidalpayService {
   private fincraWebhookAccountDetails(payload: AnyRecord) {
     const data = this.asRecord(payload.data) ?? {};
     const account =
-      this.asRecord(data.account) ?? this.asRecord(payload.account) ?? {};
+      this.asRecord(data.accountInformation) ??
+      this.asRecord(data.account) ??
+      this.asRecord(payload.accountInformation) ??
+      this.asRecord(payload.account) ??
+      {};
     const bank = this.asRecord(account.bank) ?? this.asRecord(data.bank) ?? {};
     return {
       accountNumber:
@@ -4292,6 +4398,7 @@ export class VidalpayService {
       accountName:
         this.asString(account.accountName) ??
         this.asString(account.account_name) ??
+        this.asString(account.name) ??
         this.asString(data.accountName) ??
         this.asString(data.account_name) ??
         null,
@@ -4299,6 +4406,7 @@ export class VidalpayService {
         this.asString(account.bankName) ??
         this.asString(account.bank_name) ??
         this.asString(bank.name) ??
+        this.asString(bank.bankName) ??
         this.asString(data.bankName) ??
         null,
       routingNumber:
@@ -4325,9 +4433,8 @@ export class VidalpayService {
   }
 
   private isFincraWalletActiveStatus(status: string) {
-    return ['APPROVED', 'ACTIVE', 'COMPLETED', 'SUCCESSFUL', 'SUCCESS'].some(
-      (candidate) => status.includes(candidate),
-    );
+    const normalized = status.toUpperCase().replace(/[^A-Z0-9]+/g, ' ').trim();
+    return ['ACTIVE', 'ISSUED'].includes(normalized) || normalized.endsWith(' ISSUED');
   }
 
   private safeFincraWebhookPayload(payload: AnyRecord) {
@@ -4950,17 +5057,26 @@ export class VidalpayService {
   }
 
   private normalizeWallet(wallet: Wallet) {
+    const fincraIssued =
+      wallet.provider === 'FINCRA' &&
+      wallet.providerStatus === 'ACTIVE' &&
+      Boolean(this.asString(wallet.accountNumber));
+    const existingUnitUsdAccount =
+      wallet.currency === Currency.USD &&
+      wallet.provider === 'Unit.co' &&
+      Boolean(this.asString(wallet.accountNumber));
+    const accountDetailsAvailable = fincraIssued || existingUnitUsdAccount;
     return {
       id: wallet.id,
       currency: wallet.currency,
       balance: Number(wallet.balance ?? 0),
       availableBalance: Number(wallet.availableBalance ?? wallet.balance ?? 0),
       ledgerBalance: Number(wallet.ledgerBalance ?? wallet.balance ?? 0),
-      accountNumber: wallet.accountNumber ?? null,
-      accountName: wallet.accountName ?? null,
-      bankName: wallet.bankName ?? null,
-      routingNumber: wallet.routingNumber ?? null,
-      address: wallet.address ?? null,
+      accountNumber: accountDetailsAvailable ? wallet.accountNumber ?? null : null,
+      accountName: accountDetailsAvailable ? wallet.accountName ?? null : null,
+      bankName: accountDetailsAvailable ? wallet.bankName ?? null : null,
+      routingNumber: accountDetailsAvailable ? wallet.routingNumber ?? null : null,
+      address: accountDetailsAvailable ? wallet.address ?? null : null,
       provider: wallet.provider ?? null,
       providerCustomerId: wallet.providerCustomerId ?? null,
       providerAccountId: wallet.providerAccountId ?? null,
@@ -4971,7 +5087,7 @@ export class VidalpayService {
       providerReference: wallet.providerReference ?? null,
       metadata: wallet.metadata ?? null,
       withdrawalSuspended: wallet.withdrawalSuspended,
-      sortCode: wallet.sortCode ?? null,
+      sortCode: accountDetailsAvailable ? wallet.sortCode ?? null : null,
       userId: wallet.userId,
       createdAt: wallet.createdAt,
       updatedAt: wallet.updatedAt,
@@ -5858,6 +5974,18 @@ export class VidalpayService {
       throw new ServiceUnavailableException(eligibility.blockedResponse);
     }
     return { user, eligibility };
+  }
+
+  private isWalletActivationInProgress(status: string) {
+    const normalized = status.toUpperCase().replace(/[^A-Z0-9]+/g, ' ').trim();
+    return [
+      'SUBMITTING',
+      'PENDING',
+      'APPROVED',
+      'PROCESSING',
+      'IN_REVIEW',
+      'AMBIGUOUS_PROVIDER_STATE',
+    ].includes(normalized) || normalized.endsWith(' APPROVED');
   }
 
   private async assertKycApproved(userId: string) {
