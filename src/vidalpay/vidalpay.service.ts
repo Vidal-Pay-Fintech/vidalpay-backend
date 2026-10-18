@@ -1385,7 +1385,17 @@ export class VidalpayService {
           currency: fromCurrency, provider: 'FINCRA', providerReference: null,
           requestPayload: { fromCurrency, toCurrency, amount, quoteReference }, responsePayload: null,
           errorCode: null, failureReason: null,
-          metadata: { sourceWalletId: lockedSource.id, destinationWalletId: lockedDestination.id, destinationCurrency: toCurrency, holdTransactionReference: `${reference}_hold`, quoteReference, settlement: 'AWAITING_PROVIDER' },
+          metadata: {
+            sourceWalletId: lockedSource.id,
+            destinationWalletId: lockedDestination.id,
+            destinationCurrency: toCurrency,
+            destinationAmount: receiveAmount,
+            rate: quoteMetadata.rate,
+            fee: quoteMetadata.fee,
+            holdTransactionReference: `${reference}_hold`,
+            quoteReference,
+            settlement: 'AWAITING_PROVIDER',
+          },
         }));
         await repositories.transactions.save(repositories.transactions.create({
           userId, walletId: lockedSource.id, reference: `${reference}_hold`, operationReference: reference,
