@@ -24,8 +24,8 @@ export class WalletService {
         balance: 0,
         availableBalance: 0,
         ledgerBalance: 0,
-        provider: 'PayVessel',
-        providerStatus: 'MISSING_CREDENTIALS',
+        provider: 'FINCRA',
+        providerStatus: 'NOT_PROVISIONED',
       });
     }
 
@@ -36,8 +36,8 @@ export class WalletService {
         balance: 0,
         availableBalance: 0,
         ledgerBalance: 0,
-        provider: 'Unit.co',
-        providerStatus: 'MISSING_CREDENTIALS',
+        provider: 'FINCRA',
+        providerStatus: 'NOT_PROVISIONED',
       });
     }
 

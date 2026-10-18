@@ -15,15 +15,15 @@ describe('ProviderStatusService', () => {
     expect(capabilities).toEqual(REQUIRED_PROVIDER_CAPABILITIES);
   });
 
-  it('marks Unit-backed USD wallet capability unavailable when backend credentials are missing', () => {
+  it('marks Fincra USD wallet capability unavailable when backend credentials are missing', () => {
     const service = buildService();
 
     expect(service.getStatus('usd_wallet')).toEqual(
       expect.objectContaining({
-        provider: 'Unit.co',
+        provider: 'Fincra',
         enabled: false,
         readinessStatus: 'MISSING_CREDENTIALS',
-        missingEnvVars: ['UNIT_API_TOKEN'],
+        missingEnvVars: ['FINCRA_API_KEY'],
       }),
     );
   });
@@ -68,18 +68,16 @@ describe('ProviderStatusService', () => {
     );
   });
 
-  it('accepts either configured currency rail for the shared bank-transfer capability', () => {
-    const payVesselService = buildService({
-      PAYVESSEL_API_KEY: 'sandbox-key',
-      PAYVESSEL_API_SECRET: 'sandbox-secret',
-    });
+  it('keeps Fincra payout execution blocked until its payout flow is implemented', () => {
+    const service = buildService({ FINCRA_API_KEY: 'sandbox-key' });
 
-    expect(payVesselService.getStatus('bank_transfer')).toEqual(
+    expect(service.getStatus('bank_transfer')).toEqual(
       expect.objectContaining({
-        enabled: true,
+        provider: 'Fincra',
+        enabled: false,
         envConfigured: true,
         missingEnvVars: [],
-        readinessStatus: 'CONFIGURED_NOT_LIVE_TESTED',
+        readinessStatus: 'UNSUPPORTED',
       }),
     );
   });
@@ -121,17 +119,35 @@ describe('ProviderStatusService', () => {
     );
   });
 
-  it('uses Reloadly as a configured bill-service fallback', () => {
+  it('enables VTU purchase readiness only when the VTU provider credentials are configured', () => {
     const service = buildService({
-      RELOADLY_CLIENT_ID: 'sandbox-client',
-      RELOADLY_CLIENT_SECRET: 'sandbox-secret',
+      VTU_PROVIDER: 'VTU.ng',
+      VTU_BASE_URL: 'https://vtu.ng/wp-json',
+      VTU_USERNAME: 'sandbox-user',
+      VTU_PASSWORD: 'sandbox-password',
     });
 
     expect(service.getStatus('airtime_purchase')).toEqual(
       expect.objectContaining({
         enabled: true,
-        provider: 'PayVessel/Reloadly',
+        provider: 'VTU.ng',
         readinessStatus: 'CONFIGURED_NOT_LIVE_TESTED',
+      }),
+    );
+  });
+
+  it('does not enable bill purchases from read-only Reloadly catalog credentials', () => {
+    const service = buildService({
+      RELOADLY_CLIENT_ID: 'sandbox-client',
+      RELOADLY_CLIENT_SECRET: 'sandbox-secret',
+    });
+
+    expect(service.getStatus('airtime_catalog').enabled).toBe(true);
+    expect(service.getStatus('airtime_purchase')).toEqual(
+      expect.objectContaining({
+        enabled: false,
+        provider: 'VTU.ng',
+        readinessStatus: 'MISSING_CREDENTIALS',
       }),
     );
   });

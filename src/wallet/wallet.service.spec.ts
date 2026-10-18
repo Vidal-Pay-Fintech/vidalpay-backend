@@ -28,10 +28,10 @@ describe('WalletService', () => {
     await service.createCustomerWallets('user-1');
 
     expect(walletRepository.create).toHaveBeenCalledWith(
-      expect.objectContaining({ userId: 'user-1', currency: Currency.NGN, provider: 'PayVessel', balance: 0 }),
+      expect.objectContaining({ userId: 'user-1', currency: Currency.NGN, provider: 'FINCRA', balance: 0 }),
     );
     expect(walletRepository.create).toHaveBeenCalledWith(
-      expect.objectContaining({ userId: 'user-1', currency: Currency.USD, provider: 'Unit.co', balance: 0 }),
+      expect.objectContaining({ userId: 'user-1', currency: Currency.USD, provider: 'FINCRA', balance: 0 }),
     );
   });
 

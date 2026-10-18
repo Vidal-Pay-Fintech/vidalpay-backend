@@ -39,4 +39,36 @@ describe('FincraWalletService', () => {
       }),
     ).rejects.toBeInstanceOf(ServiceUnavailableException);
   });
+
+  it('loads the Nigerian payout bank catalog from Fincra', async () => {
+    const get = jest.fn().mockResolvedValue({
+      data: { success: true, data: [{ code: '044', name: 'Access Bank' }] },
+    });
+    const client = new FincraWalletService({
+      fincraClient: () => ({ get }),
+    } as any);
+
+    await expect(client.listBanks('NG', 'NGN')).resolves.toEqual({
+      success: true,
+      data: [{ code: '044', name: 'Access Bank' }],
+    });
+    expect(get).toHaveBeenCalledWith('/core/banks', {
+      params: { country: 'NG', currency: 'NGN', paymentDestination: 'bank_account' },
+    });
+  });
+
+  it('verifies a conversion by its provider reference before settlement', async () => {
+    const get = jest.fn().mockResolvedValue({
+      data: { success: true, data: { reference: 'conversion/ref', status: 'successful' } },
+    });
+    const client = new FincraWalletService({
+      fincraClient: () => ({ get }),
+    } as any);
+
+    await expect(client.verifyConversionStatus('conversion/ref')).resolves.toEqual({
+      success: true,
+      data: { reference: 'conversion/ref', status: 'successful' },
+    });
+    expect(get).toHaveBeenCalledWith('/conversions/reference/conversion%2Fref');
+  });
 });

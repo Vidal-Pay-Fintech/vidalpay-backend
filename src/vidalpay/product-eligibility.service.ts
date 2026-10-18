@@ -122,6 +122,26 @@ export class ProductEligibilityService {
       });
     }
 
+    if (jurisdiction.jurisdiction === 'CA' || jurisdiction.jurisdiction === 'GB') {
+      if (['wallets', 'transfers', 'receive', 'fx', 'cards'].includes(product)) {
+        return {
+          product,
+          enabled: true,
+          status: 'AVAILABLE',
+          jurisdiction: jurisdiction.jurisdiction,
+          reason: null,
+          blockedResponse: null,
+        };
+      }
+
+      return this.blocked(product, jurisdiction, {
+        code: 'PROVIDER_NOT_CONFIGURED_FOR_PRODUCT',
+        status: 'PROVIDER_NOT_CONFIGURED',
+        reason: `${PRODUCT_LABELS[product]} requires a backend provider and product approval before it can be enabled for ${jurisdiction.jurisdiction}-based accounts.`,
+        missingRequirements: ['SUPPORTED_PROVIDER_PRODUCT'],
+      });
+    }
+
     return this.blocked(product, jurisdiction, {
       code: 'JURISDICTION_NOT_SUPPORTED',
       reason: 'This account jurisdiction is not supported for the requested VidalPay product.',

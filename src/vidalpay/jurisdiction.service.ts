@@ -1,7 +1,7 @@
 import { Injectable } from '@nestjs/common';
 import { User } from 'src/database/entities/user.entity';
 
-export type AccountJurisdiction = 'NG' | 'US' | 'UNKNOWN';
+export type AccountJurisdiction = 'NG' | 'US' | 'CA' | 'GB' | 'UNKNOWN';
 
 export type JurisdictionDecision = {
   jurisdiction: AccountJurisdiction;
@@ -25,6 +25,10 @@ const UNITED_STATES_VALUES = new Set([
   'UNITED STATES OF AMERICA',
   '+1',
   '1',
+]);
+const CANADA_VALUES = new Set(['CA', 'CAN', 'CANADA', '+1']);
+const UNITED_KINGDOM_VALUES = new Set([
+  'GB', 'GBR', 'UK', 'UNITED KINGDOM', 'GREAT BRITAIN', '+44', '44',
 ]);
 
 @Injectable()
@@ -117,6 +121,23 @@ export class JurisdictionService {
       };
     }
 
+    if (authoritativeJurisdiction === 'CA' || authoritativeJurisdiction === 'GB') {
+      return {
+        jurisdiction: authoritativeJurisdiction,
+        countryCode,
+        country,
+        residency,
+        region,
+        phoneCountry,
+        source: authoritativeSignals.find(
+          (signal) => signal.jurisdiction === authoritativeJurisdiction,
+        )?.source ?? 'USER_PROFILE',
+        confidence: 'HIGH',
+        reviewRequired: false,
+        reason: null,
+      };
+    }
+
     return {
       jurisdiction: 'UNKNOWN',
       countryCode,
@@ -144,6 +165,8 @@ export class JurisdictionService {
     const normalized = value.trim().toUpperCase().replace(/[\s-]+/g, '_');
     if (NIGERIA_VALUES.has(normalized)) return 'NG';
     if (UNITED_STATES_VALUES.has(normalized)) return 'US';
+    if (CANADA_VALUES.has(normalized)) return 'CA';
+    if (UNITED_KINGDOM_VALUES.has(normalized)) return 'GB';
     return null;
   }
 
@@ -152,6 +175,7 @@ export class JurisdictionService {
     const normalized = phoneNumber.replace(/[\s()-]/g, '');
     if (normalized.startsWith('+234')) return 'NG';
     if (normalized.startsWith('+1')) return 'US';
+    if (normalized.startsWith('+44')) return 'GB';
     return null;
   }
 }

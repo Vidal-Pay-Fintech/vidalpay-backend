@@ -66,11 +66,14 @@ describe('WalletProductCatalogService', () => {
     expect(service.find('CAD')).toEqual(expect.objectContaining({ tier: 'ADDITIONAL' }));
   });
 
-  it('enables sandbox wallet test-mode products without requiring a large JSON catalogue', () => {
+  it('requires explicit Fincra sandbox product and jurisdiction approval', () => {
     const service = new WalletProductCatalogService(
       config({
         FINCRA_WALLET_TEST_MODE: 'true',
         FINCRA_API_KEY: 'fincra-key',
+        FINCRA_GBP_SANDBOX_VA_SUPPORT: 'true',
+        FINCRA_GBP_SUPPORTED_JURISDICTIONS: 'GB',
+        FINCRA_GBP_CAN_PROVISION: 'true',
       }),
     );
 
@@ -87,6 +90,8 @@ describe('WalletProductCatalogService', () => {
     expect(service.providerConfigured(service.find('GBP')!).configured).toBe(
       true,
     );
+    expect(service.compatibleProducts('GB').map((product) => product.currency)).toContain('GBP');
+    expect(service.compatibleProducts('US').map((product) => product.currency)).not.toContain('GBP');
     expect(service.find('GBP')?.requirements.map((item) => item.key)).toEqual(
       expect.arrayContaining([
         'legal_name',

@@ -187,7 +187,7 @@ export class VidalpayService {
         payvessel: null,
       },
       message:
-        'Amount limits are exposed from backend policy. Provider-specific limits remain null until Unit.co and PayVessel account/card provisioning is live-tested.',
+        'Amount limits are exposed from backend policy. Provider-specific limits remain null until Fincra account provisioning is live-tested.',
     };
   }
 
@@ -498,6 +498,21 @@ export class VidalpayService {
       fincraRequest.KYCInformation,
     ) ?? {};
     if (
+      !eligibility.eligible &&
+      !['REQUIRES_INFORMATION', 'PROVIDER_NOT_CONFIGURED'].includes(
+        eligibility.status,
+      )
+    ) {
+      return {
+        ...eligibility,
+        activation: {
+          status: eligibility.status,
+          reference: null,
+          message: eligibility.reason,
+        },
+      };
+    }
+    if (
       eligibility.currency === 'NGN' &&
       !/^\d{11}$/.test(this.asString(fincraKycInformation.bvn) ?? '')
     ) {
@@ -517,6 +532,40 @@ export class VidalpayService {
           message: 'Enter a valid 11-digit BVN to continue.',
         },
       };
+    }
+    if (eligibility.currency !== 'NGN') {
+      const missingFincraFields = this.missingFincraFcyFields(fincraRequest);
+      if (missingFincraFields.length > 0) {
+        return {
+          ...eligibility,
+          eligible: false,
+          canRequest: true,
+          status: 'REQUIRES_INFORMATION',
+          reason:
+            'Fincra requires the listed identity, employment, expected-activity, and document details for a foreign-currency account request.',
+          missingRequirements: missingFincraFields,
+          activation: {
+            status: 'REQUIRES_INFORMATION',
+            reference: null,
+            message: 'Complete the foreign-currency account requirements before submitting.',
+          },
+        };
+      }
+      if (!fincraRequest.isTermsAccepted) {
+        return {
+          ...eligibility,
+          eligible: false,
+          canRequest: true,
+          status: 'REQUIRES_INFORMATION',
+          reason: 'Your consent is required before VidalPay can send these details to Fincra.',
+          missingRequirements: [{ key: 'fincra_data_consent', label: 'Consent to share KYC information with Fincra', source: 'FINCRA' }],
+          activation: {
+            status: 'REQUIRES_INFORMATION',
+            reference: null,
+            message: 'Confirm consent to continue.',
+          },
+        };
+      }
     }
     if (!eligibility.eligible) {
       return {
@@ -742,24 +791,52 @@ export class VidalpayService {
   }
 
   async getBankCatalog() {
-    const ngnStatus = this.providerStatusService.getStatus('bank_transfer');
-    if (!ngnStatus.enabled) {
+    const fincraStatus = this.providerStatusService.getStatus('ngn_wallet');
+    if (!fincraStatus.enabled) {
       return {
-        provider: ngnStatus.provider,
+        provider: 'Fincra',
         source: 'PROVIDER_UNAVAILABLE',
-        message: ngnStatus.failureReason,
+        message: fincraStatus.failureReason,
         banks: [],
         items: [],
       };
     }
 
+    const response = this.asRecord(
+      await this.fincraWalletService.listBanks('NG', 'NGN'),
+    );
+    const data = this.asRecord(response?.data);
+    const records = Array.isArray(response?.data)
+      ? response.data
+      : Array.isArray(data?.data)
+        ? data.data
+        : Array.isArray(data?.items)
+          ? data.items
+          : Array.isArray(response?.items)
+            ? response.items
+            : [];
+    const banks = records
+      .map((value) => this.asRecord(value))
+      .filter((bank): bank is AnyRecord => Boolean(bank))
+      .map((bank) => ({
+        id: this.asString(bank.id) ?? this.asString(bank.code) ?? '',
+        code:
+          this.asString(bank.code) ??
+          this.asString(bank.nibssCode) ??
+          this.asString(bank.bankCode) ??
+          '',
+        name: this.asString(bank.name) ?? '',
+        country: 'NG',
+        currency: 'NGN',
+      }))
+      .filter((bank) => bank.id && bank.code && bank.name);
+
     return {
-      provider: ngnStatus.provider,
-      source: 'PROVIDER_CONFIGURED_NOT_LIVE_TESTED',
-      message:
-        'Bank catalog retrieval is configured for the provider adapter but has not been live-tested in this environment.',
-      banks: [],
-      items: [],
+      provider: 'Fincra',
+      source: 'FINCRA_LIVE_RESPONSE',
+      message: null,
+      banks,
+      items: banks,
     };
   }
 
@@ -777,13 +854,13 @@ export class VidalpayService {
       capability,
       provider:
         currency === Currency.USD
-          ? 'Unit.co'
+          ? 'Fincra'
           : currency === Currency.NGN
-            ? 'PayVessel'
+            ? 'Fincra'
             : 'Fincra',
       reason:
         currency === Currency.NGN || currency === Currency.USD
-          ? 'External account resolution requires a live provider integration and credentials.'
+          ? 'Fincra account resolution and payout execution are not enabled in this backend yet.'
           : `${currency} external account resolution and payouts require a live-tested Fincra payout/transfer integration.`,
       missingRequirements:
         this.providerStatusService.getStatus(capability).missingEnvVars,
@@ -796,15 +873,15 @@ export class VidalpayService {
     await this.recordBlockedOperation(userId, 'external_transfer', payload, {
       provider:
         currency === Currency.USD
-          ? 'Unit.co'
+          ? 'Fincra'
           : currency === Currency.NGN
-            ? 'PayVessel'
+            ? 'Fincra'
             : 'Fincra',
       capability:
         currency === Currency.NGN ? 'bank_transfer' : 'wallet_activation',
       reason:
         currency === Currency.NGN || currency === Currency.USD
-          ? 'External transfers must be executed by Unit.co or PayVessel; no live-tested provider path is configured.'
+          ? 'Fincra payout execution and settlement reconciliation are not enabled in this backend yet.'
           : `${currency} external transfers require a live-tested Fincra payout/transfer integration before funds can leave the wallet.`,
     });
   }
@@ -839,7 +916,7 @@ export class VidalpayService {
         this.emptyVtuCatalog(kind);
       return {
         region: this.inferRegion(user),
-        provider: 'PayVessel',
+        provider: 'VTU.ng',
         source: 'UNAVAILABLE_FOR_ACCOUNT_REGION',
         message:
           'Airtime, data, and bill payments are currently available only to Nigeria-based accounts.',
@@ -938,7 +1015,7 @@ export class VidalpayService {
       this.throwProviderUnavailable({
         feature: 'Utility customer validation',
         capability: 'utilities_validate',
-        provider: 'PayVessel',
+        provider: 'VTU.ng',
         reason:
           'Utility validation is available only for Nigeria-based accounts.',
       });
@@ -993,9 +1070,9 @@ export class VidalpayService {
     this.throwProviderUnavailable({
       feature: 'Utility customer validation',
       capability: 'utilities_validate',
-      provider: 'PayVessel',
+      provider: 'VTU.ng',
       reason:
-        'Utility validation must be confirmed by PayVessel before payment.',
+        'Utility validation must be confirmed by VTU.ng before payment.',
       missingRequirements:
         this.providerStatusService.getStatus('utilities_validate')
           .missingEnvVars,
@@ -1021,7 +1098,7 @@ export class VidalpayService {
     const user = await this.findUser(userId);
     if (this.inferRegion(user) !== 'NG') {
       await this.recordBlockedOperation(userId, type, payload, {
-        provider: 'PayVessel',
+        provider: 'VTU.ng',
         capability: capabilityByKind[type],
         reason:
           'Airtime, data, and bill payments are available only for Nigeria-based accounts and use the NGN wallet.',
@@ -1103,67 +1180,11 @@ export class VidalpayService {
       }
     }
 
-    if (
-      ['airtime', 'data', 'utilities'].includes(type) &&
-      this.configService.get<string>('RELOADLY_CLIENT_ID') &&
-      this.configService.get<string>('RELOADLY_CLIENT_SECRET')
-    ) {
-      const requestPayload = this.redactPayload(payload);
-      const operation = await this.providerOperationRepository.save(
-        this.providerOperationRepository.create({
-          userId,
-          type,
-          idempotencyKey,
-          reference: idempotencyKey,
-          status: 'PENDING',
-          amount: this.normalizeAmount(payload.amount),
-          currency: Currency.NGN,
-          provider: 'Reloadly',
-          requestPayload,
-          responsePayload: null,
-          errorCode: null,
-          failureReason: null,
-          metadata: { sandbox: true },
-        }),
-      );
-      try {
-        const providerPayload = { ...payload };
-        delete providerPayload.transactionPin;
-        delete providerPayload.pin;
-        const response = await this.sandboxProviderService.purchaseReloadly(
-          type as 'airtime' | 'data' | 'utilities',
-          providerPayload,
-        );
-        operation.status = 'SUBMITTED';
-        operation.providerReference =
-          this.asString(response.transactionId) ??
-          this.asString(response.id) ??
-          null;
-        operation.responsePayload = this.redactPayload(response);
-        await this.providerOperationRepository.save(operation);
-        return this.normalizeOperation(operation);
-      } catch (error) {
-        operation.status = 'FAILED';
-        operation.errorCode = 'PROVIDER_REQUEST_FAILED';
-        operation.failureReason = this.providerErrorMessage(error);
-        await this.providerOperationRepository.save(operation);
-        throw new ServiceUnavailableException(
-          createBlockedResponse({
-            code: operation.errorCode,
-            feature: type,
-            capability: capabilityByKind[type],
-            provider: 'Reloadly',
-            reason: operation.failureReason,
-            retryable: true,
-          }),
-        );
-      }
-    }
     await this.recordBlockedOperation(userId, type, payload, {
-      provider: 'PayVessel',
+      provider: 'VTU.ng',
       capability: capabilityByKind[type],
       reason:
-        'NGN wallet is not debited until PayVessel confirms the bill-payment operation.',
+        'VTU.ng is not configured. No wallet debit has been performed.',
     });
   }
 
@@ -1220,11 +1241,59 @@ export class VidalpayService {
     const toCurrency = this.normalizeFxCurrency(
       payload.toCurrency ?? payload.destinationCurrency,
     );
-    const amount = this.normalizeAmount(payload.amount);
+    const amount = payload.amount === undefined ? 0 : this.normalizeAmount(payload.amount);
     if (fromCurrency === toCurrency) {
       throw new BadRequestException(
         'fromCurrency and toCurrency must be different',
       );
+    }
+    const requestedAmount = payload.amount === undefined
+      ? null
+      : this.normalizeAmount(payload.amount);
+    if (requestedAmount !== null) {
+      const business = this.configService.get<string>('FINCRA_BUSINESS_ID')?.trim();
+      if (!business) {
+        this.throwProviderUnavailable({
+          code: 'FX_PROVIDER_NOT_CONFIGURED', feature: 'FX quote', capability: 'fx_quote',
+          provider: 'Fincra', reason: 'Conversion quotes are not configured for this account.',
+          missingRequirements: ['FINCRA_BUSINESS_ID'],
+        });
+      }
+      const raw = await this.fincraWalletService.generateConversionQuote({
+        business,
+        sourceCurrency: fromCurrency,
+        destinationCurrency: toCurrency,
+        amount: String(requestedAmount),
+        action: 'send',
+        transactionType: 'conversion',
+        feeBearer: 'customer',
+        paymentDestination: 'fliqpay_wallet',
+      });
+      const root = this.asRecord(raw) ?? {};
+      const quote = this.asRecord(root.data) ?? root;
+      const reference = this.asString(quote.reference) ?? this.asString(quote.quoteReference);
+      const sourceAmount = Number(quote.amountToCharge ?? quote.sourceAmount ?? quote.initialAmount ?? requestedAmount);
+      const receiveAmount = Number(quote.amountToReceive ?? quote.destinationAmount ?? quote.quotedAmount);
+      const rate = Number(quote.rate);
+      if (root.success === false || !reference || !Number.isFinite(sourceAmount) || !Number.isFinite(receiveAmount) || !Number.isFinite(rate)) {
+        throw new ServiceUnavailableException({ code: 'FX_QUOTE_INVALID', message: 'A usable conversion quote was not returned.' });
+      }
+      const expiresAt = this.asString(quote.expireAt) ?? this.asString(quote.expiresAt) ?? new Date(Date.now() + 30_000).toISOString();
+      await this.providerOperationRepository.save(this.providerOperationRepository.create({
+        userId, type: 'fx_quote', idempotencyKey: `fx_quote_${randomUUID()}`,
+        reference: `fx_quote_${randomUUID()}`, providerReference: reference,
+        status: 'QUOTED', amount: sourceAmount, currency: fromCurrency, provider: 'FINCRA',
+        requestPayload: { fromCurrency, toCurrency, requestedAmount },
+        responsePayload: this.redactPayload(raw), errorCode: null, failureReason: null,
+        metadata: { fromCurrency, toCurrency, requestedAmount, amountToCharge: sourceAmount, destinationAmount: receiveAmount, rate, fee: Number(quote.fee ?? 0), expiresAt },
+      }));
+      return {
+        quoteId: reference, quoteReference: reference, provider: 'Fincra', executable: true,
+        status: 'QUOTED', fromCurrency, toCurrency, amount: requestedAmount,
+        amountToCharge: sourceAmount, estimatedAmount: receiveAmount, rate,
+        fee: Number(quote.fee ?? 0), expiresAt,
+        fetchedAt: new Date().toISOString(),
+      };
     }
     const rates = await this.getFxRates(userId);
     const rate = this.findFxRate(rates, fromCurrency, toCurrency);
@@ -1259,12 +1328,134 @@ export class VidalpayService {
 
   async convertFx(userId: string, payload: AnyRecord) {
     await this.assertKycApproved(userId);
-    await this.recordBlockedOperation(userId, 'fx_convert', payload, {
-      provider: 'Fincra',
-      capability: 'fx_convert',
-      reason:
-        'Currency conversion execution remains blocked until wallet debit holds, provider conversion settlement, reconciliation, and reversal handling are implemented.',
+    const fromCurrency = this.normalizeFxCurrency(payload.fromCurrency);
+    const toCurrency = this.normalizeFxCurrency(payload.toCurrency);
+    const requestedAmount = this.normalizeAmount(payload.amount);
+    const quoteReference = this.asString(payload.quoteReference) ?? this.asString(payload.quoteId);
+    const idempotencyKey = this.asString(payload.idempotencyKey);
+    const pin = this.asString(payload.pin);
+    if (fromCurrency === toCurrency) throw new BadRequestException('Choose two different currencies.');
+    if (!quoteReference || !idempotencyKey || !pin) throw new BadRequestException('A current quote, transaction PIN, and idempotency key are required.');
+    const readiness = this.providerStatusService.getStatus('fx_convert');
+    if (!readiness.enabled) {
+      this.throwProviderUnavailable({
+        code: 'FX_CONVERSION_NOT_CONFIGURED', feature: 'Currency conversion', capability: 'fx_convert',
+        provider: 'Fincra', reason: 'Currency conversion is not configured for this account.',
+        missingRequirements: readiness.missingEnvVars,
+      });
+    }
+    await this.assertTransactionPin(userId, pin);
+    const existing = await this.providerOperationRepository.findOne({ where: { userId, type: 'fx_convert', idempotencyKey } });
+    if (existing) return this.normalizeOperation(existing);
+    const quote = await this.providerOperationRepository.findOne({ where: { userId, type: 'fx_quote', providerReference: quoteReference, status: 'QUOTED' } });
+    const quoteMetadata = this.asRecord(quote?.metadata) ?? {};
+    if (!quote || quoteMetadata.fromCurrency !== fromCurrency || quoteMetadata.toCurrency !== toCurrency || Number(quoteMetadata.requestedAmount) !== requestedAmount) {
+      throw new PreconditionFailedException({ code: 'FX_QUOTE_INVALID', message: 'Request a new quote before converting.' });
+    }
+    const expiresAt = new Date(String(quoteMetadata.expiresAt ?? 0)).getTime();
+    if (!Number.isFinite(expiresAt) || expiresAt <= Date.now()) throw new PreconditionFailedException({ code: 'FX_QUOTE_EXPIRED', message: 'Your conversion quote expired. Request a new quote.' });
+    const amount = Number(quoteMetadata.amountToCharge ?? quote.amount);
+    const receiveAmount = Number(quoteMetadata.destinationAmount);
+    if (!Number.isFinite(amount) || amount <= 0 || !Number.isFinite(receiveAmount) || receiveAmount <= 0) throw new PreconditionFailedException('The conversion quote is invalid. Request a new quote.');
+    await this.findUser(userId);
+    const [source, destination] = await Promise.all([
+      this.ensureWallet(userId, fromCurrency as Currency),
+      this.ensureWallet(userId, toCurrency as Currency),
+    ]);
+    const active = (wallet: Wallet) => wallet.provider === 'FINCRA' && wallet.providerStatus === 'ACTIVE' && Boolean(this.asString(wallet.accountNumber));
+    if (!active(source)) throw new PreconditionFailedException({ code: 'SOURCE_WALLET_NOT_ACTIVE', currency: fromCurrency, message: `Activate your ${fromCurrency} wallet before converting from it.` });
+    if (!active(destination)) throw new PreconditionFailedException({ code: 'DESTINATION_WALLET_NOT_ACTIVE', currency: toCurrency, message: `Activate your ${toCurrency} wallet before converting to it.` });
+    const reference = `fx_${randomUUID()}`;
+    let operation: ProviderOperation;
+    try {
+      operation = await this.withOptionalTransaction(async (repositories) => {
+        const lockedSource = await this.findLockedWallet(repositories.wallets, userId, fromCurrency as Currency);
+        const lockedDestination = await this.findLockedWallet(repositories.wallets, userId, toCurrency as Currency);
+        if (!lockedSource || !lockedDestination || !active(lockedSource) || !active(lockedDestination)) {
+          throw new PreconditionFailedException('Both currency wallets must remain active during conversion.');
+        }
+        const current = Number(lockedSource.balance ?? 0);
+        if (current < amount) throw new PreconditionFailedException('Insufficient wallet balance.');
+        lockedSource.balance = this.roundMoney(current - amount);
+        lockedSource.availableBalance = lockedSource.balance;
+        lockedSource.ledgerBalance = lockedSource.balance;
+        await repositories.wallets.save(lockedSource);
+        const op = await repositories.operations.save(repositories.operations.create({
+          userId, type: 'fx_convert', idempotencyKey, reference, status: 'HELD', amount,
+          currency: fromCurrency, provider: 'FINCRA', providerReference: null,
+          requestPayload: { fromCurrency, toCurrency, amount, quoteReference }, responsePayload: null,
+          errorCode: null, failureReason: null,
+          metadata: { sourceWalletId: lockedSource.id, destinationWalletId: lockedDestination.id, destinationCurrency: toCurrency, holdTransactionReference: `${reference}_hold`, quoteReference, settlement: 'AWAITING_PROVIDER' },
+        }));
+        await repositories.transactions.save(repositories.transactions.create({
+          userId, walletId: lockedSource.id, reference: `${reference}_hold`, operationReference: reference,
+          currency: fromCurrency, amount, balanceBefore: current, balanceAfter: lockedSource.balance,
+          type: 'debit', status: 'PENDING', info: 'Currency conversion hold',
+          description: `Convert ${fromCurrency} to ${toCurrency}`, tag: 'fx_conversion',
+          provider: 'FINCRA', providerReference: quoteReference, idempotencyKey,
+          metadata: { settlement: 'AWAITING_PROVIDER' },
+        }));
+        return op;
+      });
+    } catch (error) {
+      if ((error as any)?.code === '23505') {
+        const duplicate = await this.providerOperationRepository.findOne({ where: { userId, type: 'fx_convert', idempotencyKey } });
+        if (duplicate) return this.normalizeOperation(duplicate);
+      }
+      throw error;
+    }
+    try {
+      const business = this.configService.get<string>('FINCRA_BUSINESS_ID')?.trim();
+      const result = await this.fincraWalletService.initiateConversion({ business, quoteReference, customerReference: reference });
+      const record = this.asRecord(result.data) ?? result;
+      operation.providerReference = this.asString(record.reference) ?? this.asString(record.id) ?? null;
+      operation.status = 'PENDING';
+      operation.responsePayload = this.redactPayload(result);
+      operation.metadata = { ...(operation.metadata ?? {}), settlement: 'AWAITING_SIGNED_WEBHOOK', providerInitiated: true };
+      return this.normalizeOperation(await this.providerOperationRepository.save(operation));
+    } catch (error) {
+      const response = this.asRecord((error as any)?.response);
+      const retryable = response?.retryable === true;
+      if (!retryable) await this.reverseFxLedgerHold(operation, 'FAILED', 'The conversion was rejected and the held funds were returned.');
+      else {
+        operation.status = 'AMBIGUOUS_PROVIDER_STATE';
+        operation.failureReason = 'The conversion request could not be confirmed. The held funds remain protected while the status is checked.';
+        operation.metadata = { ...(operation.metadata ?? {}), settlement: 'RECONCILIATION_REQUIRED' };
+        await this.providerOperationRepository.save(operation);
+      }
+      throw error;
+    }
+  }
+
+  async getFxConversionStatus(userId: string, reference: string) {
+    const operation = await this.providerOperationRepository.findOne({
+      where: { userId, type: 'fx_convert', reference },
     });
+    if (!operation) throw new NotFoundException('Conversion not found.');
+    const metadata = this.asRecord(operation.metadata) ?? {};
+    if (
+      ['PENDING', 'AMBIGUOUS_PROVIDER_STATE', 'HELD'].includes(operation.status) &&
+      operation.providerReference &&
+      metadata.ledgerFinalized !== true &&
+      metadata.ledgerReversed !== true
+    ) {
+      try {
+        const verification = await this.fincraWalletService.verifyConversionStatus(operation.providerReference);
+        const data = this.asRecord(verification.data) ?? verification;
+        const status = (this.asString(data.status) ?? this.asString(data.state) ?? '').toUpperCase();
+        if (/SUCCESS|COMPLETED|SETTLED/.test(status)) {
+          await this.completeFxLedgerHold(operation, verification, status);
+        } else if (/FAILED|REJECTED|CANCELLED|REVERSED/.test(status)) {
+          await this.reverseFxLedgerHold(operation, 'FAILED', 'The conversion did not settle. The source funds were returned.', verification);
+        }
+      } catch {
+        // Keep the hold intact until the provider can confirm a terminal result.
+      }
+    }
+    const current = await this.providerOperationRepository.findOne({
+      where: { userId, type: 'fx_convert', reference },
+    });
+    return this.normalizeOperation(current ?? operation);
   }
 
   async internalTransfer(userId: string, payload: AnyRecord) {
@@ -2141,6 +2332,32 @@ export class VidalpayService {
       if (!this.isMissingTable(error, 'provider_operation')) throw error;
     }
 
+    let ngnWalletActivation: AnyRecord | null = null;
+    if (decision === 'VERIFIED' && profile.region === 'NG') {
+      const bvn = this.asString(this.asRecord(profile.identity)?.bvn);
+      if (bvn) {
+        try {
+          ngnWalletActivation = await this.activateWalletProduct(
+            userId,
+            Currency.NGN,
+            { KYCInformation: { bvn } },
+          );
+        } catch {
+          ngnWalletActivation = {
+            status: 'PROVISIONING_REQUIRES_ATTENTION',
+            message:
+              'Your KYC is approved. NGN account provisioning could not be requested automatically; open wallet requirements to retry.',
+          };
+        }
+      } else {
+        ngnWalletActivation = {
+          status: 'REQUIRES_INFORMATION',
+          message:
+            'Your KYC is approved. Submit your BVN in wallet requirements to request your NGN account.',
+        };
+      }
+    }
+
     let notification: AnyRecord = { status: 'STORAGE_UNAVAILABLE' };
     try {
       notification = (
@@ -2151,11 +2368,14 @@ export class VidalpayService {
               : decision === 'REJECTED' || decision === 'RETRY_REQUIRED'
                 ? 'More KYC information is required'
                 : 'KYC review update',
-          body:
-            statusMessage ??
-            (decision === 'VERIFIED'
-              ? 'Your account verification was approved.'
-              : 'Please review your KYC checklist and submit the remaining information.'),
+          body: decision === 'VERIFIED' && profile.region === 'NG'
+            ? ngnWalletActivation?.status === 'PENDING'
+              ? 'Your KYC is approved. Your NGN account request is processing; details will appear after Fincra confirms issuance.'
+              : this.asString(ngnWalletActivation?.message) ?? 'Your KYC is approved.'
+            : statusMessage ??
+              (decision === 'VERIFIED'
+                ? 'Your account verification was approved.'
+                : 'Please review your KYC checklist and submit the remaining information.'),
           category: 'KYC',
           metadata: {
             status: decision,
@@ -2163,6 +2383,7 @@ export class VidalpayService {
             missingRequirements,
             screen: 'KYC',
             actionRequired: decision === 'RETRY_REQUIRED',
+            ngnWalletActivationStatus: ngnWalletActivation?.status ?? null,
           },
         })
       ).push;
@@ -2173,6 +2394,7 @@ export class VidalpayService {
     return {
       user: this.normalizeAdminUser(user),
       kyc: this.normalizeKycProfile(profile),
+      ...(ngnWalletActivation ? { ngnWalletActivation } : {}),
       notification,
     };
   }
@@ -3729,9 +3951,14 @@ export class VidalpayService {
           payload,
         });
         const processedEventIds = this.providerOperationEventIds(operation);
+        const operationMetadata = this.asRecord(operation.metadata) ?? {};
+        const conversionNeedsReconciliation = operation.type === 'fx_convert' &&
+          operationMetadata.ledgerFinalized !== true &&
+          operationMetadata.ledgerReversed !== true &&
+          operationMetadata.settlement === 'RECONCILIATION_REQUIRED';
         if (
-          eventRecord.duplicate ||
-          (eventId && processedEventIds.includes(eventId))
+          (eventRecord.duplicate || (eventId && processedEventIds.includes(eventId))) &&
+          !conversionNeedsReconciliation
         ) {
           return {
             received: true,
@@ -3744,11 +3971,43 @@ export class VidalpayService {
             walletUpdated: false,
           };
         }
-        const walletUpdate = await this.persistFincraWalletFromWebhook(
-          operation,
-          payload,
-          status,
-        );
+        if (operation.type === 'fx_convert') {
+          const finalEvent = /SUCCESS|COMPLETED|SETTLED|FAILED|REJECTED|CANCELLED|REVERSED/i.test(status);
+          if (finalEvent) {
+            const providerReference = reference === operation.reference
+              ? operation.providerReference
+              : reference;
+            try {
+              if (!providerReference || providerReference === operation.reference) {
+                throw new PreconditionFailedException('The provider conversion reference is not available yet.');
+              }
+              const verification = await this.fincraWalletService.verifyConversionStatus(providerReference);
+              const verifiedData = this.asRecord(verification.data) ?? verification;
+              const verifiedStatus = this.asString(verifiedData.status) ?? this.asString(verifiedData.state) ?? '';
+              if (/SUCCESS|COMPLETED|SETTLED/i.test(verifiedStatus)) {
+                await this.completeFxLedgerHold(operation, verification, verifiedStatus.toUpperCase());
+              } else if (/FAILED|REJECTED|CANCELLED|REVERSED/i.test(verifiedStatus)) {
+                await this.reverseFxLedgerHold(operation, 'FAILED', 'The conversion did not settle. The source funds were returned.', verification);
+              } else {
+                operation.status = 'PENDING';
+                operation.metadata = { ...(operation.metadata ?? {}), providerWebhookReceived: true, providerWebhookStatus: status, verificationStatus: verifiedStatus || 'UNKNOWN', settlement: 'RECONCILIATION_REQUIRED' };
+                await this.providerOperationRepository.save(operation);
+              }
+            } catch {
+              operation.status = 'PENDING';
+              operation.metadata = { ...(operation.metadata ?? {}), providerWebhookReceived: true, providerWebhookStatus: status, settlement: 'RECONCILIATION_REQUIRED' };
+              operation.failureReason = 'The provider has not yet confirmed the conversion. Funds remain held while status is rechecked.';
+              await this.providerOperationRepository.save(operation);
+            }
+          } else {
+            operation.status = 'PENDING';
+            operation.metadata = { ...(operation.metadata ?? {}), providerWebhookReceived: true, providerWebhookStatus: status, settlement: 'AWAITING_PROVIDER' };
+            await this.providerOperationRepository.save(operation);
+          }
+          updated = true;
+          return { received: true, provider: 'FINCRA', reference, status, updated, duplicate: false, activationReference: operation.reference, walletUpdated: false };
+        }
+        const walletUpdate = await this.persistFincraWalletFromWebhook(operation, payload, status);
         walletUpdated = walletUpdate.persisted;
         operation.status = walletUpdate.persisted ? 'ACTIVE' : status;
         operation.responsePayload = this.safeFincraWebhookPayload(payload);
@@ -4454,13 +4713,44 @@ export class VidalpayService {
   ): FincraVirtualAccountRequestPayload {
     const identity = this.asRecord(payload.KYCInformation) ?? {};
     const metadata = this.asRecord(payload.metadata) ?? {};
+    const identityAddress = this.asRecord(identity.address) ?? {};
+    const profileInformation = this.fincraKycInformationFromUser(user);
+    const profileAddress = this.asRecord(profileInformation.address) ?? {};
+    const address = this.compactRecord({
+      ...profileAddress,
+      ...identityAddress,
+      countryOfResidence:
+        this.asString(identityAddress.countryOfResidence) ??
+        this.asString(identityAddress.countryCode) ??
+        this.asString(identityAddress.country) ??
+        this.asString(user.countryCode),
+      zip:
+        this.asString(identityAddress.zip) ??
+        this.asString(identityAddress.postalCode) ??
+        this.asString((user as unknown as AnyRecord).postalCode),
+      number: this.asString(identityAddress.number),
+    });
+    const kycInformation = this.compactRecord({
+      ...profileInformation,
+      ...identity,
+      birthDate:
+        this.asString(identity.birthDate) ??
+        this.asString(identity.dateOfBirth) ??
+        this.asString(user.dateOfBirth as unknown),
+      taxCountry:
+        this.asString(identity.taxCountry) ??
+        this.asString(user.countryCode) ??
+        this.asString(user.residency),
+      address,
+    });
     const request: FincraVirtualAccountRequestPayload = {
       currency: product.currency,
-      accountType: 'individual',
-      KYCInformation: this.compactRecord({
-        ...this.fincraKycInformationFromUser(user),
-        ...identity,
-      }),
+      accountType: this.configuredFincraAccountType(product.currency),
+      KYCInformation: kycInformation,
+      monthlyTransactionCount:
+        this.asString(identity.monthlyTransactionCount) ?? undefined,
+      monthlyTransactionVolume:
+        this.asString(identity.monthlyTransactionVolume) ?? undefined,
       isTermsAccepted:
         payload.isTermsAccepted === true || payload.termsAccepted === true,
       merchantReference: activationKey,
@@ -4475,7 +4765,11 @@ export class VidalpayService {
 
     const utilityBill = this.asString(payload.utilityBill);
     const bankStatement = this.asString(payload.bankStatement);
-    const meansOfId = this.asString(payload.meansOfId);
+    const meansOfId = Array.isArray(payload.meansOfId)
+      ? payload.meansOfId
+          .map((value) => this.asString(value))
+          .filter((value): value is string => Boolean(value))
+      : this.asString(payload.meansOfId);
     const accountAgreement = this.asString(payload.accountAgreement);
     const regulatoryEvidence = this.asString(payload.regulatoryEvidence);
     if (utilityBill) request.utilityBill = utilityBill;
@@ -4484,6 +4778,52 @@ export class VidalpayService {
     if (accountAgreement) request.accountAgreement = accountAgreement;
     if (regulatoryEvidence) request.regulatoryEvidence = regulatoryEvidence;
     return request;
+  }
+
+  private missingFincraFcyFields(request: FincraVirtualAccountRequestPayload) {
+    const identity = this.asRecord(request.KYCInformation) ?? {};
+    const address = this.asRecord(identity.address) ?? {};
+    const incomeBand = this.asRecord(identity.incomeBand) ?? {};
+    const document = this.asRecord(identity.document) ?? {};
+    const required: Array<[string, unknown, string]> = [
+      ['firstName', identity.firstName, 'First name'],
+      ['lastName', identity.lastName, 'Last name'],
+      ['birthDate', identity.birthDate, 'Date of birth'],
+      ['taxCountry', identity.taxCountry, 'Tax country'],
+      ['nationality', identity.nationality, 'Nationality'],
+      ['email', identity.email, 'Email'],
+      ['address.countryOfResidence', address.countryOfResidence, 'Country of residence'],
+      ['address.state', address.state, 'State or province'],
+      ['address.zip', address.zip, 'Postal code'],
+      ['address.street', address.street, 'Street address'],
+      ['address.number', address.number, 'Street number'],
+      ['address.city', address.city, 'City'],
+      ['sourceOfIncome', identity.sourceOfIncome, 'Source of income'],
+      ['accountDesignation', identity.accountDesignation, 'Account use'],
+      ['incomeBand.lower', incomeBand.lower, 'Income range lower bound'],
+      ['incomeBand.upper', incomeBand.upper, 'Income range upper bound'],
+      ['phone', identity.phone, 'Phone number'],
+      ['employmentStatus', identity.employmentStatus, 'Employment status'],
+      ['document.type', document.type, 'ID document type'],
+      ['document.number', document.number, 'ID document number'],
+      ['document.issuedCountryCode', document.issuedCountryCode, 'ID issuing country'],
+      ['document.issuedBy', document.issuedBy, 'ID issuing authority'],
+      ['document.issuedDate', document.issuedDate, 'ID issue date'],
+      ['document.expirationDate', document.expirationDate, 'ID expiration date'],
+      ['occupation', identity.occupation, 'Occupation'],
+      ['monthlyTransactionCount', request.monthlyTransactionCount, 'Expected monthly transaction count'],
+      ['monthlyTransactionVolume', request.monthlyTransactionVolume, 'Expected monthly transaction volume'],
+      ['meansOfId', request.meansOfId, 'Government ID document upload'],
+      ['utilityBill', request.utilityBill, 'Recent proof of address document'],
+    ];
+    if (identity.taxCountry === 'US') {
+      required.push(['taxNumber', identity.taxNumber, 'US tax number']);
+    }
+    return required
+      .filter(([, value]) =>
+        Array.isArray(value) ? value.length === 0 : !this.asString(value),
+      )
+      .map(([key, , label]) => ({ key, label, source: 'FINCRA' }));
   }
 
   private fincraKycInformationFromUser(user: User) {
@@ -4747,8 +5087,7 @@ export class VidalpayService {
   private normalizeUser(user: User, wallets: Wallet[], kyc: KycProfile) {
     const { password, pin, resetToken, resetTokenExpiry, ...safeUser } = user;
     const region = kyc.region ?? user.region ?? this.inferRegion(user);
-    const defaultCurrency =
-      region === 'NG' ? Currency.NGN : region === 'US' ? Currency.USD : null;
+    const defaultCurrency = this.defaultCurrencyForRegion(region);
     const orderedWallets = this.orderWalletsByDefault(wallets, defaultCurrency);
     return {
       ...safeUser,
@@ -4915,11 +5254,7 @@ export class VidalpayService {
       kycProvider: null,
       signupRegion: this.inferRegion(user),
       defaultWalletCurrency:
-        this.inferRegion(user) === 'NG'
-          ? Currency.NGN
-          : this.inferRegion(user) === 'US'
-            ? Currency.USD
-            : null,
+        this.defaultCurrencyForRegion(this.inferRegion(user)),
       country: user.country ?? null,
       profilePicture: user.profilePicture ?? null,
       lastLogin: user.lastLogin ?? null,
@@ -5118,7 +5453,12 @@ export class VidalpayService {
   }
 
   private normalizeKycProfile(profile: KycProfile) {
-    const identity = profile.identity ?? {};
+    const storedIdentity = profile.identity ?? {};
+    const { bvn, ...safeIdentity } = storedIdentity;
+    const identity: AnyRecord = {
+      ...safeIdentity,
+      ...(this.asString(bvn) ? { bvnProvided: true } : {}),
+    };
     const actionRequired =
       this.asRecord(identity.actionRequired) ??
       (identity.actionRequired === true
@@ -5976,6 +6316,83 @@ export class VidalpayService {
     return { user, eligibility };
   }
 
+  private async completeFxLedgerHold(operation: ProviderOperation, payload: AnyRecord, providerStatus: string) {
+    await this.withOptionalTransaction(async (repositories) => {
+      const current = (await repositories.operations.findOne({ where: { reference: operation.reference } })) ?? operation;
+      const metadata = this.asRecord(current.metadata) ?? {};
+      if (metadata.ledgerFinalized === true) return current;
+      const destinationWalletId = this.asString(metadata.destinationWalletId);
+      const destination = destinationWalletId ? await this.findLockedWalletById(repositories.wallets, destinationWalletId) : null;
+      if (!destination) throw new PreconditionFailedException('The destination wallet is unavailable for settlement.');
+      const data = this.asRecord(payload.data) ?? {};
+      const credit = Number(data.amountReceived ?? metadata.destinationAmount);
+      if (!Number.isFinite(credit) || credit <= 0) throw new PreconditionFailedException('The settlement did not include a valid received amount.');
+      const before = Number(destination.balance ?? 0);
+      destination.balance = this.roundMoney(before + credit);
+      destination.availableBalance = destination.balance;
+      destination.ledgerBalance = destination.balance;
+      await repositories.wallets.save(destination);
+      const hold = await repositories.transactions.findOne({ where: { reference: `${current.reference}_hold` } });
+      if (hold) {
+        hold.status = 'SUCCESS';
+        hold.providerReference = current.providerReference;
+        hold.metadata = { ...(hold.metadata ?? {}), settlement: 'PROVIDER_COMPLETED', providerStatus };
+        await repositories.transactions.save(hold);
+      }
+      await repositories.transactions.save(repositories.transactions.create({
+        userId: current.userId, walletId: destination.id, reference: `${current.reference}_credit`,
+        operationReference: current.reference, currency: String(metadata.destinationCurrency), amount: credit,
+        balanceBefore: before, balanceAfter: destination.balance, type: 'credit', status: 'SUCCESS',
+        info: 'Currency conversion', description: `Converted ${current.currency} to ${metadata.destinationCurrency}`,
+        tag: 'fx_conversion', provider: 'FINCRA', providerReference: current.providerReference,
+        idempotencyKey: `${current.idempotencyKey}_credit`, metadata: { settlement: 'PROVIDER_COMPLETED', rate: metadata.rate },
+      }));
+      current.status = 'COMPLETED';
+      current.responsePayload = this.redactPayload(payload);
+      current.metadata = { ...metadata, settlement: 'COMPLETED', ledgerFinalized: true, providerWebhookStatus: providerStatus };
+      await repositories.operations.save(current);
+      return current;
+    });
+  }
+
+  private async reverseFxLedgerHold(operation: ProviderOperation, status: string, reason: string, payload?: AnyRecord) {
+    await this.withOptionalTransaction(async (repositories) => {
+      const current = (await repositories.operations.findOne({ where: { reference: operation.reference } })) ?? operation;
+      const metadata = this.asRecord(current.metadata) ?? {};
+      if (metadata.ledgerReversed !== true) {
+        const sourceId = this.asString(metadata.sourceWalletId);
+        const source = sourceId ? await this.findLockedWalletById(repositories.wallets, sourceId) : null;
+        const amount = Number(current.amount ?? 0);
+        if (!source || amount <= 0) throw new PreconditionFailedException('The source wallet cannot be restored automatically; reconciliation is required.');
+        const before = Number(source.balance ?? 0);
+        source.balance = this.roundMoney(before + amount);
+        source.availableBalance = source.balance;
+        source.ledgerBalance = source.balance;
+        await repositories.wallets.save(source);
+        await repositories.transactions.save(repositories.transactions.create({
+          userId: current.userId, walletId: source.id, reference: `${current.reference}_reversal`,
+          operationReference: current.reference, currency: String(current.currency), amount,
+          balanceBefore: before, balanceAfter: source.balance, type: 'credit', status: 'SUCCESS',
+          info: 'Currency conversion reversal', description: reason, tag: 'fx_conversion_reversal',
+          provider: 'FINCRA', providerReference: current.providerReference,
+          idempotencyKey: `${current.idempotencyKey}_reversal`, metadata: { originalReference: current.reference },
+        }));
+        const hold = await repositories.transactions.findOne({ where: { reference: `${current.reference}_hold` } });
+        if (hold) {
+          hold.status = 'REVERSED';
+          hold.metadata = { ...(hold.metadata ?? {}), settlement: 'REVERSED' };
+          await repositories.transactions.save(hold);
+        }
+      }
+      current.status = status;
+      current.failureReason = reason;
+      current.responsePayload = payload ? this.redactPayload(payload) : current.responsePayload;
+      current.metadata = { ...metadata, settlement: 'REVERSED', ledgerReversed: true, reversalReason: reason };
+      await repositories.operations.save(current);
+      return current;
+    });
+  }
+
   private isWalletActivationInProgress(status: string) {
     const normalized = status.toUpperCase().replace(/[^A-Z0-9]+/g, ' ').trim();
     return [
@@ -6605,6 +7022,21 @@ export class VidalpayService {
     }
     if (
       explicit.some((value) =>
+        ['ca', 'canada', 'can'].includes(value),
+      )
+    ) {
+      return 'CA';
+    }
+    if (
+      explicit.some((value) =>
+        ['gb', 'uk', 'united kingdom', 'great britain', 'gbp', '+44', '44'].includes(value),
+      ) ||
+      user.phoneNumber?.startsWith('+44')
+    ) {
+      return 'GB';
+    }
+    if (
+      explicit.some((value) =>
         ['us', 'usa', 'united states', 'united_states', '+1', '1'].includes(
           value,
         ),
@@ -6614,6 +7046,14 @@ export class VidalpayService {
       return 'US';
     }
     return null;
+  }
+
+  private configuredFincraAccountType(currency: string): 'individual' | 'corporate' {
+    const configured = this.configService
+      .get<string>(`FINCRA_${currency}_ACCOUNT_TYPE`)
+      ?.trim()
+      .toLowerCase();
+    return configured === 'corporate' ? 'corporate' : 'individual';
   }
 
   private defaultKycSections(region: string | null, status = 'NOT_STARTED') {
@@ -7040,7 +7480,11 @@ export class VidalpayService {
       ? Currency.USD
       : region === 'NG'
         ? Currency.NGN
-        : null;
+        : region === 'CA'
+          ? Currency.CAD
+          : region === 'GB'
+            ? Currency.GBP
+            : null;
   }
 
   private orderWalletsByDefault(
@@ -7131,9 +7575,9 @@ export class VidalpayService {
         title: 'Bank transfer',
         description: 'Receive funds into provider-provisioned account details.',
         enabled: false,
-        provider: 'Unit.co/PayVessel',
+        provider: 'Fincra',
         blockedReason: 'Provider account details have not been provisioned.',
-        currencies: ['USD', 'NGN'],
+        currencies: ['NGN', 'USD', 'GBP', 'CAD'],
         action: { type: 'INFO', path: null, method: null },
       },
       {
@@ -7143,7 +7587,7 @@ export class VidalpayService {
         enabled: false,
         provider: null,
         blockedReason: 'Card top-up provider is not configured.',
-        currencies: ['USD', 'NGN'],
+        currencies: ['NGN', 'USD', 'GBP', 'CAD'],
         action: { type: 'POST', path: '/wallet/top-up/card', method: 'POST' },
       },
     ];
@@ -7199,7 +7643,7 @@ export class VidalpayService {
         category: 'Wallet',
         question: 'Why are my account details unavailable?',
         answer:
-          'Account details appear after the backend provisions real provider accounts with Unit.co or PayVessel.',
+          'Account details appear only after Fincra confirms account issuance for the selected wallet.',
       },
       {
         id: 'provider-status',

@@ -1447,6 +1447,17 @@ export class AuthenticationService {
     ) {
       return 'NG';
     }
+    if (candidates.some((value) => ['ca', 'can', 'canada'].includes(value))) {
+      return 'CA';
+    }
+    if (
+      candidates.some((value) =>
+        ['gb', 'uk', 'united kingdom', 'great britain', '+44', '44'].includes(value),
+      ) ||
+      phone?.startsWith('+44')
+    ) {
+      return 'GB';
+    }
     if (
       candidates.some((value) =>
         ['us', 'usa', 'united states', 'united_states', '+1', '1'].includes(

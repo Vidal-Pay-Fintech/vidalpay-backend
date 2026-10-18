@@ -264,6 +264,11 @@ export class FxController {
   convert(@ActiveUser() user: ActiveUserData, @Body() body: AnyRecord) {
     return this.vidalpayService.convertFx(user.sub, body);
   }
+
+  @Get('conversions/:reference')
+  conversionStatus(@ActiveUser() user: ActiveUserData, @Param('reference') reference: string) {
+    return this.vidalpayService.getFxConversionStatus(user.sub, reference);
+  }
 }
 
 @Controller('cards')

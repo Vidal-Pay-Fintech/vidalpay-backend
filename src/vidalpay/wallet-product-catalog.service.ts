@@ -3,7 +3,7 @@ import { ConfigService } from '@nestjs/config';
 import { createBlockedResponse } from './contracts';
 import { AccountJurisdiction } from './jurisdiction.service';
 
-const FINCRA_SANDBOX_VIRTUAL_ACCOUNT_CURRENCIES = new Set([
+const FINCRA_VIRTUAL_ACCOUNT_CURRENCIES = new Set([
   'NGN',
   'USD',
   'GBP',
@@ -99,9 +99,12 @@ export class WalletProductCatalogService {
     const missingRequirementsConfig = product.requirementsConfigured
       ? []
       : [`FINCRA_${product.currency}_REQUIREMENTS_CONFIGURED`];
-    const missingCapability = FINCRA_SANDBOX_VIRTUAL_ACCOUNT_CURRENCIES.has(
-      product.currency,
-    )
+    const sandboxVaEnabled = this.truthy(
+      this.configService.get<string>(
+        `FINCRA_${product.currency}_SANDBOX_VA_SUPPORT`,
+      ),
+    );
+    const missingCapability = sandboxVaEnabled
       ? []
       : [`FINCRA_${product.currency}_SANDBOX_VA_SUPPORT`];
     const missingRequirements = [
@@ -143,12 +146,10 @@ export class WalletProductCatalogService {
       enabled: true,
       accountType: 'VIRTUAL_ACCOUNT' as const,
       tier: 'PRIMARY' as const,
-      supportedJurisdictions: ['NG', 'US'],
-      canProvision:
-        sandboxTestMode ||
-        this.truthy(
-          this.configService.get<string>(`FINCRA_${currency}_CAN_PROVISION`),
-        ),
+      supportedJurisdictions: this.configuredJurisdictions(currency),
+      canProvision: this.truthy(
+        this.configService.get<string>(`FINCRA_${currency}_CAN_PROVISION`),
+      ),
       requirementsConfigured:
         sandboxTestMode ||
         this.truthy(
@@ -174,6 +175,17 @@ export class WalletProductCatalogService {
         .trim()
         .toLowerCase(),
     );
+  }
+
+  private configuredJurisdictions(currency: string): AccountJurisdiction[] {
+    const configured = this.configService
+      .get<string>(`FINCRA_${currency}_SUPPORTED_JURISDICTIONS`)
+      ?.split(',')
+      .map((value) => value.trim().toUpperCase())
+      .filter((value): value is AccountJurisdiction =>
+        ['NG', 'US', 'CA', 'GB'].includes(value),
+      );
+    return configured ?? [];
   }
 
   private mergeConfiguredProducts(defaults: WalletProduct[]) {
@@ -225,7 +237,7 @@ export class WalletProductCatalogService {
       typeof record.currency === 'string'
         ? this.normalizeCurrency(record.currency)
         : null;
-    if (!currency || !FINCRA_SANDBOX_VIRTUAL_ACCOUNT_CURRENCIES.has(currency)) {
+    if (!currency || !FINCRA_VIRTUAL_ACCOUNT_CURRENCIES.has(currency)) {
       return null;
     }
 
@@ -235,10 +247,10 @@ export class WalletProductCatalogService {
       ? record.supportedJurisdictions
           .filter((item): item is string => typeof item === 'string')
           .map((item) => item.trim().toUpperCase())
-          .filter((item): item is AccountJurisdiction =>
-            ['NG', 'US'].includes(item),
+            .filter((item): item is AccountJurisdiction =>
+            ['NG', 'US', 'CA', 'GB'].includes(item),
           )
-      : ['NG', 'US'];
+      : [];
 
     const requirements = Array.isArray(record.requirements)
       ? record.requirements
