@@ -134,6 +134,26 @@ describe('ProviderStatusService', () => {
         readinessStatus: 'CONFIGURED_NOT_LIVE_TESTED',
       }),
     );
+    expect(service.getStatus('vtu_purchase')).toEqual(
+      expect.objectContaining({
+        enabled: true,
+        readinessStatus: 'CONFIGURED_NOT_LIVE_TESTED',
+      }),
+    );
+  });
+
+  it('does not mark the executed VTU purchase path ready without provider and base URL configuration', () => {
+    const service = buildService({
+      VTU_USERNAME: 'sandbox-user',
+      VTU_PASSWORD: 'sandbox-password',
+    });
+
+    expect(service.getStatus('vtu_purchase')).toEqual(
+      expect.objectContaining({
+        enabled: false,
+        readinessStatus: 'MISSING_CREDENTIALS',
+      }),
+    );
   });
 
   it('does not enable bill purchases from read-only Reloadly catalog credentials', () => {

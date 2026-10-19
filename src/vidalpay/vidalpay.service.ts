@@ -4017,6 +4017,7 @@ export class VidalpayService {
           updated = true;
           return { received: true, provider: 'FINCRA', reference, status, updated, duplicate: false, activationReference: operation.reference, walletUpdated: false };
         }
+        const walletWasAlreadyActive = operation.status === 'ACTIVE';
         const walletUpdate = await this.persistFincraWalletFromWebhook(operation, payload, status);
         walletUpdated = walletUpdate.persisted;
         operation.status = walletUpdate.persisted ? 'ACTIVE' : status;
@@ -4041,6 +4042,32 @@ export class VidalpayService {
         };
         await this.providerOperationRepository.save(operation);
         updated = true;
+        if (
+          walletUpdate.persisted &&
+          !walletWasAlreadyActive &&
+          operation.userId &&
+          operation.metadata?.accountActivationNotificationSentAt == null
+        ) {
+          try {
+            await this.sendNotificationToUser(operation.userId, {
+              title: `${this.normalizeCurrency(operation.currency ?? '')} receive account activated`,
+              body: 'Your receive account is ready. Account details are now available in your wallet.',
+              category: 'WALLET',
+              metadata: {
+                screen: 'ReceiveFunding',
+                currency: this.normalizeCurrency(operation.currency ?? ''),
+                status: 'ACTIVE',
+              },
+            });
+            operation.metadata = {
+              ...(operation.metadata ?? {}),
+              accountActivationNotificationSentAt: new Date().toISOString(),
+            };
+            await this.providerOperationRepository.save(operation);
+          } catch {
+            // Notification persistence or push delivery must not fail a verified provider webhook.
+          }
+        }
       }
     }
 
@@ -5467,7 +5494,8 @@ export class VidalpayService {
     const { bvn, ...safeIdentity } = storedIdentity;
     const identity: AnyRecord = {
       ...safeIdentity,
-      ...(this.asString(bvn) ? { bvnProvided: true } : {}),
+      ninProvided: Boolean(this.asString(storedIdentity.nin)),
+      bvnProvided: Boolean(this.asString(bvn)),
     };
     const actionRequired =
       this.asRecord(identity.actionRequired) ??

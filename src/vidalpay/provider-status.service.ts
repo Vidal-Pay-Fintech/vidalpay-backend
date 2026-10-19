@@ -342,8 +342,8 @@ export class ProviderStatusService {
       service: 'VTU.ng utility customer validation',
       envVars: [],
       envVarGroups: [
-        ['VTU_USERNAME', 'VTU_PASSWORD'],
-        ['VTU_EMAIL', 'VTU_PASSWORD'],
+        ['VTU_PROVIDER', 'VTU_BASE_URL', 'VTU_USERNAME', 'VTU_PASSWORD'],
+        ['VTU_PROVIDER', 'VTU_BASE_URL', 'VTU_EMAIL', 'VTU_PASSWORD'],
       ],
     },
     vtu_purchase: {
@@ -352,8 +352,8 @@ export class ProviderStatusService {
       service: 'VTU.ng airtime/data/utility purchase',
       envVars: [],
       envVarGroups: [
-        ['VTU_USERNAME', 'VTU_PASSWORD'],
-        ['VTU_EMAIL', 'VTU_PASSWORD'],
+        ['VTU_PROVIDER', 'VTU_BASE_URL', 'VTU_USERNAME', 'VTU_PASSWORD'],
+        ['VTU_PROVIDER', 'VTU_BASE_URL', 'VTU_EMAIL', 'VTU_PASSWORD'],
       ],
     },
     vtu_requery: {

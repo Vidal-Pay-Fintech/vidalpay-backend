@@ -232,6 +232,31 @@ describe('VidalpayService', () => {
       await expect(service.getKycStatus('user-1')).resolves.toMatchObject({ status: 'REJECTED', capabilities: { canTagTransfer: false, canBankTransfer: false } });
     });
 
+    it('reports government ID presence while continuing to mask BVN values', async () => {
+      userRepository.findOne.mockResolvedValue({ id: 'user-1', countryCode: 'NG' });
+      kycProfileRepository.findOne.mockResolvedValue({
+        id: 'kyc-1', userId: 'user-1', region: 'NG', status: 'VERIFIED',
+        identity: { nin: '12345678901', bvn: '10987654321' },
+      });
+
+      await expect(service.getKycStatus('user-1')).resolves.toMatchObject({
+        identity: { ninProvided: true, bvnProvided: true },
+      });
+      const response = await service.getKycStatus('user-1');
+      expect(response.identity).not.toHaveProperty('bvn');
+    });
+
+    it('reports missing government ID values as not provided', async () => {
+      userRepository.findOne.mockResolvedValue({ id: 'user-1', countryCode: 'NG' });
+      kycProfileRepository.findOne.mockResolvedValue({
+        id: 'kyc-1', userId: 'user-1', region: 'NG', status: 'VERIFIED', identity: {},
+      });
+
+      await expect(service.getKycStatus('user-1')).resolves.toMatchObject({
+        identity: { ninProvided: false, bvnProvided: false },
+      });
+    });
+
     it('a verified account does not restart or downgrade from client submissions', async () => {
       userRepository.findOne.mockResolvedValue({ id: 'user-1', kycStatus: 'VERIFIED' });
       kycProfileRepository.findOne.mockResolvedValue({ id: 'kyc-1', userId: 'user-1', status: 'VERIFIED', region: 'US' });
@@ -2188,6 +2213,11 @@ describe('VidalpayService', () => {
     providerOperationRepository.save.mockImplementation(
       async (payload: any) => payload,
     );
+    userRepository.findOne.mockResolvedValue({ id: 'user-1' });
+    notificationPreferenceRepository.findOne.mockResolvedValue({
+      preferences: { push: false },
+    });
+    notificationDeviceRepository.find.mockResolvedValue([]);
 
     await expect(
       service.handleFincraWebhook(payload, signature),
@@ -2221,6 +2251,19 @@ describe('VidalpayService', () => {
           providerAccountDetailsAvailable: true,
           walletPersistenceBlocked: null,
           walletPersistenceStatus: 'PERSISTED',
+        }),
+      }),
+    );
+    expect(notificationRepository.save).toHaveBeenCalledWith(
+      expect.objectContaining({
+        userId: 'user-1',
+        title: 'CAD receive account activated',
+        category: 'WALLET',
+        read: false,
+        metadata: expect.objectContaining({
+          screen: 'ReceiveFunding',
+          currency: 'CAD',
+          status: 'ACTIVE',
         }),
       }),
     );
