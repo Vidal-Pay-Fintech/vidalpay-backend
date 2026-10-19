@@ -193,23 +193,33 @@ export class EmailService {
     return render(template);
   };
 
-  async sendMail({ email, subject, template, file }: SendMailConfiguration) {
+  async sendMail({ email, subject, template, html, text, file }: SendMailConfiguration) {
     this.assertConfigured();
-    const html = await this.generateEmail(template);
+    const renderedHtml = html ?? (template ? await this.generateEmail(template) : this.textToHtml(text ?? ''));
     try {
       if (this.emailProvider === 'resend') {
         return await this.sendEmailWithResend({
           email,
           subject,
-          html,
+          html: renderedHtml,
           file,
         });
       }
 
-      return await this.sendEmailNodeMailer({ email, subject, html, file });
+      return await this.sendEmailNodeMailer({ email, subject, html: renderedHtml, file });
     } catch (error) {
       this.throwEmailUnavailable(error);
     }
+  }
+
+  private textToHtml(text: string) {
+    const escaped = text
+      .replace(/&/g, '&amp;')
+      .replace(/</g, '&lt;')
+      .replace(/>/g, '&gt;')
+      .replace(/"/g, '&quot;')
+      .replace(/'/g, '&#39;');
+    return `<div style="font-family:Arial,sans-serif;white-space:pre-wrap">${escaped}</div>`;
   }
 
   /**

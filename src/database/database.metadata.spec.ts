@@ -14,6 +14,7 @@ import { ProviderOperation } from './entities/provider-operation.entity';
 import { ReferralEvent } from './entities/referral-event.entity';
 import { RewardLedgerEntry } from './entities/reward-ledger-entry.entity';
 import { SupportTicket } from './entities/support-ticket.entity';
+import { SupportMessage } from './entities/support-message.entity';
 import { Token } from './entities/token.entity';
 import { User } from './entities/user.entity';
 import { Wallet } from './entities/wallet.entity';
@@ -40,6 +41,7 @@ describe('PostgreSQL entity metadata', () => {
         ReferralEvent,
         RewardLedgerEntry,
         SupportTicket,
+        SupportMessage,
       ],
       synchronize: false,
       migrationsRun: false,

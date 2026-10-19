@@ -27,11 +27,13 @@ import { ProviderOperation } from 'src/database/entities/provider-operation.enti
 import { ReferralEvent } from 'src/database/entities/referral-event.entity';
 import { RewardLedgerEntry } from 'src/database/entities/reward-ledger-entry.entity';
 import { SupportTicket } from 'src/database/entities/support-ticket.entity';
+import { SupportMessage } from 'src/database/entities/support-message.entity';
 import { Token } from 'src/database/entities/token.entity';
 import { AccountStatus, User } from 'src/database/entities/user.entity';
 import { Wallet } from 'src/database/entities/wallet.entity';
 import { TokenType } from 'src/common/enum/token-type.enum';
 import { MailService } from 'src/mail/mail.service';
+import { PhoneService } from 'src/mail/phone.service';
 import { Currency } from 'src/utils/enums/wallet.enum';
 import { UserRole } from 'src/utils/enums/user.enum';
 import { TagIdGenerator } from 'src/utils/tagIdGenerator';
@@ -108,6 +110,8 @@ export class VidalpayService {
     private readonly notificationDeviceRepository: Repository<NotificationDevice>,
     @InjectRepository(SupportTicket)
     private readonly supportTicketRepository: Repository<SupportTicket>,
+    @InjectRepository(SupportMessage)
+    private readonly supportMessageRepository: Repository<SupportMessage>,
     @InjectRepository(Token)
     private readonly tokenRepository: Repository<Token>,
     @InjectRepository(Dispute)
@@ -121,6 +125,7 @@ export class VidalpayService {
     private readonly yellowCardService: YellowCardService,
     private readonly configService: ConfigService,
     private readonly mailService: MailService,
+    private readonly phoneService: PhoneService,
     private readonly dataSource: DataSource,
   ) {}
 
@@ -1509,7 +1514,7 @@ export class VidalpayService {
     await this.assertTransactionPin(userId, pin);
 
     try {
-      return await this.dataSource.transaction(async (manager) => {
+      const completedOperation = await this.dataSource.transaction(async (manager) => {
         const users = manager.getRepository(User);
         const wallets = manager.getRepository(Wallet);
         const operations = manager.getRepository(ProviderOperation);
@@ -1638,6 +1643,30 @@ export class VidalpayService {
 
         return this.normalizeOperation(operation);
       });
+      try {
+        await this.sendNotificationToUser(userId, {
+          title: 'Transfer sent',
+          body: `${currency} ${amount.toFixed(2)} was sent to ${recipientTag}.`,
+          category: 'TRANSFER_OUT',
+          metadata: { reference: idempotencyKey, currency, amount, recipientTag },
+        });
+      } catch {
+        // Notification delivery must never change the already-committed transfer result.
+      }
+      try {
+        const recipient = await this.findUserByTag(this.userRepository, recipientTag);
+        if (recipient) {
+          await this.sendNotificationToUser(recipient.id, {
+            title: 'Transfer received',
+            body: `You received ${currency} ${amount.toFixed(2)}.`,
+            category: 'TRANSFER_IN',
+            metadata: { reference: idempotencyKey, currency, amount },
+          });
+        }
+      } catch {
+        // Recipient alerts are best effort after the ledger transaction commits.
+      }
+      return completedOperation;
     } catch (error) {
       this.throwMissingFeatureStorage(
         error,
@@ -2075,9 +2104,123 @@ export class VidalpayService {
     if (!ticket) {
       throw new NotFoundException('Support ticket not found');
     }
+    const messages = await this.supportMessageRepository.find({
+      where: { ticketId: id },
+      order: { createdAt: 'ASC' },
+    });
     return {
       ticket: this.normalizeAdminSupportTicket(ticket),
+      messages,
     };
+  }
+
+  async listSupportMessages(userId: string, ticketId: string) {
+    const ticket = await this.supportTicketRepository.findOne({
+      where: { id: ticketId, userId },
+    });
+    if (!ticket) throw new NotFoundException('Support ticket not found');
+    const messages = await this.supportMessageRepository.find({
+      where: { ticketId, userId },
+      order: { createdAt: 'ASC' },
+    });
+    if (!messages.length && ticket.message) {
+      messages.push({
+        id: ticket.id,
+        ticketId: ticket.id,
+        userId,
+        authorType: 'CUSTOMER',
+        authorId: userId,
+        message: ticket.message,
+        createdAt: ticket.createdAt,
+      } as SupportMessage);
+    }
+    return {
+      messages,
+      ticket: this.normalizeAdminSupportTicket(ticket),
+    };
+  }
+
+  async createSupportMessage(userId: string, ticketId: string, payload: AnyRecord) {
+    const ticket = await this.supportTicketRepository.findOne({
+      where: { id: ticketId, userId },
+    });
+    if (!ticket) throw new NotFoundException('Support ticket not found');
+    if (['RESOLVED', 'CLOSED'].includes(ticket.status.toUpperCase())) {
+      throw new BadRequestException('This support ticket is closed');
+    }
+    const message = this.asString(payload.message)?.trim();
+    if (!message || message.length > 4000) {
+      throw new BadRequestException('Message must contain 1 to 4000 characters');
+    }
+    const saved = await this.supportMessageRepository.save(
+      this.supportMessageRepository.create({
+        ticketId,
+        userId,
+        authorType: 'CUSTOMER',
+        authorId: userId,
+        message,
+      }),
+    );
+    await this.supportTicketRepository.save(ticket);
+    return { message: saved };
+  }
+
+  async replyToAdminSupportTicket(adminId: string, ticketId: string, payload: AnyRecord) {
+    const ticket = await this.supportTicketRepository.findOne({ where: { id: ticketId } });
+    if (!ticket) throw new NotFoundException('Support ticket not found');
+    const message = this.asString(payload.message)?.trim();
+    if (!message || message.length > 4000) {
+      throw new BadRequestException('Reply must contain 1 to 4000 characters');
+    }
+    const saved = await this.supportMessageRepository.save(
+      this.supportMessageRepository.create({
+        ticketId,
+        userId: ticket.userId,
+        authorType: 'SUPPORT',
+        authorId: adminId,
+        message,
+      }),
+    );
+    ticket.status = 'WAITING_FOR_CUSTOMER';
+    await this.supportTicketRepository.save(ticket);
+    const delivery = await this.sendNotificationToUser(ticket.userId, {
+      title: 'Support replied to your ticket',
+      body: message.slice(0, 240),
+      category: 'support_updates',
+      metadata: { ticketId, messageId: saved.id },
+    });
+    return { message: saved, ticket: this.normalizeAdminSupportTicket(ticket), notification: delivery };
+  }
+
+  async updateAdminSupportTicket(ticketId: string, payload: AnyRecord) {
+    const ticket = await this.supportTicketRepository.findOne({ where: { id: ticketId } });
+    if (!ticket) throw new NotFoundException('Support ticket not found');
+    const status = this.asString(payload.status)?.toUpperCase();
+    const allowed = ['OPEN', 'IN_PROGRESS', 'WAITING_FOR_CUSTOMER', 'RESOLVED', 'CLOSED'];
+    if (!status || !allowed.includes(status)) {
+      throw new BadRequestException(`Status must be one of: ${allowed.join(', ')}`);
+    }
+    ticket.status = status;
+    if (status === 'RESOLVED' || status === 'CLOSED') {
+      ticket.resolutionSummary = this.asString(payload.resolutionSummary)?.slice(0, 4000) ?? ticket.resolutionSummary;
+    }
+    await this.supportTicketRepository.save(ticket);
+    return { ticket: this.normalizeAdminSupportTicket(ticket) };
+  }
+
+  async sendAdminNotification(adminId: string, payload: AnyRecord) {
+    const userId = this.asString(payload.userId);
+    const title = this.asString(payload.title)?.trim();
+    const body = this.asString(payload.body)?.trim();
+    if (!userId || !title || !body || title.length > 120 || body.length > 2000) {
+      throw new BadRequestException('userId, a title up to 120 characters, and body up to 2000 characters are required');
+    }
+    return this.sendNotificationToUser(userId, {
+      title,
+      body,
+      category: this.asString(payload.category) ?? 'manual',
+      metadata: { ...(this.asRecord(payload.metadata) ?? {}), initiatedBy: adminId, source: 'ADMIN_MANUAL' },
+    });
   }
 
   async listAdminWhatsAppConversations(params: AnyRecord) {
@@ -3023,8 +3166,8 @@ export class VidalpayService {
       category?: string;
       metadata?: AnyRecord;
     },
-  ) {
-    await this.findUser(userId);
+  ): Promise<{ notification: Notification; push: AnyRecord; email: AnyRecord; sms: AnyRecord }> {
+    const user = await this.findUser(userId);
     const notification = await this.notificationRepository.save(
       this.notificationRepository.create({
         userId,
@@ -3037,29 +3180,80 @@ export class VidalpayService {
     );
 
     const preference = await this.getOrCreateNotificationPreference(userId);
-    const preferences =
+    const preferences: AnyRecord =
       preference.preferences ?? this.defaultNotificationPreferences();
+    const allowedCategory = this.notificationCategoryEnabled(
+      payload.category ?? 'General',
+      preferences,
+    );
+    const channels = this.asRecord(preferences.channels) ?? {};
+    const pushEnabled = channels.push !== undefined
+      ? channels.push === true
+      : preferences.push !== false;
+    const emailEnabled = channels.email !== undefined
+      ? channels.email === true
+      : preferences.email !== false;
+    const smsEnabled = channels.sms !== undefined
+      ? channels.sms === true
+      : preferences.sms === true;
     const devices = await this.notificationDeviceRepository.find({
       where: { userId, revokedAt: IsNull() },
     });
     const pushDevices =
-      preferences.push === false
+      !allowedCategory || !pushEnabled
         ? []
         : devices.filter((device) =>
             this.asString(device.pushToken ?? device.token),
           );
 
+    const delivery: AnyRecord = {
+      push: {
+        status: !allowedCategory || !pushEnabled
+          ? 'DISABLED_BY_PREFERENCE'
+          : pushDevices.length === 0 ? 'NO_ACTIVE_DEVICES' : 'PENDING',
+        attempted: 0,
+        delivered: 0,
+      },
+      email: { status: 'DISABLED_BY_PREFERENCE' },
+      sms: { status: 'DISABLED_BY_PREFERENCE' },
+    };
+
+    if (allowedCategory && emailEnabled) {
+      try {
+        await this.mailService.sendNotificationEmail(userId, payload.title, payload.body);
+        delivery.email = { status: 'SENT' };
+      } catch (error) {
+        delivery.email = {
+          status: 'DELIVERY_FAILED',
+          reason: error instanceof Error ? error.message : 'Email delivery failed',
+        };
+      }
+    }
+    if (allowedCategory && smsEnabled) {
+      if (!user.phoneNumber) {
+        delivery.sms = { status: 'NO_PHONE_NUMBER' };
+      } else {
+        try {
+          await this.phoneService.sendNotificationSms(
+            user.phoneNumber,
+            `${payload.title}: ${payload.body}`.slice(0, 1400),
+          );
+          delivery.sms = { status: 'SENT' };
+        } catch (error) {
+          delivery.sms = {
+            status: 'DELIVERY_FAILED',
+            reason: error instanceof Error ? error.message : 'SMS delivery failed',
+          };
+        }
+      }
+    }
+
     if (pushDevices.length === 0) {
       return {
         notification,
-        push: {
-          status:
-            preferences.push === false
-              ? 'DISABLED_BY_USER'
-              : 'NO_ACTIVE_DEVICES',
-          attempted: 0,
-          delivered: 0,
-        },
+        push: delivery.push as AnyRecord,
+        email: delivery.email as AnyRecord,
+        sms: delivery.sms as AnyRecord,
       };
     }
 
@@ -3111,28 +3305,55 @@ export class VidalpayService {
         }
       }
 
-      return {
-        notification,
-        push: {
+      delivery.push = {
           status: errors.length ? 'PARTIAL_FAILURE' : 'SENT',
           attempted: messages.length,
           delivered: Math.max(messages.length - errors.length, 0),
           failed: errors.length,
-        },
-      };
-    } catch (error) {
+        };
       return {
         notification,
-        push: {
+        push: delivery.push as AnyRecord,
+        email: delivery.email as AnyRecord,
+        sms: delivery.sms as AnyRecord,
+      };
+    } catch (error) {
+      delivery.push = {
           status: 'DELIVERY_FAILED',
           attempted: messages.length,
           delivered: 0,
           failed: messages.length,
           failureReason:
             error instanceof Error ? error.message : 'Expo push request failed',
-        },
+        };
+      return {
+        notification,
+        push: delivery.push as AnyRecord,
+        email: delivery.email as AnyRecord,
+        sms: delivery.sms as AnyRecord,
       };
     }
+  }
+
+  private notificationCategoryEnabled(category: string, preferences: AnyRecord) {
+    if (/security|auth/i.test(category)) return true;
+    const activity = this.asRecord(preferences.activity) ?? {};
+    const marketing = this.asRecord(preferences.marketing) ?? {};
+    const normalized = category.toLowerCase();
+    const preferenceKey = /transfer/i.test(normalized)
+      ? /incoming|credit|deposit/i.test(normalized) ? 'transfers_in' : 'transfers_out'
+      : /card/i.test(normalized) ? 'card_activity'
+      : /kyc|verification/i.test(normalized) ? 'kyc_updates'
+      : /fund|wallet/i.test(normalized) ? 'wallet_funding'
+      : /reward/i.test(normalized) ? 'rewards'
+      : /referral/i.test(normalized) ? 'referrals'
+      : /promotion|offer/i.test(normalized) ? 'promotions'
+      : /product.?news/i.test(normalized) ? 'product_news'
+      : /support/i.test(normalized) ? 'support_updates'
+      : null;
+    if (!preferenceKey) return true;
+    const selected = preferenceKey in activity ? activity : marketing;
+    return selected[preferenceKey] !== false;
   }
 
   async markNotificationsRead(userId: string, notificationIds?: string[]) {
@@ -3283,6 +3504,18 @@ export class VidalpayService {
         metadata,
       }),
     );
+    const initialMessage = this.asString(payload.message)?.trim();
+    if (initialMessage) {
+      await this.supportMessageRepository.save(
+        this.supportMessageRepository.create({
+          ticketId: ticket.id,
+          userId,
+          authorType: 'CUSTOMER',
+          authorId: userId,
+          message: initialMessage,
+        }),
+      );
+    }
     if (!zendeskStatus.enabled) {
       return {
         ticket,

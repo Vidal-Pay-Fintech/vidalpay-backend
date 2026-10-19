@@ -106,6 +106,18 @@ export class MailService {
     });
   }
 
+  async sendNotificationEmail(userId: string, title: string, body: string) {
+    const user = await this.getLoggedUser(userId);
+    if (!user?.email) {
+      throw new Error('User has no email address');
+    }
+    return this.emailService.sendMail({
+      email: user.email,
+      subject: title,
+      text: body,
+    });
+  }
+
   //   async sendWithdrawalSuccessNotification(
   //     userId: string,
   //     amount: number,

@@ -28,6 +28,7 @@ import { ProviderOperation } from './entities/provider-operation.entity';
 import { ReferralEvent } from './entities/referral-event.entity';
 import { RewardLedgerEntry } from './entities/reward-ledger-entry.entity';
 import { SupportTicket } from './entities/support-ticket.entity';
+import { SupportMessage } from './entities/support-message.entity';
 
 //REPOSITORIES
 import { UserRepository } from './repositories/user.repository';
@@ -94,6 +95,7 @@ import { buildDatabaseDataSourceOptions } from './database.config';
       ReferralEvent,
       RewardLedgerEntry,
       SupportTicket,
+      SupportMessage,
     ]),
   ],
   providers: [UserRepository, ConfigService, TokenRepository, WalletRepository],

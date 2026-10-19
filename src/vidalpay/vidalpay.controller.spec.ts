@@ -33,6 +33,9 @@ describe('VidalPay mobile contract controllers', () => {
     getAdminProviderOperation: jest.fn(),
     listAdminSupportTickets: jest.fn(),
     getAdminSupportTicket: jest.fn(),
+    replyToAdminSupportTicket: jest.fn(),
+    updateAdminSupportTicket: jest.fn(),
+    sendAdminNotification: jest.fn(),
     listAdminWhatsAppConversations: jest.fn(),
     listAdminVtuOperations: jest.fn(),
     getProductCapabilities: jest.fn(),
@@ -149,6 +152,9 @@ describe('VidalPay mobile contract controllers', () => {
     controller.providerOperation('op-1');
     controller.supportTickets(query);
     controller.supportTicket('ticket-1');
+    controller.replyToSupportTicket(user, 'ticket-1', { message: 'Reply' });
+    controller.updateSupportTicket('ticket-1', { status: 'RESOLVED' });
+    controller.sendNotification(user, { userId: 'user-2', title: 'Title', body: 'Body' });
     controller.whatsappConversations(query);
     controller.vtuOperations(query);
 
@@ -162,6 +168,9 @@ describe('VidalPay mobile contract controllers', () => {
     expect(service.getAdminProviderOperation).toHaveBeenCalledWith('op-1');
     expect(service.listAdminSupportTickets).toHaveBeenCalledWith(query);
     expect(service.getAdminSupportTicket).toHaveBeenCalledWith('ticket-1');
+    expect(service.replyToAdminSupportTicket).toHaveBeenCalledWith('user-1', 'ticket-1', { message: 'Reply' });
+    expect(service.updateAdminSupportTicket).toHaveBeenCalledWith('ticket-1', { status: 'RESOLVED' });
+    expect(service.sendAdminNotification).toHaveBeenCalledWith('user-1', { userId: 'user-2', title: 'Title', body: 'Body' });
     expect(service.listAdminWhatsAppConversations).toHaveBeenCalledWith(query);
     expect(service.listAdminVtuOperations).toHaveBeenCalledWith(query);
   });

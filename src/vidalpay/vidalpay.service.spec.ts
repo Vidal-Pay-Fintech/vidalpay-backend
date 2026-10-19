@@ -72,6 +72,7 @@ describe('VidalpayService', () => {
   let notificationRepository: ReturnType<typeof repo>;
   let notificationPreferenceRepository: ReturnType<typeof repo>;
   let notificationDeviceRepository: ReturnType<typeof repo>;
+  let supportMessageRepository: ReturnType<typeof repo>;
   let cardRepository: ReturnType<typeof repo>;
   let fincraWalletService: {
     listBanks: jest.Mock;
@@ -120,6 +121,7 @@ describe('VidalpayService', () => {
     notificationPreferenceRepository = repo();
     notificationDeviceRepository = repo();
     const supportTicketRepository = repo();
+    supportMessageRepository = repo();
     const tokenRepository = repo();
     const disputeRepository = repo();
     providerStatusService = {
@@ -176,6 +178,7 @@ describe('VidalpayService', () => {
       notificationPreferenceRepository as any,
       notificationDeviceRepository as any,
       supportTicketRepository as any,
+      supportMessageRepository as any,
       tokenRepository as any,
       disputeRepository as any,
       providerStatusService as any,
@@ -189,6 +192,7 @@ describe('VidalpayService', () => {
       yellowCardService as any,
       configService as unknown as ConfigService,
       {} as any,
+      { sendNotificationSms: jest.fn() } as any,
       {} as DataSource,
     );
   });

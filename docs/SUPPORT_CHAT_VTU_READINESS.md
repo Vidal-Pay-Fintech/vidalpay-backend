@@ -71,6 +71,20 @@ Assuming the deployed API base is `https://vidalpay-backend-1.onrender.com/api/v
 
 ## Current endpoint behavior
 
+### Support inbox and manual notifications
+
+The authenticated VidalPay admin API exposes the ticket queue at `GET /admin/support/tickets` (filter by `status`, `category`, `search`, `page`, and `limit`) and ticket details/messages at `GET /admin/support/tickets/:id`. Admins and super admins can reply with `POST /admin/support/tickets/:id/replies` using `{ "message": "..." }`, and update queue status with `PATCH /admin/support/tickets/:id` using one of `OPEN`, `IN_PROGRESS`, `WAITING_FOR_CUSTOMER`, `RESOLVED`, or `CLOSED`.
+
+Customers can read and send messages at `GET` and `POST /support/tickets/:ticketId/messages`. The mobile chat uses these persisted messages and polls for replies while open. The migration/repair script creates only the message table and indexes; review the target database and backup before applying it:
+
+```text
+npm run db:repair-support-messaging -- --check
+npm run db:repair-support-messaging -- --apply
+npm run db:repair-support-messaging -- --check
+```
+
+Admin and super admin manual notifications are sent to one explicit user with `POST /admin/notifications` and `{ "userId": "...", "title": "...", "body": "...", "category": "..." }`. The sender is recorded in notification metadata. Delivery results are reported independently for push, email, and SMS; saved category/channel preferences are honored. Email requires the existing Resend or SMTP configuration, SMS requires Twilio credentials plus an E.164 user phone number, and push requires an active device token. An API response does not prove external delivery; inspect each returned channel status.
+
 ### Support tickets
 
 `POST /support/tickets` still saves a local `support_ticket` row. If Zendesk is not configured, the response includes `providerSync.status = NOT_CONFIGURED`. If Zendesk credentials are present, the response still stays blocked until the adapter is implemented and live-tested.

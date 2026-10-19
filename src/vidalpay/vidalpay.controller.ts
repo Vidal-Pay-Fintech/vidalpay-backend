@@ -121,6 +121,25 @@ export class AdminController {
     return this.vidalpayService.getAdminSupportTicket(id);
   }
 
+  @Post('support/tickets/:id/replies')
+  replyToSupportTicket(
+    @ActiveUser() user: ActiveUserData,
+    @Param('id') id: string,
+    @Body() body: AnyRecord,
+  ) {
+    return this.vidalpayService.replyToAdminSupportTicket(user.sub, id, body);
+  }
+
+  @Patch('support/tickets/:id')
+  updateSupportTicket(@Param('id') id: string, @Body() body: AnyRecord) {
+    return this.vidalpayService.updateAdminSupportTicket(id, body);
+  }
+
+  @Post('notifications')
+  sendNotification(@ActiveUser() user: ActiveUserData, @Body() body: AnyRecord) {
+    return this.vidalpayService.sendAdminNotification(user.sub, body);
+  }
+
   @Get('support/whatsapp-conversations')
   whatsappConversations(@Query() query: AnyRecord) {
     return this.vidalpayService.listAdminWhatsAppConversations(query);
@@ -469,6 +488,23 @@ export class SupportController {
   @Post('tickets')
   create(@ActiveUser() user: ActiveUserData, @Body() body: AnyRecord) {
     return this.vidalpayService.createSupportTicket(user.sub, body);
+  }
+
+  @Get('tickets/:ticketId/messages')
+  messages(
+    @ActiveUser() user: ActiveUserData,
+    @Param('ticketId') ticketId: string,
+  ) {
+    return this.vidalpayService.listSupportMessages(user.sub, ticketId);
+  }
+
+  @Post('tickets/:ticketId/messages')
+  sendMessage(
+    @ActiveUser() user: ActiveUserData,
+    @Param('ticketId') ticketId: string,
+    @Body() body: AnyRecord,
+  ) {
+    return this.vidalpayService.createSupportMessage(user.sub, ticketId, body);
   }
 }
 

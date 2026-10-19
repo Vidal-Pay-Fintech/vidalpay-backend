@@ -14,6 +14,7 @@ import { ProviderOperation } from 'src/database/entities/provider-operation.enti
 import { ReferralEvent } from 'src/database/entities/referral-event.entity';
 import { RewardLedgerEntry } from 'src/database/entities/reward-ledger-entry.entity';
 import { SupportTicket } from 'src/database/entities/support-ticket.entity';
+import { SupportMessage } from 'src/database/entities/support-message.entity';
 import { Token } from 'src/database/entities/token.entity';
 import { User } from 'src/database/entities/user.entity';
 import { Wallet } from 'src/database/entities/wallet.entity';
@@ -70,6 +71,7 @@ import { YellowCardService } from './yellow-card.service';
       ReferralEvent,
       RewardLedgerEntry,
       SupportTicket,
+      SupportMessage,
       Token,
       User,
       Wallet,

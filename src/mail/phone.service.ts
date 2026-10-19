@@ -16,17 +16,23 @@ export class PhoneService {
   private readonly SENDER_ID = 'VidalPay';
   private user: User;
   private readonly logger = new Logger(PhoneService.name);
-  private twilioClient: Twilio;
+  private twilioClient: Twilio | null = null;
 
   constructor(
     private readonly tokensService: TokensService,
     private readonly userRepository: UserRepository,
   ) {
     // Initialize Twilio client
-    this.twilioClient = new Twilio(
-      process.env.TWILIO_ACCOUNT_SID,
-      process.env.TWILIO_AUTH_TOKEN,
-    );
+  }
+
+  private getTwilioClient() {
+    const accountSid = process.env.TWILIO_ACCOUNT_SID;
+    const authToken = process.env.TWILIO_AUTH_TOKEN;
+    if (!accountSid || !authToken || !process.env.TWILIO_PHONE_NUMBER) {
+      throw new ServiceUnavailableException('SMS delivery is not configured');
+    }
+    this.twilioClient ??= new Twilio(accountSid, authToken);
+    return this.twilioClient;
   }
 
   private async getUserDetails(userId: string) {
@@ -105,7 +111,7 @@ export class PhoneService {
       // Auto-detect country and format phone number
       const formattedPhone = this.detectCountryAndFormatPhone(phone);
 
-      const result = await this.twilioClient.messages.create({
+      const result = await this.getTwilioClient().messages.create({
         body: message,
         from: process.env.TWILIO_PHONE_NUMBER, // Your US Twilio phone number
         to: formattedPhone,
@@ -119,6 +125,17 @@ export class PhoneService {
       this.logger.error(`Failed to send SMS to ${phone}: ${error.message}`);
       throw error;
     }
+  }
+
+  async sendNotificationSms(phone: string, message: string) {
+    if (!/^\+[1-9]\d{7,14}$/.test(phone)) {
+      throw new Error('Phone number must be in E.164 format');
+    }
+    return this.getTwilioClient().messages.create({
+      body: message,
+      from: process.env.TWILIO_PHONE_NUMBER,
+      to: phone,
+    });
   }
 
   public async sendWelcomeSMS(
