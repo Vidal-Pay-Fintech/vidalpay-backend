@@ -19,6 +19,7 @@
     "db:repair-wallet-schema": "node scripts/repair-wallet-schema.js",
     "db:repair-wallet-currencies": "node scripts/repair-wallet-currencies.js",
     "db:repair-kyc-storage": "node scripts/repair-kyc-storage.js",
+    "db:repair-notifications": "node scripts/repair-notifications.js",
     "db:repair-support-messaging": "node scripts/repair-support-messaging.js",
     "db:plan-legacy-restore": "node scripts/plan-legacy-restore.js",
     "db:restore-legacy": "node scripts/restore-legacy-data.js",
